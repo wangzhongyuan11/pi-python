@@ -1,606 +1,258 @@
-# Python Pi Agent 重写任务清单
-
-> 总体方案见 `tasks/plan.md`。  
-> 每项任务目标规模为 1–5 个文件；若实现前发现超过 5 个文件，必须先拆分。  
-> 默认验证命令不运行真实 API；`live_provider` 必须显式触发。
-
-## Phase 0：规范与测试底座
-
-### P0-T01：冻结源码行为基线
-
-- [ ] **描述：** 记录 `D:\pi` commit、稳定 CLI 主链、未完成 Harness 边界和教程版本。
-- [ ] **验收：** `docs/baseline.md` 能让新开发者区分事实、教程解释和推断。
-- [ ] **验证：** 路径和符号通过 `rg` 在固定 commit 中可找到。
-- [ ] **依赖/规模：** 无；S；`docs/baseline.md`、`docs/parity-matrix.md`。
-
-### P0-T02：建立 uv workspace
-
-- [ ] **描述：** 创建 root `pyproject.toml` 和核心 package 空壳，固定单向 import 关系。
-- [ ] **验收：** 所有 package 可 editable install，空包可导入。
-- [ ] **验证：** `uv sync --all-packages`；最小 import smoke test。
-- [ ] **依赖/规模：** P0-T01；M；root 配置和每次最多 3 个 package manifest，分批提交。
-
-### P0-T03：建立隔离测试环境
-
-- [ ] **描述：** 配置 pytest markers、isolated HOME、清空 API Key、禁止网络、固定 clock/UUID。
-- [ ] **验收：** 默认测试访问网络或真实用户配置时立即失败。
-- [ ] **验证：** `uv run pytest tests/test_test_environment.py`。
-- [ ] **依赖/规模：** P0-T02；M；`conftest.py`、测试配置和一份自测。
-
-### P0-T04：建立质量门禁
-
-- [ ] **描述：** 配置 ruff、mypy、coverage 和 package import-boundary check。
-- [ ] **验收：** 人为加入反向 import 时测试失败，删除后通过。
-- [ ] **验证：** ruff、mypy、focused dependency test。
-- [ ] **依赖/规模：** P0-T02；S；root 配置与一份架构测试。
-
-### P0-T05：编写五份公共契约
-
-- [ ] **描述：** 明确 Message、stream events、Agent events、Tool pipeline、Session JSONL。
-- [ ] **验收：** 每份文档有输入、输出、顺序、不变量和错误语义。
-- [ ] **验证：** 人工对照 `D:\pi` 源码和测试审查。
-- [ ] **依赖/规模：** P0-T01；每份 XS，逐份完成。
-
-## Phase 1：FakeProvider 可行走骨架
-
-### P1-T01：定义最小消息模型
-
-- [ ] **描述：** 实现 User/Assistant/ToolResult、Text/ToolCall、Usage 和 StopReason。
-- [ ] **验收：** 判别联合可验证、序列化、反序列化并保持 tool call id。
-- [ ] **验证：** round-trip 与非法 payload 表驱动测试。
-- [ ] **依赖/规模：** P0-T05；M；`pi_ai/messages.py`、`content.py`、测试。
-
-### P1-T02：实现 AssistantStream
-
-- [ ] **描述：** 实现 async iteration、partial message reducer、`result()` 和单终止约束。
-- [ ] **验收：** text/tool-call/error 流只产生一个 terminal event。
-- [ ] **验证：** golden event tests，含重复终止和取消。
-- [ ] **依赖/规模：** P1-T01；M；stream 模块、event 模型、测试。
-
-### P1-T03：实现共享 FakeProvider
-
-- [ ] **描述：** 提供可排队响应、delta、tool call、error、abort 的确定性 Provider。
-- [ ] **验收：** 所有上层测试可只注入 FakeProvider，不 mock 私有方法。
-- [ ] **验证：** 精确事件序列和响应队列耗尽测试。
-- [ ] **依赖/规模：** P1-T02；S；testing provider 与测试。
-
-### P1-T04：实现最小串行 Agent Loop
-
-- [ ] **描述：** 完成 model -> tool -> result -> model 的串行闭环。
-- [ ] **验收：** 直接回答、单工具、多轮工具三条路径均结束于 final assistant。
-- [ ] **验证：** 三份 golden transcript。
-- [ ] **依赖/规模：** P1-T01–T03；M；loop、tool protocol、测试。
-
-### P1-T05：实现 Fake print CLI
-
-- [ ] **描述：** 创建内存 CodingSession 和 `python -m pi_coding_agent -p`。
-- [ ] **验收：** 输入 prompt 后只输出 FakeProvider 最终文本。
-- [ ] **验证：** 黑盒 subprocess test。
-- [ ] **依赖/规模：** P1-T04；M；session、cli、`__main__`、测试。
-
-## Phase 2：pi_ai 与 DeepSeek
-
-### P2-T01：补齐 AI 层数据契约
-
-- [ ] **描述：** 增加 Thinking/Image content、Model、Context、ToolSpec、ThinkingLevel、完整 Usage。
-- [ ] **验收：** 所有类型 round-trip，未知 discriminator 明确失败。
-- [ ] **验证：** schema 与 serialization contract tests。
-- [ ] **依赖/规模：** Phase 1；分成 2 个 M task，单次不超过 5 文件。
-
-### P2-T02：实现 Registry 与 CredentialResolver
-
-- [ ] **描述：** 实现 Provider/Model 注册、查找、覆盖以及环境变量凭据解析。
-- [ ] **验收：** 可枚举认证状态但任何 repr/diagnostic 不含 secret。
-- [ ] **验证：** 注册冲突、缺凭据、脱敏和环境隔离测试。
-- [ ] **依赖/规模：** P2-T01；M；registry、credentials、测试。
-
-### P2-T03：实现 OpenAI-compatible 编码器
-
-- [ ] **描述：** 把内部 Context/Tool 转成 chat completions 请求，并解析非流式响应。
-- [ ] **验收：** user/assistant/tool result、thinking 配置和多个 tools 转换正确。
-- [ ] **验证：** MockTransport request-body contract tests。
-- [ ] **依赖/规模：** P2-T01；M；codec、adapter、测试。
-
-### P2-T04：实现 SSE 流解析
-
-- [ ] **描述：** 解析 text/thinking/tool-call delta，累积部分 JSON 参数并规范化 stop reason。
-- [ ] **验收：** 断片边界任意切分仍得到同一事件序列。
-- [ ] **验证：** chunk fuzz/table tests，含非法 SSE 和中途断流。
-- [ ] **依赖/规模：** P2-T03；M；SSE parser、stream adapter、测试。
-
-### P2-T05：注册并验证 DeepSeek
-
-- [ ] **描述：** 注册 base URL、模型元数据、`DEEPSEEK_API_KEY` 和 thinking 映射。
-- [ ] **验收：** mock 测试通过；显式 live test 可完成文本、流和 tool call。
-- [ ] **验证：** `pytest -m live_provider --provider deepseek --model deepseek-v4-flash`。
-- [ ] **依赖/规模：** P2-T02–T04；S；provider config、live test。
-
-## Phase 3：完整 Agent Core
-
-### P3-T01：实现 AgentEvent 与 AgentState reducer
-
-- [ ] **描述：** 增加 Agent/Turn/Message/Tool 生命周期事件和状态归约。
-- [ ] **验收：** 监听器看到的是事件对应的已更新状态。
-- [ ] **验证：** 严格事件顺序与状态快照测试。
-- [ ] **依赖/规模：** Phase 1；M；events、state/reducer、测试。
-
-### P3-T02：实现 awaited listener barrier
-
-- [ ] **描述：** 支持 sync/async listener，按注册顺序等待并正确处理取消。
-- [ ] **验收：** prompt 返回前 listener 全部完成；核心 listener 异常可见。
-- [ ] **验证：** delayed listener、exception、wait-for-idle tests。
-- [ ] **依赖/规模：** P3-T01；S；event bus 与测试。
-
-### P3-T03：实现工具五步管道
-
-- [ ] **描述：** prepare -> validate -> before -> execute -> after -> ToolResult。
-- [ ] **验收：** unknown tool、invalid args、blocked、exception 都形成结构化结果。
-- [ ] **验证：** 表驱动 pipeline tests。
-- [ ] **依赖/规模：** P1-T04、P3-T01；M；tool executor、hooks、测试。
-
-### P3-T04：实现并行批次语义
-
-- [ ] **描述：** 支持 sequential/parallel；准备串行、execute 并行、结果稳定排序。
-- [ ] **验收：** end event 按完成顺序，transcript 按源调用顺序。
-- [ ] **验证：** 使用受控 event 的并发测试重复三次。
-- [ ] **依赖/规模：** P3-T03；M；batch executor 与测试。
-
-### P3-T05：实现取消与终止
-
-- [ ] **描述：** 支持 abort、late update guard、length 截断、terminate 和最大轮数。
-- [ ] **验收：** 截断 tool call 不执行；取消后无新消息污染下一次运行。
-- [ ] **验证：** abort-before/during/after、late callback tests。
-- [ ] **依赖/规模：** P3-T02–T04；M；cancellation、loop adjustments、测试。
-
-### P3-T06：实现 steering 与 follow-up
-
-- [ ] **描述：** 创建两个语义不同的队列以及 prepare-next-turn/stop-after-turn。
-- [ ] **验收：** steering 在工具批次后注入，follow-up 在原任务结束后开始。
-- [ ] **验证：** 多队列顺序和 continue tests。
-- [ ] **依赖/规模：** P3-T05；M；queue、agent facade、测试。
-
-## Phase 4：Coding Tools
-
-### P4-T01：定义 Operations 边界
-
-- [ ] **描述：** 定义 File/Process/Search Operations Protocol 和本地实现入口。
-- [ ] **验收：** Tool 不直接调用散落的 os/subprocess API。
-- [ ] **验证：** fake operations contract tests。
-- [ ] **依赖/规模：** Phase 3；S；operations contract、fake、测试。
-
-### P4-T02：实现 read 与输出截断
-
-- [ ] **描述：** 支持 offset/limit、文本/图片/二进制检测、UTF-8 安全 head 截断。
-- [ ] **验收：** 截断结果报告原规模和完整输出位置。
-- [ ] **验证：** 中文、emoji、超大行、越界和二进制 tests。
-- [ ] **依赖/规模：** P4-T01；M；read、truncate、测试。
-
-### P4-T03：实现 write 与 edit
-
-- [ ] **描述：** write 创建父目录；edit 原子匹配，保存 BOM/CRLF。
-- [ ] **验收：** 重叠/缺失/重复目标整体失败且文件未改变。
-- [ ] **验证：** temp filesystem 与 byte-for-byte tests。
-- [ ] **依赖/规模：** P4-T01；拆为两个 M task，各自不超过 4 文件。
-
-### P4-T04：实现文件 mutation queue
-
-- [ ] **描述：** 同一规范路径串行，不同路径可并行，符号链接别名归一。
-- [ ] **验收：** 并发 edit/write 不丢更新。
-- [ ] **验证：** controlled concurrency 与 symlink tests。
-- [ ] **依赖/规模：** P4-T03；S；queue 与测试。
-
-### P4-T05：实现 bash
-
-- [ ] **描述：** 支持 cwd/env/timeout/abort、stdout/stderr 合并、tail 截断和进程树清理。
-- [ ] **验收：** timeout/abort 后无孤儿进程，迟到输出被丢弃。
-- [ ] **验证：** Windows PowerShell/cmd 与 Linux shell matrix。
-- [ ] **依赖/规模：** P4-T01–T02；M；process operations、bash tool、测试。
-
-### P4-T06：实现 grep/find/ls
-
-- [ ] **描述：** 支持 `.gitignore`、隐藏文件、结果上限、flag-like pattern。
-- [ ] **验收：** 三个工具返回稳定相对路径和明确截断说明。
-- [ ] **验证：** 临时 Git tree contract tests。
-- [ ] **依赖/规模：** P4-T01；拆成 3 个 S task。
-
-## Phase 5：CodingSession 与 Headless CLI
-
-### P5-T01：实现 CodingSession composition root
-
-- [ ] **描述：** 组合 ModelRuntime、Agent、Tools、Settings stub 和内存 Session。
-- [ ] **验收：** 下层依赖均通过构造注入，核心不读全局单例。
-- [ ] **验证：** FakeProvider integration test。
-- [ ] **依赖/规模：** Phase 2–4；M；services、session、factory、测试。
-
-### P5-T02：实现 CLI 参数契约
-
-- [ ] **描述：** 支持 help/version/list-models/provider/model/thinking/tools/no-session/print。
-- [ ] **验收：** 错误参数有稳定退出码和 stderr 诊断。
-- [ ] **验证：** 参数表驱动测试和黑盒 subprocess tests。
-- [ ] **依赖/规模：** P5-T01；M；args、main、测试。
-
-### P5-T03：实现 text 与 JSON 输出
-
-- [ ] **描述：** text 只打印最终文本，JSON 每行一个事件，不混入日志。
-- [ ] **验收：** assistant error 返回非零；stderr 不含 secret。
-- [ ] **验证：** stdout cleanliness 和 JSON parse tests。
-- [ ] **依赖/规模：** P5-T02；S；print/json mode、测试。
-
-### P5-T04：完成真实 DeepSeek 工具闭环
-
-- [ ] **描述：** 在临时 workspace 运行真实 prompt -> read -> ToolResult -> final answer。
-- [ ] **验收：** 结构化断言证明文件确实被读取，限制 token 和费用。
-- [ ] **验证：** 显式 live_provider smoke test。
-- [ ] **依赖/规模：** P2-T05、P4-T02、P5-T03；S；live test 与文档。
-
-## Phase 6：Session Tree
-
-### P6-T01：定义 Session Header 与 Entry 联合
-
-- [ ] **描述：** 定义 versioned header 和全部成熟路径 entry 类型。
-- [ ] **验收：** round-trip 保留 message、usage、thinking、stop reason 和 parent id。
-- [ ] **验证：** schema/codec contract tests。
-- [ ] **依赖/规模：** Phase 5；M；entries、codec、测试。
-
-### P6-T02：实现 InMemory Repository
-
-- [ ] **描述：** 实现 append/load/leaf/path/fork 的参考后端。
-- [ ] **验收：** 重复 ID、未知 parent 和非法 sequence 被拒绝。
-- [ ] **验证：** shared repository conformance suite。
-- [ ] **依赖/规模：** P6-T01；M；protocol、memory repo、conformance。
-
-### P6-T03：实现 JSONL Repository
-
-- [ ] **描述：** 每次 mutation append 一行，支持加载和连续 sequence。
-- [ ] **验收：** 与 InMemory 运行同一套 conformance tests。
-- [ ] **验证：** crash/reopen 和跨进程 smoke test。
-- [ ] **依赖/规模：** P6-T02；M；jsonl repo、codec adjustments、测试。
-
-### P6-T04：实现损坏恢复边界
-
-- [ ] **描述：** 修复无换行/torn tail；拒绝中间损坏和完整非法行。
-- [ ] **验收：** 不会静默丢弃有效历史。
-- [ ] **验证：** byte fixture corruption matrix。
-- [ ] **依赖/规模：** P6-T03；S；recovery helper 与测试。
-
-### P6-T05：实现 Context 重建与分支
-
-- [ ] **描述：** 从 leaf 回溯、反转，应用 model/thinking/compaction，支持 branch/fork/tree。
-- [ ] **验收：** 非活动分支不进入 Context；状态随分支回退。
-- [ ] **验证：** tree fixtures 和 context golden tests。
-- [ ] **依赖/规模：** P6-T02–T04；分成 context 与 branch 两个 M task。
-
-### P6-T06：建立副作用恢复幂等性
-
-- [ ] **描述：** 根据已持久化 ToolCall/ToolResult 判定恢复点。
-- [ ] **验收：** resume 不重新执行已完成 write/edit/bash。
-- [ ] **验证：** crash-between-events matrix。
-- [ ] **依赖/规模：** P6-T05、Phase 4；M；resume policy、session integration test。
-
-## Phase 7：Resources 与 Trust
-
-### P7-T01：实现 Settings 合并
-
-- [ ] **描述：** 解析 global/project settings，明确覆盖和未知字段诊断。
-- [ ] **验收：** 未信任项目配置不启用可执行资源。
-- [ ] **验证：** temporary HOME/project matrix。
-- [ ] **依赖/规模：** Phase 5；M；settings model、manager、测试。
-
-### P7-T02：实现 System Prompt 与 Context Files
-
-- [ ] **描述：** 组装 cwd/date/tools，按层级读取 AGENTS.md/CLAUDE.md。
-- [ ] **验收：** 合并顺序、XML escaping 和缺文件行为确定。
-- [ ] **验证：** nested directory golden tests。
-- [ ] **依赖/规模：** P7-T01；M；prompt builder、context loader、测试。
-
-### P7-T03：实现 Prompt Templates
-
-- [ ] **描述：** 发现 Markdown template 并展开位置参数、全部参数和默认值。
-- [ ] **验收：** 错误模板产生 diagnostic，不破坏普通 prompt。
-- [ ] **验证：** parser/expansion tests。
-- [ ] **依赖/规模：** P7-T02；S；template module、测试。
-
-### P7-T04：实现 Skills
-
-- [ ] **描述：** frontmatter、scope、优先级、冲突、索引、懒加载、显式 `/skill`。
-- [ ] **验收：** 正文默认不进 system prompt；禁用模型调用的 skill 不出现在索引。
-- [ ] **验证：** collision/frontmatter/XML tests。
-- [ ] **依赖/规模：** P7-T02；拆 discovery 与 expansion 两个 M task。
-
-### P7-T05：实现 ResourceLoader 与 ProjectTrust
-
-- [ ] **描述：** 聚合 settings/context/skills/templates/diagnostics，支持 reload。
-- [ ] **验收：** 不可信项目的 executable extension 不加载。
-- [ ] **验证：** trust/reload/stale resource tests。
-- [ ] **依赖/规模：** P7-T01–T04；M；loader、trust manager、测试。
-
-## Phase 8：可靠性与上下文压缩
-
-### P8-T01：实现 Provider Retry
-
-- [ ] **描述：** 分类 transient/permanent 错误，支持可取消 backoff。
-- [ ] **验收：** 429/账单错误不被错误重试，网络断流可恢复。
-- [ ] **验证：** fake clock retry tests。
-- [ ] **依赖/规模：** Phase 2、5；M；retry policy、session integration、测试。
-
-### P8-T02：实现 Context Usage 与阈值
-
-- [ ] **描述：** 计算最后有效 usage、估算 fallback、reserve/keep recent 阈值。
-- [ ] **验收：** 纯逻辑对中英文偏差有明确记录和安全余量。
-- [ ] **验证：** table tests。
-- [ ] **依赖/规模：** Phase 6；S；usage module、测试。
-
-### P8-T03：实现 Compaction 切点
-
-- [ ] **描述：** 合法切点、recent tail、assistant split、turn prefix 和文件跟踪。
-- [ ] **验收：** 不从 ToolResult 非法切断；结果确定性。
-- [ ] **验证：** large fixture 与 property tests。
-- [ ] **依赖/规模：** P8-T02；M；cutpoint、serialization、测试。
-
-### P8-T04：实现摘要生成与存储
-
-- [ ] **描述：** 使用 FakeSummarizer 测试结构化摘要、previous summary 和 CompactionEntry。
-- [ ] **验收：** 下一次 Context 为 summary + retained tail。
-- [ ] **验证：** multi-compaction integration tests。
-- [ ] **依赖/规模：** P8-T03、Phase 6；M；summarizer、compaction service、测试。
-
-### P8-T05：实现自动压缩与 overflow 恢复
-
-- [ ] **描述：** 支持 manual/threshold/overflow，overflow 自动恢复最多一次。
-- [ ] **验收：** 不出现无限 compact/retry 循环。
-- [ ] **验证：** fake provider overflow sequences。
-- [ ] **依赖/规模：** P8-T01、T04；M；session orchestration、测试。
-
-### P8-T06：实现 Branch Summary 与 agent_settled
-
-- [ ] **描述：** 用 LCA 收集放弃分支，生成摘要；所有后处理完成后发 settled。
-- [ ] **验收：** branch summary 不污染原分支，settled 晚于 retry/compact/listener。
-- [ ] **验证：** branch tree 和 event ordering tests。
-- [ ] **依赖/规模：** P8-T04–T05；M；branch summary、settlement、测试。
-
-## Phase 9：Extensions 与 Packages
-
-### P9-T01：定义 Extension API 契约
-
-- [ ] **描述：** 定义 input/context/provider/tool/session hook 的 typed 输入输出和错误策略。
-- [ ] **验收：** 每个 hook 写明继续、阻止、改写或终止语义。
-- [ ] **验证：** contract review 与 schema tests。
-- [ ] **依赖/规模：** Phase 7–8；M；types、contracts、测试。
-
-### P9-T02：实现后台 Hook Pipeline
-
-- [ ] **描述：** 按源码顺序调度 hook，隔离第三方错误并传播取消。
-- [ ] **验收：** command/input/skill/preflight/before-agent/tool 顺序固定。
-- [ ] **验证：** golden hook trace。
-- [ ] **依赖/规模：** P9-T01；M；runner、session integration、测试。
-
-### P9-T03：实现扩展注册能力
-
-- [ ] **描述：** 注册 Tool、Command、Provider、Flag 和 custom Session entry。
-- [ ] **验收：** Extension command 不消耗模型响应；动态 tool 进入 system prompt。
-- [ ] **验证：** registration integration tests。
-- [ ] **依赖/规模：** P9-T02；按注册类型拆为多个 S task。
-
-### P9-T04：实现 Extension Loader 与 Trust
-
-- [ ] **描述：** 支持 user/project/local module/entry point，含 reload、shutdown、stale context。
-- [ ] **验收：** 未信任 project extension 不执行；reload 后旧 context 失效。
-- [ ] **验证：** isolated module tests。
-- [ ] **依赖/规模：** P9-T02、P7-T05；M；loader、runtime、测试。
-
-### P9-T05：实现 Package Manifest 最小闭环
-
-- [ ] **描述：** 解析资源 manifest，支持安装记录、启用/禁用和诊断。
-- [ ] **验收：** 包资源仍经过 scope/trust/priority 规则。
-- [ ] **验证：** temporary package repository tests。
-- [ ] **依赖/规模：** P9-T03–T04；M；manifest、package state、测试。
-
-## Phase 10：TUI
-
-### P10-T01：定义 Terminal 与 VirtualTerminal
-
-- [ ] **描述：** 抽象 write/move/clear/size/mode，提供内存终端。
-- [ ] **验收：** 不启动真实控制台也能验证 viewport。
-- [ ] **验证：** terminal conformance tests。
-- [ ] **依赖/规模：** P0-T02；M；terminal protocol、virtual terminal、测试。
-
-### P10-T02：实现宽度与差分渲染
-
-- [ ] **描述：** 处理 ANSI、wcwidth、CJK/emoji、wrap、shrink、resize。
-- [ ] **验收：** 80x24/40x10/resized viewport 无残影。
-- [ ] **验证：** screen golden tests。
-- [ ] **依赖/规模：** P10-T01；分 width/layout/renderer 三个 M task。
-
-### P10-T03：实现编辑器与输入解析
-
-- [ ] **描述：** editor/history/undo/paste/escape/CSI/Kitty 输入和 word navigation。
-- [ ] **验收：** 分段输入与 bracketed paste 不丢字符。
-- [ ] **验证：** byte-stream parser 和 editor model tests。
-- [ ] **依赖/规模：** P10-T01；拆 parser 与 editor 两个 M task。
-
-### P10-T04：实现 Agent 消息渲染
-
-- [ ] **描述：** 渲染 text/thinking/tool progress/error/usage/context/cost。
-- [ ] **验收：** 只消费 Event/State 公共 API，不维护第二份 transcript。
-- [ ] **验证：** FakeProvider streaming screen tests。
-- [ ] **依赖/规模：** P10-T02、Phase 5；M；renderers、controller、测试。
-
-### P10-T05：实现交互命令与 Overlay
-
-- [ ] **描述：** model/settings/session/tree/compact selectors 和核心 slash commands。
-- [ ] **验收：** overlay focus、取消、session switch 行为确定。
-- [ ] **验证：** VirtualTerminal interactive tests。
-- [ ] **依赖/规模：** P10-T03–T04、Phase 6–9；按 overlay 拆多个 M task。
-
-### P10-T06：完成 Windows ConPTY Smoke
-
-- [ ] **描述：** 在真实 Windows Terminal/ConPTY 验证启动、流式、resize、中止和退出。
-- [ ] **验收：** 无残留 raw mode，无孤儿进程。
-- [ ] **验证：** 标记为 `tui_live` 的平台 smoke test。
-- [ ] **依赖/规模：** P10-T05；S；smoke harness 与文档。
-
-## Phase 11：Provider 广度与认证
-
-### P11-T01：建立 Adapter Contract Suite
-
-- [ ] **描述：** 固化 message/tool/thinking/cache/usage/error/abort 的协议族契约。
-- [ ] **验收：** 任意 adapter 可用同一套测试运行。
-- [ ] **验证：** DeepSeek adapter 先通过完整 suite。
-- [ ] **依赖/规模：** Phase 2；M；conformance helper 与 fixtures。
-
-### P11-T02：实现主协议族
-
-- [ ] **描述：** 分别实现 OpenAI Responses、Anthropic Messages、Google 和 Bedrock。
-- [ ] **验收：** 每个 adapter 只依赖 `pi_ai`，不修改 Agent Loop。
-- [ ] **验证：** 每个协议族独立 contract + mock HTTP tests。
-- [ ] **依赖/规模：** P11-T01；每个协议族单独 L task并继续细拆。
-
-### P11-T03：实现 Provider 配置层
-
-- [ ] **描述：** 将多个具体 Provider 映射到协议 adapter 和模型元数据。
-- [ ] **验收：** 新 Provider 主要是声明配置而不是复制网络实现。
-- [ ] **验证：** registry/model lookup tests。
-- [ ] **依赖/规模：** P11-T02；按 Provider family 分 S task。
-
-### P11-T04：实现 OAuth 与 Credential Refresh
-
-- [ ] **描述：** 建立可取消 OAuth flow、持久凭据和 refresh single-flight。
-- [ ] **验收：** 并发请求不重复 refresh，任何状态输出都不含 token。
-- [ ] **验证：** fake OAuth server 与 race tests。
-- [ ] **依赖/规模：** P11-T03；拆 auth store/flow/refresh 三个 M task。
-
-### P11-T05：实现动态模型目录
-
-- [ ] **描述：** 支持远程刷新、cache、失败回退、配置覆盖和热重载。
-- [ ] **验收：** 网络失败不阻塞使用已有目录，取消不挂起启动。
-- [ ] **验证：** fake catalog server tests。
-- [ ] **依赖/规模：** P11-T03；M；catalog、cache、测试。
-
-## Phase 12：RPC 与远程包
-
-### P12-T01：完成 JSON/RPC 模式
-
-- [ ] **描述：** 实现 request id、commands、events、errors 和 stdin/stdout framing。
-- [ ] **验收：** stdout 每行合法 JSON，未知 command 有稳定错误。
-- [ ] **验证：** black-box RPC tests。
-- [ ] **依赖/规模：** Phase 5–9；M；rpc protocol、mode、测试。
-
-### P12-T02：实现 pi_protocol
-
-- [ ] **描述：** Pydantic schema、CBOR、4-byte big-endian framing 和 16 MiB 上限。
-- [ ] **验收：** partial frame、oversize、invalid CBOR 明确失败。
-- [ ] **验证：** codec/framing contract tests。
-- [ ] **依赖/规模：** P0-T02；M；schema、codec、framing、测试。
-
-### P12-T03：实现 pi_client
-
-- [ ] **描述：** 连接、request、event、session handle、lease、reconnect、dispose。
-- [ ] **验收：** 断线恢复不重复提交已确认请求。
-- [ ] **验证：** fake transport state-machine tests。
-- [ ] **依赖/规模：** P12-T02；按 connection/session 拆两个 M task。
-
-### P12-T04：实现 pi_server
-
-- [ ] **描述：** connection、transport、多 Session 生命周期和请求分派。
-- [ ] **验收：** 租约和断线规则明确，异常 Session 不拖垮 server。
-- [ ] **验证：** client/server conformance tests。
-- [ ] **依赖/规模：** P12-T02–T03、Phase 6；拆 transport/session 两个 M task。
-
-### P12-T05：实现 SQLite Backend
-
-- [ ] **描述：** 让 SQLite 与 InMemory/JSONL 运行同一 repository conformance。
-- [ ] **验收：** 事务失败不发布半成品，sequence/parent 不变量一致。
-- [ ] **验证：** backend conformance + crash tests。
-- [ ] **依赖/规模：** Phase 6；M；sqlite repo、migration、测试。
-
-### P12-T06：探索实验 AgentHarness
-
-- [ ] **描述：** 按上游接口实现 operation records、lanes、resume 等实验语义。
-- [ ] **验收：** 明确标记 experimental，不替换成熟 CodingSession。
-- [ ] **验证：** 独立 harness contract tests，不与稳定 release gate 混淆。
-- [ ] **依赖/规模：** P12-T05；先写 ADR，再拆为多个 M task。
-
-## Phase 13：产品外围
-
-### P13-T01：实现导入导出
-
-- [ ] **描述：** HTML/JSONL export、JSONL import 和 round-trip。
-- [ ] **验收：** 消息、entry、分支、usage 不丢失。
-- [ ] **验证：** export/import golden tests。
-- [ ] **依赖/规模：** Phase 6、10；按格式拆 S/M task。
-
-### P13-T02：实现图片与剪贴板
-
-- [ ] **描述：** 图片附件、mime/size 校验、剪贴板输入和终端图片后端。
-- [ ] **验收：** 不支持的终端自动降级文本，不阻塞核心 TUI。
-- [ ] **验证：** image fixture、clipboard fake、terminal capability tests。
-- [ ] **依赖/规模：** Phase 2、10；拆附件与渲染两个 M task。
-
-### P13-T03：完善 Package Manager
-
-- [ ] **描述：** 来源解析、安装、升级、禁用、锁定和诊断。
-- [ ] **验收：** 安装失败不破坏既有资源状态，project 资源经过 trust。
-- [ ] **验证：** local fake registry/git tests。
-- [ ] **依赖/规模：** P9-T05；按 source/state/update 拆三个 M task。
-
-### P13-T04：完善平台集成
-
-- [ ] **描述：** theme、keybindings、completion、first-run、自更新和安装器。
-- [ ] **验收：** Windows/Linux 从全新 HOME 启动正常。
-- [ ] **验证：** packaged install smoke matrix。
-- [ ] **依赖/规模：** Phase 10、P13-T03；逐功能拆 S/M task。
-
-## Phase 14：Telemetry、Evals 与发布
-
-### P14-T01：实现 Telemetry Protocol
-
-- [ ] **描述：** no-op、in-memory、real exporter 和测试采集器。
-- [ ] **验收：** telemetry 故障不改变 Agent 语义，不记录 secret/tool 原始敏感内容。
-- [ ] **验证：** telemetry conformance tests。
-- [ ] **依赖/规模：** Phase 3；M；protocol、implementations、测试。
-
-### P14-T02：实现 Eval Harness
-
-- [ ] **描述：** 提供 FakeProvider 回归集和可选真实模型任务集。
-- [ ] **验收：** 评测结果可重复，真实模型波动与代码回归分开报告。
-- [ ] **验证：** deterministic eval smoke。
-- [ ] **依赖/规模：** Phase 5、11；M；runner、cases、reporter、测试。
-
-### P14-T03：建立 TypeScript 差分测试
-
-- [ ] **描述：** 使用固定输入比较 stream、Agent events、ToolResult 和 Session projection。
-- [ ] **验收：** 每个差异都有 documented disposition。
-- [ ] **验证：** `pytest -m parity`。
-- [ ] **依赖/规模：** 全部核心阶段；按契约族拆多个 M task。
-
-### P14-T04：完成发布验收
-
-- [ ] **描述：** 构建 wheel，从仓库外、全新 HOME 安装并运行完整 smoke matrix。
-- [ ] **验收：** help/version/models/print/interactive/resume 可用，真实 DeepSeek 最小调用成功。
-- [ ] **验证：** release script + 人工审查。
-- [ ] **依赖/规模：** 所有前序任务；L，必须继续拆为 packaging/docs/smoke 三项。
-
-## 阶段检查点
-
-### Checkpoint A：P5 完成
-
-- [ ] FakeProvider、DeepSeek、Agent Loop、七工具、print/json CLI 全部通过。
-- [ ] 默认测试无网络、无凭据、无用户配置依赖。
-- [ ] 从仓库外能执行第一条真实 tool-loop。
-
-### Checkpoint B：P8 完成
-
-- [ ] Session resume/fork/tree 和副作用幂等通过。
-- [ ] Settings/AGENTS/Skills/Templates/Trust 可用。
-- [ ] retry/compaction/branch summary 不破坏事件和 Session。
-
-### Checkpoint C：P10 完成
-
-- [ ] Extension 和 TUI 达到日常使用水平。
-- [ ] Windows ConPTY 与 VirtualTerminal 双重验证通过。
-
-### Checkpoint D：P14 完成
-
-- [ ] 当前稳定 Pi 功能面均在 parity matrix 中有实现或明确的刻意差异。
-- [ ] 未完成 Harness 保持 experimental，不影响稳定 CLI。
-- [ ] 完整 Definition of Done 与人工审查通过。
+# Pi Agent Python 重写原子任务清单
+
+> 唯一任务事实来源。架构与范围见 [plan.md](plan.md)。
+> 规则：一项任务 = 一个可观察行为 = 一个提交；禁止把任务标成完成后再写“以后拆分”。
+
+## 执行规则
+
+每行均包含：ID、目标、源码证据、前置任务、输入/输出、1–5 个主要文件、先写的失败测试、最小实现、兼容分类、聚焦验证、阶段回归、提交信息和完成框。
+
+- 开始任务前创建/使用 `phase/NN-name`；Phase 0 首次 main bootstrap 除外。
+- 先提交失败测试证据，再写最小实现；不顺手整理相邻模块。
+- 任务完成后执行“聚焦验证”和对应阶段门 `G<n>`；Phase 0 使用当时已存在的累进门 `G0-DOC`、`G0-CORE`、`G0-FINAL`。
+- Phase PR 写明测试、差异、风险、回滚；用户确认后才合并并进入下一 Phase。
+- `[x]` 表示验证和提交均已完成；`[ ]` 表示不得依赖其结果。
+
+### 阶段回归命令
+
+```text
+G0-DOC   聚焦的 `python -m unittest tests.test_<module>` + `git diff --check`
+G0-CORE  uv lock --check && uv sync --frozen --all-groups --no-sources && uv run --frozen ruff check . && uv run --frozen ruff format --check . && uv run --frozen pyright && uv run --frozen pytest tests -m "not live_provider and not network" && uv build --no-sources
+G0-FINAL 先运行 G0-CORE，再运行 `uv run --frozen python scripts/check_surface_matrix.py --source D:\pi`、`uv run --frozen python scripts/verify_distribution.py`、`uv run --frozen python scripts/ts_oracle.py --source D:\pi verify`、`uv run --frozen pip-audit --local`、`uv run --frozen pre-commit run --all-files`
+G1  uv run --frozen pytest tests/pi_telemetry tests/pi_ai
+G2  uv run --frozen pytest tests/pi_agent
+G3  uv run --frozen pytest tests/pi_coding_agent/session tests/contracts
+G4  uv run --frozen pytest tests/pi_ai/providers -m "not live_provider"
+G5  uv run --frozen pytest tests/pi_coding_agent/tools
+G6  uv run --frozen pytest tests/pi_coding_agent/cli tests/pi_coding_agent/sdk -m "not live_provider"
+G7  uv run --frozen pytest tests/pi_coding_agent/resources
+G8  uv run --frozen pytest tests/pi_coding_agent/session tests/pi_coding_agent/agent_session
+G9  uv run --frozen pytest tests/pi_tui
+G10 uv run --frozen pytest tests/pi_coding_agent/extensions tests/pi_coding_agent/packages
+G11 uv run --frozen pytest tests/pi_coding_agent/tui
+G12 uv run --frozen pytest tests/pi_coding_agent/cli tests/pi_coding_agent/rpc tests/pi_coding_agent/export
+G13 先运行 G0-FINAL，再运行 `uv run --frozen pytest --cov --cov-branch tests -m "not live_provider and not network"`
+```
+
+路径中的上游证据均相对 `D:\pi` 冻结提交；Python 文件均相对本仓库。
+
+## Phase 0：规范和测试底座
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [x] P0-T00 | 输入旧分析与旧 plan/todo；输出可追溯的初始 Git 基线 | 仓库原始文件；无前置 | 原始 3 个 Markdown | 检查未跟踪基线 → 初始化 main、身份、remote 并原样提交 | Supported | `git show --stat --oneline HEAD` / G0 不适用 | `P0-T00: preserve pre-rewrite planning baseline` |
+| [x] P0-T01 | 归档旧计划并以审查后 plan/todo 完整替换 | 冻结 commit 与用户锁定计划；P0-T00 | `tasks/plan.md`, `tasks/todo.md`, `tasks/archive/plan-*.md`, `tasks/archive/todo-*.md` | 校验 archive 哈希和新文件缺失 → `git mv` 后写入冻结计划与本表 | Supported | `git diff --check -- tasks/plan.md tasks/todo.md` / G0 | `P0-T01: freeze rewrite roadmap and atomic backlog` |
+| [ ] P0-T02 | 冻结上游基线、范围、单 wheel 边界、兼容/恢复与开发工作流决策 | 冻结 commit；P0-T01 | `docs/decisions/0001-source-baseline-and-scope.md`, `0002-single-wheel-package-boundaries.md`, `0003-compatibility-divergence-and-session-recovery.md`, `0004-development-workflow.md`, `tests/test_architecture_documents.py` | 缺 ADR/边界断言红测 → 四项相互引用的最小决策记录 | Intentional divergence | `python -m unittest tests.test_architecture_documents` / G0-DOC | `P0-T02: record frozen architecture decisions` |
+| [ ] P0-T03 | Message/Event/Tool 场景输入；输出冻结 wire 与事件顺序文档 | `packages/{ai,agent}/src`; P0-T02 | `docs/contracts/message-event-tool.md`, `tests/test_message_event_tool_contract.py` | 初始事件顺序与 transform/convert 缺失红测 → 单一 wire 契约 | Supported | `python -m unittest tests.test_message_event_tool_contract` / G0-DOC | `P0-T03: freeze message event and tool contract` |
+| [ ] P0-T04 | 合法/损坏 v3 JSONL 输入；输出持久化、恢复和导入规则 | `core/session-manager.ts`; P0-T03 | `docs/contracts/session-v3.md`, `tests/test_session_contract.py` | v3/recovery/import 断言红测 → Session 契约 | Intentional divergence | `python -m unittest tests.test_session_contract` / G0-DOC | `P0-T04: freeze session v3 contract` |
+| [ ] P0-T05 | CLI/Provider/Session 错误输入；输出 typed error 与 exit code 规则 | 上游 CLI 与错误路径；P0-T03 | `docs/contracts/errors-exit-codes.md`, `tests/test_error_contract.py` | exit/secret-output 断言红测 → 错误契约 | Intentional divergence | `python -m unittest tests.test_error_contract` / G0-DOC | `P0-T05: freeze errors and exit codes` |
+| [ ] P0-T06 | HOME/cwd/env/path 输入；输出命名、目录与凭据优先级 | `config.ts`, `session-manager.ts`; P0-T05 | `docs/contracts/paths-naming.md`, `tests/test_path_contract.py` | path/env 优先级断言红测 → 路径契约 | Intentional divergence | `python -m unittest tests.test_path_contract` / G0-DOC | `P0-T06: freeze paths naming and credential precedence` |
+| [ ] P0-T07 | 冻结公开表面输入；输出有唯一 ID、三态、owner/phase 与可解析源码证据的矩阵 | 上游 public entrypoints；P0-T02..P0-T06 | `docs/compatibility/surface-matrix.md`, `scripts/check_surface_matrix.py`, `tests/test_surface_matrix.py` | 重复 ID/列漂移/缺分类/owner/evidence 红测 → 六列可枚举 matrix | Supported | `python -m unittest tests.test_surface_matrix && python scripts/check_surface_matrix.py --source D:\pi` / G0-DOC | `P0-T07: enumerate the compatibility surface` |
+| [ ] P0-T08 | Key/文件/Shell/模型/资源/扩展/Session 边界输入；输出可测试控制 | `project-trust.ts`, `extensions/loader.ts`, `tools/*`; P0-T07 | `docs/security/threat-model.md`, `SECURITY.md`, `tests/test_security_baseline.py` | 边界或控制缺失红测 → 威胁模型和报告政策 | Supported | `python -m unittest tests.test_security_baseline` / G0-DOC | `P0-T08: establish threat model and security policy` |
+| [ ] P0-T09 | 上游 MIT 文本输入；输出完整 notice 且不误授权 Python 原创代码 | 上游 `LICENSE`; P0-T02 | `THIRD_PARTY_NOTICES.md`, `tests/test_legal_baseline.py` | notice/根 LICENSE 断言红测 → 法律基线 | Intentional divergence | `python -m unittest tests.test_legal_baseline` / G0-DOC | `P0-T09: preserve the upstream legal notice` |
+| [ ] P0-T10 | 空源码树输入；输出一个 wheel 的五包可导入骨架和严格依赖边界 | package graph；P0-T02,P0-T09 | `pyproject.toml`, `uv.lock`, `src/*/__init__.py`, `tests/test_import_boundaries.py`, `tests/test_packages.py` | 五包导入/边界红测 → 最小空包、Hatchling 与初始 lock | Supported | `uv run --frozen pytest tests/test_import_boundaries.py tests/test_packages.py` / G0-CORE | `P0-T10: establish single-wheel package boundaries` |
+| [ ] P0-T11 | 默认测试进程输入；输出 collection 前 HOME/cwd/credential 隔离及 Python 网络边界 | 安全模型；P0-T08,P0-T10 | `tests/_bootstrap.py`, `tests/subprocess_bootstrap/sitecustomize.py`, `tests/conftest.py`, `tests/test_test_environment.py` | Python socket/DNS/child/常见客户端逃逸红测 → offline proxy/env 与进程内/child 门禁；不宣称 OS 原生进程防火墙 | Supported | `uv run --frozen pytest tests/test_test_environment.py` / G0-CORE | `P0-T11: isolate the offline test environment` |
+| [ ] P0-T12 | 脚本化时间/随机/Provider/Tool 输入；输出确定性测试结果 | faux provider/test harness；P0-T11 | `tests/fakes.py`, `tests/randomness.py`, `tests/test_fakes.py`, `tests/test_randomness.py` | 重放/seed/耗尽红测 → FakeClock/FakeProvider/FakeTool/seed helper | Supported | `uv run --frozen pytest tests/test_fakes.py tests/test_randomness.py` / G0-CORE | `P0-T12: add deterministic test doubles` |
+| [ ] P0-T13 | `PI_TS_SOURCE` 输入；输出冻结且 clean 的 commit 证据，拒绝任何 npm script | `D:\pi` Git/package scripts；P0-T10 | `scripts/ts_oracle.py`, `tests/test_typescript_oracle.py` | wrong/dirty repo 与 npm 执行红测 → 纯只读 Git oracle | Supported | `uv run --frozen pytest tests/test_typescript_oracle.py && uv run --frozen python scripts/ts_oracle.py --source D:\pi verify` / G0-CORE | `P0-T13: add read-only TypeScript oracle` |
+| [ ] P0-T14 | clean checkout 输入；输出 Windows/Linux × 3.12/3.13 的冻结核心质量门 | G0-CORE；P0-T10..P0-T13 | `.github/workflows/ci.yml`, `.gitattributes` | workflow/schema 红测 → lock/lint/type/offline/build CI | Intentional divergence | `uv run --frozen pytest tests/test_test_environment.py` / G0-CORE | `P0-T14: add reproducible cross-platform ci` |
+| [ ] P0-T15 | 合成 secret 与 Git history 输入；输出本地和 CI 阻断且日志脱敏 | 安全模型；P0-T08 | `.gitleaks.toml`, `.github/workflows/secret-scan.yml`, `.env.example`, `.gitignore` | secret fixture 红测 → pinned/redacted history scan | Supported | `git diff --check` / G0-CORE | `P0-T15: enforce secret scanning` |
+| [ ] P0-T16 | staged Python 变更输入；输出本地 Ruff/Pyright/Gitleaks 门禁 | G0-CORE；P0-T14,P0-T15 | `.pre-commit-config.yaml` | hook 配置检查失败 → 固定版本本地 hooks | Intentional divergence | `uv run --frozen pre-commit run --all-files` / G0-CORE | `P0-T16: add local contribution gates` |
+| [ ] P0-T17 | 依赖清单输入；输出仅针对受控清单的更新 PR 配置 | Python/GitHub Actions dependencies；P0-T14 | `.github/dependabot.yml` | 配置校验失败 → 最小 Dependabot policy | Intentional divergence | `git diff --check -- .github/dependabot.yml` / G0-CORE | `P0-T17: automate dependency update proposals` |
+| [ ] P0-T18 | wheel+sdist 输入；输出五包与逐字相同 MIT notice，拒绝缺失/重复 artifact | build metadata；P0-T09,P0-T10,P0-T14 | `scripts/verify_distribution.py`, `tests/test_distribution.py`, `.github/workflows/ci.yml` | 缺 sdist/namespace/notice 红测 → 双 artifact verifier 并接入 CI | Intentional divergence | `uv build --no-sources && uv run --frozen pytest tests/test_distribution.py && uv run --frozen python scripts/verify_distribution.py` / G0-FINAL | `P0-T18: verify distribution artifacts in ci` |
+| [ ] P0-T19 | 已冻结仓库状态输入；输出准确 README、CHANGELOG 与贡献规则 | P0-T02..P0-T18 | `README.md`, `CHANGELOG.md`, `AGENTS.md` | 状态/命令/边界过期红测 → 只记录已实现事实和执行规则 | Intentional divergence | `git diff --check -- README.md CHANGELOG.md AGENTS.md` / G0-FINAL | `P0-T19: document the phase zero repository` |
+| [ ] P0-T20 | 全绿 Phase 0 输入；输出远端 main、required checks、禁止直推并停止 | P0-T02..P0-T19 | Git/GitHub 设置（无源码文件） | 远端/保护查询失败 → push main、设置规则、回读验证 | Supported | `git status --porcelain` 与 GitHub ruleset 查询 / G0-FINAL | `P0-T20: complete phase zero bootstrap`（无空提交） |
+
+## Phase 1：`pi_telemetry` 与 `pi_ai`
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P1-T01 | clean install 元数据输入；输出可导入的固定 Pydantic v2 runtime dependency | Python 类型决策；P0-T20 | `pyproject.toml`, `uv.lock`, `tests/test_runtime_dependencies.py` | distribution metadata 无 Pydantic 红测 → 增加单一直接依赖并重锁 | Intentional divergence | `uv lock --check && uv run --frozen pytest tests/test_runtime_dependencies.py -k pydantic` / G1 | `P1-T01: add the pydantic runtime dependency` |
+| [ ] P1-T02 | Telemetry 调用输入；No-op 无副作用、Memory 可断言输出 | `packages/telemetry/src/{index,memory,noop}.ts`; P1-T01 | `src/pi_telemetry/protocol.py`, `src/pi_telemetry/memory.py`, `src/pi_telemetry/__init__.py`, `tests/pi_telemetry/test_conformance.py` | conformance 红测 → Protocol、Noop、InMemory | Supported | `uv run --frozen pytest tests/pi_telemetry/test_conformance.py` / G1 | `P1-T02: implement telemetry protocol conformance` |
+| [ ] P1-T03 | wire message JSON 输入输出领域 Message/content/image/tool call/result | `packages/ai/src/types.ts`; P1-T02 | `src/pi_ai/messages.py`, `src/pi_ai/wire/messages.py`, `tests/pi_ai/test_messages.py` | 判别联合 round-trip 红测 → dataclass + Pydantic alias codec | Supported | `uv run --frozen pytest tests/pi_ai/test_messages.py` / G1 | `P1-T03: define message and content contracts` |
+| [ ] P1-T04 | 模型/Context/Usage/Thinking 输入；输出验证后的领域对象 | `types.ts`, `models.ts`; P1-T03 | `src/pi_ai/models.py`, `src/pi_ai/context.py`, `src/pi_ai/usage.py`, `tests/pi_ai/test_models_context.py` | 非法 role/usage/thinking 红测 → 最小类型及不变量 | Supported | `uv run --frozen pytest tests/pi_ai/test_models_context.py` / G1 | `P1-T04: define model context and usage atoms` |
+| [ ] P1-T05 | Tool JSON Schema 输入；输出 Provider schema 与参数校验结果 | `types.ts`, `utils/validation.ts`; P1-T03 | `src/pi_ai/tools.py`, `src/pi_ai/wire/tools.py`, `tests/pi_ai/test_tool_schema.py` | valid/invalid schema 矩阵红测 → Pydantic TypeAdapter 包装 | Supported | `uv run --frozen pytest tests/pi_ai/test_tool_schema.py` / G1 | `P1-T05: implement tool schema validation` |
+| [ ] P1-T06 | Provider chunk 输入；输出 12 类有序 AssistantMessageEvent | `types.ts`, `utils/event-stream.ts`; P1-T03,P1-T04 | `src/pi_ai/events.py`, `src/pi_ai/wire/events.py`, `tests/pi_ai/test_events.py` | start/delta/end/done/error 判别与顺序红测 → 事件联合 | Supported | `uv run --frozen pytest tests/pi_ai/test_events.py` / G1 | `P1-T06: define assistant stream event contract` |
+| [ ] P1-T07 | 异步事件生产者输入；输出单次消费、终止明确的 AssistantStream | `utils/event-stream.ts`, `stream.ts`; P1-T06 | `src/pi_ai/stream.py`, `tests/pi_ai/test_stream.py` | done/error/abort/重复终止红测 → 最小 AsyncIterator 与收集器 | Supported | `uv run --frozen pytest tests/pi_ai/test_stream.py` / G1 | `P1-T07: implement assistant event stream` |
+| [ ] P1-T08 | 脚本化响应输入；输出离线确定性的 Provider/FakeProvider | `providers/faux.ts`, `stream.ts`; P1-T07 | `src/pi_ai/provider.py`, `src/pi_ai/testing.py`, `tests/pi_ai/test_fake_provider.py` | 多调用/abort 红测 → Protocol、CredentialResolver、脚本队列 | Intentional divergence | `uv run --frozen pytest tests/pi_ai/test_fake_provider.py` / G1 | `P1-T08: add provider ports and deterministic fake` |
+| [ ] P1-T09 | 所有 wire 对象输入；输出 JSON/Schema 快照且 camelCase 稳定 | `types.ts` 与导出面；P1-T03..P1-T08 | `src/pi_ai/wire/codec.py`, `src/pi_ai/__init__.py`, `tests/pi_ai/test_wire_roundtrip.py`, `tests/contracts/test_pi_ai_exports.py` | round-trip/export 快照红测 → 汇总 codec 与明确 `__all__` | Supported | `uv run --frozen pytest tests/pi_ai/test_wire_roundtrip.py tests/contracts/test_pi_ai_exports.py` / G1 | `P1-T09: freeze pi_ai wire and export surface` |
+
+## Phase 2：`pi_agent` 与核心循环
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P2-T01 | Agent 内部消息输入；先 transform 再 convert，输出 LLM Context | `agent/src/types.ts`, `coding-agent/core/messages.ts`; P1-T09 | `src/pi_agent/messages.py`, `src/pi_agent/context.py`, `tests/pi_agent/test_context_pipeline.py` | 调用顺序和过滤红测 → 两阶段纯函数 | Supported | `uv run --frozen pytest tests/pi_agent/test_context_pipeline.py` / G2 | `P2-T01: separate agent and llm context messages` |
+| [ ] P2-T02 | lifecycle 状态变化输入；输出 AgentState 与判别 AgentEvent | `agent/src/types.ts`; P2-T01 | `src/pi_agent/state.py`, `src/pi_agent/events.py`, `tests/pi_agent/test_state_events.py` | 非法转移/事件顺序红测 → dataclass 状态与事件 | Supported | `uv run --frozen pytest tests/pi_agent/test_state_events.py` / G2 | `P2-T02: define agent state and lifecycle events` |
+| [ ] P2-T03 | 用户消息+无工具 Provider 输入；输出最终 AssistantMessage | `agent/src/agent-loop.ts`; P2-T01,P2-T02 | `src/pi_agent/loop.py`, `tests/pi_agent/test_loop_text.py` | 空/文本/length/terminate 红测 → 最小异步轮次 | Supported | `uv run --frozen pytest tests/pi_agent/test_loop_text.py` / G2 | `P2-T03: implement text-only agent loop` |
+| [ ] P2-T04 | ToolCall 输入；输出 prepare/validate/hook/execute/finalize 结果 | `agent-loop.ts`, `types.ts`; P2-T03 | `src/pi_agent/tools.py`, `src/pi_agent/tool_pipeline.py`, `tests/pi_agent/test_tool_pipeline.py` | unknown/invalid/exception 红测 → 五阶段 pipeline 和错误 ToolResult | Supported | `uv run --frozen pytest tests/pi_agent/test_tool_pipeline.py` / G2 | `P2-T04: implement five-stage tool pipeline` |
+| [ ] P2-T05 | 单/多 ToolCall 输入；输出按调用顺序追加的多轮消息 | `agent-loop.ts`; P2-T04 | `src/pi_agent/loop.py`, `tests/pi_agent/test_loop_tools.py` | 单工具/链式/最大轮次红测 → 循环执行并再次请求 Provider | Supported | `uv run --frozen pytest tests/pi_agent/test_loop_tools.py` / G2 | `P2-T05: close the agent tool loop` |
+| [ ] P2-T06 | parallel 工具乱序完成输入；输出仍按模型顺序回填 | `agent-loop.ts` tool execution; P2-T05 | `src/pi_agent/scheduler.py`, `src/pi_agent/loop.py`, `tests/pi_agent/test_parallel_tools.py` | 人为乱序红测 → TaskGroup 收集后按 index finalize | Supported | `uv run --frozen pytest tests/pi_agent/test_parallel_tools.py` / G2 | `P2-T06: preserve model order for parallel tools` |
+| [ ] P2-T07 | prompt/steer/follow-up 输入；输出两个独立队列的规定顺序 | `agent/src/agent.ts`; P2-T05 | `src/pi_agent/agent.py`, `src/pi_agent/queues.py`, `tests/pi_agent/test_agent_queues.py` | steer/follow-up 交错红测 → 明确 drain 点和并发 prompt guard | Supported | `uv run --frozen pytest tests/pi_agent/test_agent_queues.py` / G2 | `P2-T07: implement agent input queues` |
+| [ ] P2-T08 | AbortSignal 输入；输出 aborted 且丢弃迟到 update | `agent.ts`, `agent-loop.ts`; P2-T07 | `src/pi_agent/cancellation.py`, `src/pi_agent/agent.py`, `tests/pi_agent/test_cancellation.py` | 迟到 Provider/Tool 事件红测 → generation token + 取消传播 | Supported | `uv run --frozen pytest tests/pi_agent/test_cancellation.py` / G2 | `P2-T08: make cancellation discard late updates` |
+| [ ] P2-T09 | sync/async listener 输入；`wait_for_idle()` 等待全部完成 | `agent.ts` subscriptions; P2-T08 | `src/pi_agent/listeners.py`, `src/pi_agent/agent.py`, `tests/pi_agent/test_listeners.py`, `src/pi_agent/__init__.py` | 慢 listener 提前 idle 红测 → 跟踪 listener tasks 与导出 | Supported | `uv run --frozen pytest tests/pi_agent/test_listeners.py` / G2 | `P2-T09: make idle wait for lifecycle listeners` |
+
+## Phase 3：稳定契约与 v3 Session
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P3-T01 | v3 JSONL 行输入；输出 Header 与全部已知 Entry wire model | `coding-agent/core/session-manager.ts`; P2-T09 | `src/pi_coding_agent/session/models.py`, `src/pi_coding_agent/session/codec.py`, `tests/pi_coding_agent/session/test_models.py` | header-only version/extra/custom 红测 → Pydantic 判别联合 | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_models.py` / G3 | `P3-T01: define canonical v3 session models` |
+| [ ] P3-T02 | Session 文件输入；输出严格解析结果或路径+行号 typed error | `session-manager.ts`; P3-T01 | `src/pi_coding_agent/session/errors.py`, `src/pi_coding_agent/session/reader.py`, `tests/pi_coding_agent/session/test_reader.py` | JSON/schema/unknown type/torn tail 红测 → 无写入 parser | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/session/test_reader.py` / G3 | `P3-T02: implement strict read-only session parser` |
+| [ ] P3-T03 | create/in_memory/append 输入；输出延迟创建的 append-only JSONL | `session-manager.ts`; P3-T02 | `src/pi_coding_agent/session/manager.py`, `src/pi_coding_agent/session/writer.py`, `tests/pi_coding_agent/session/test_append.py` | 空 session 不建文件/旧行不变红测 → sync manager 与 fsync append | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_append.py` / G3 | `P3-T03: add append-only session manager` |
+| [ ] P3-T04 | 合法 Entry 图输入；输出唯一 root/leaf 索引、tree 与活动路径 | `session-manager.ts`; P3-T03 | `src/pi_coding_agent/session/tree.py`, `tests/pi_coding_agent/session/test_tree.py` | duplicate/orphan/cycle 红测 → 不可变索引与路径查询 | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_tree.py` / G3 | `P3-T04: index session trees and active paths` |
+| [ ] P3-T05 | 活动路径输入；输出严格的 LLM messages/context 投影 | `session-manager.ts`; P3-T04 | `src/pi_coding_agent/session/context.py`, `tests/pi_coding_agent/session/test_context_projection.py` | custom/summary/model-setting 混入红测 → 纯投影函数 | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_context_projection.py` / G3 | `P3-T05: project active session context` |
+| [ ] P3-T06 | 目标 entry id 输入；输出只移动 leaf 的 branch 状态，历史字节不变 | `session-manager.ts`; P3-T04 | `src/pi_coding_agent/session/manager.py`, `tests/pi_coding_agent/session/test_branch.py` | 非法 target/文件重写红测 → branch leaf transition | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_branch.py` / G3 | `P3-T06: navigate append-only session branches` |
+| [ ] P3-T07 | 全文件新输出输入；输出同目录临时写、fsync 与 atomic replace | Python 安全决策；P3-T03 | `src/pi_coding_agent/session/atomic.py`, `tests/pi_coding_agent/session/test_atomic_rewrite.py` | 注入写/replace 故障红测 → 原子写 helper | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/session/test_atomic_rewrite.py` / G3 | `P3-T07: write whole-session outputs atomically` |
+| [ ] P3-T08 | source leaf/cwd 输入；输出新 id/Header/parentSession 的 fork 文件 | `session-manager.ts`; P3-T05,P3-T06,P3-T07 | `src/pi_coding_agent/session/fork.py`, `tests/pi_coding_agent/session/test_fork.py` | 来源 hash、context、id/cwd 红测 → 新文件 fork | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_fork.py` / G3 | `P3-T08: fork v3 sessions without source mutation` |
+| [ ] P3-T09 | path/id 输入；输出一个严格打开的 SessionManager，来源字节不变 | `session-manager.ts`; P3-T02,P3-T04 | `src/pi_coding_agent/session/catalog.py`, `tests/pi_coding_agent/session/test_open.py` | partial id/损坏/mtime 红测 → 纯读 open resolver | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_open.py` / G3 | `P3-T09: open sessions without mutation` |
+| [ ] P3-T10 | cwd/session-dir 输入；输出排序后的合法 Session 与损坏诊断 | `session-manager.ts`; P3-T02 | `src/pi_coding_agent/session/catalog.py`, `tests/pi_coding_agent/session/test_list.py` | 单个损坏阻断目录/mtime 变化红测 → 纯读 catalog | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_list.py` / G3 | `P3-T10: list sessions with isolated diagnostics` |
+| [ ] P3-T11 | Session/path 输入；输出可导出的结构化 transcript，来源字节不变 | export/session code；P3-T05,P3-T09 | `src/pi_coding_agent/session/export.py`, `tests/pi_coding_agent/session/test_export_projection.py` | 内容遗漏/源 hash 变化红测 → 纯 projection exporter | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_export_projection.py` / G3 | `P3-T11: export a read-only session projection` |
+| [ ] P3-T12 | 合法上游 v3 `.pi` 文件输入；输出新的 `.pi-python` v3 文件和 ImportResult | `session-manager.ts`; `docs/contracts/session-v3.md`; P3-T02,P3-T07 | `src/pi_coding_agent/session/importer.py`, `src/pi_coding_agent/session/models.py`, `tests/pi_coding_agent/session/test_import_pi.py` | extra 字段/旧版本/来源 hash 红测 → 严格 v3 importer | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/session/test_import_pi.py` / G3 | `P3-T12: import mature pi v3 sessions safely` |
+| [ ] P3-T13 | Python/TS canonical fixture 输入；输出双方可打开的规范化 v3 | `session-manager.ts` tests; P3-T01..P3-T12 | `tests/fixtures/session_v3/*.jsonl`, `tests/contracts/test_session_ts_compat.py`, `scripts/session_oracle.py` | 双向 fixture 比较红测 → 只读 oracle adapter | Supported | `uv run --frozen pytest tests/contracts/test_session_ts_compat.py` / G3 | `P3-T13: prove canonical v3 interoperability` |
+| [ ] P3-T14 | 产品端口调用输入；输出冻结 Settings/Resource/Extension/UI/Exporter/SessionImporter no-op | `settings-manager.ts`, `resource-loader.ts`, `extensions/types.ts`; P3-T12 | `src/pi_coding_agent/ports.py`, `src/pi_tui/protocols.py`, `tests/contracts/test_product_ports.py` | export/signature 红测 → Protocol 与 in-memory/no-op 实现 | Supported | `uv run --frozen pytest tests/contracts/test_product_ports.py` / G3 | `P3-T14: freeze stable product service ports` |
+| [ ] P3-T15 | 全绿 Phase 3 输入；输出版本 `0.1.0` 的可安装 checkpoint artifact | P3-T01..P3-T14 | `pyproject.toml`, `uv.lock`, `CHANGELOG.md`, `scripts/verify_checkpoint.py`, `tests/release/test_checkpoint.py` | 版本不一致/仓库内路径泄漏红测 → bump、build、仓库外临时环境 wheel smoke；用户确认后 tag/release | Intentional divergence | `uv build --no-sources && uv run --frozen pytest tests/release/test_checkpoint.py && uv run --frozen python scripts/verify_checkpoint.py --version 0.1.0` / G3 | `P3-T15: cut the 0.1.0 checkpoint` |
+
+## Phase 4：DeepSeek Provider
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P4-T01 | clean install 元数据输入；输出可导入固定版本 `AsyncOpenAI` 的 runtime dependency | Provider 设计；P3-T15 | `pyproject.toml`, `uv.lock`, `tests/test_runtime_dependencies.py` | distribution metadata 无 `openai` 红测 → 增加单一直接依赖并重锁 | Intentional divergence | `uv lock --check && uv run --frozen pytest tests/test_runtime_dependencies.py -k openai` / G4 | `P4-T01: add the openai runtime dependency` |
+| [ ] P4-T02 | 官方模型资料输入；输出 Flash/Pro 目录、能力、默认 Pro | `ai/providers/deepseek*.ts`; P4-T01 | `src/pi_ai/providers/deepseek/models.py`, `tests/pi_ai/providers/test_deepseek_models.py`, `docs/decisions/0005-deepseek-catalog.md` | catalog 快照红测 → 固定受审数据 | Intentional divergence | `uv run --frozen pytest tests/pi_ai/providers/test_deepseek_models.py` / G4 | `P4-T02: define controlled DeepSeek model catalog` |
+| [ ] P4-T03 | CLI/env/env-file/cwd `.env` 输入；输出单一 credential 或 typed error | `env-api-keys.ts`, runtime credentials; P4-T02 | `src/pi_ai/credentials.py`, `src/pi_coding_agent/deepseek_credentials.py`, `tests/pi_ai/providers/test_credentials.py` | 优先级/不泄漏红测 → 只读 resolver | Intentional divergence | `uv run --frozen pytest tests/pi_ai/providers/test_credentials.py` / G4 | `P4-T03: resolve DeepSeek credentials safely` |
+| [ ] P4-T04 | pi_ai Context/Tools 输入；输出 OpenAI chat completion 请求 | `api/openai-completions.ts`, `providers/deepseek.ts`; P4-T02 | `src/pi_ai/providers/deepseek/request.py`, `tests/pi_ai/providers/test_deepseek_request.py` | role/tool/thinking/image capability 红测 → 纯转换器 | Intentional divergence | `uv run --frozen pytest tests/pi_ai/providers/test_deepseek_request.py` / G4 | `P4-T04: convert context to DeepSeek requests` |
+| [ ] P4-T05 | Mock SSE text/thinking 输入；输出精确 start/delta/end/done 序列 | `api/openai-completions.ts`; P4-T04 | `src/pi_ai/providers/deepseek/stream.py`, `tests/pi_ai/providers/test_deepseek_text_stream.py` | chunk 边界/空 delta 红测 → AsyncOpenAI stream adapter | Intentional divergence | `uv run --frozen pytest tests/pi_ai/providers/test_deepseek_text_stream.py` / G4 | `P4-T05: stream DeepSeek text and thinking` |
+| [ ] P4-T06 | 分片 tool calls 输入；输出多 ToolCall、usage 与 stop reason | 同上及 tool call tests; P4-T05 | `src/pi_ai/providers/deepseek/tool_calls.py`, `src/pi_ai/providers/deepseek/stream.py`, `tests/pi_ai/providers/test_deepseek_tools.py` | interleaved partial JSON 红测 → index/id/name/arguments 累积 | Intentional divergence | `uv run --frozen pytest tests/pi_ai/providers/test_deepseek_tools.py` / G4 | `P4-T06: assemble DeepSeek streamed tool calls` |
+| [ ] P4-T07 | 429/5xx/timeout/abort 输入；输出 bounded retry 或 error/aborted | `utils/provider-retry.ts`; P4-T05 | `src/pi_ai/providers/deepseek/provider.py`, `src/pi_ai/providers/deepseek/retry.py`, `tests/pi_ai/providers/test_deepseek_errors.py` | 语义 delta 后不得重试、SDK 0 retry 红测 → 显式策略/300s idle | Intentional divergence | `uv run --frozen pytest tests/pi_ai/providers/test_deepseek_errors.py` / G4 | `P4-T07: bound DeepSeek request retries` |
+| [ ] P4-T08 | Provider factory 输入；输出导出的 DeepSeekProvider；live case 仅 marker | `providers/deepseek.ts`; P4-T02..P4-T07 | `src/pi_ai/providers/deepseek/__init__.py`, `tests/pi_ai/providers/test_deepseek_provider.py`, `tests/live/test_deepseek.py` | 端到端 mock 红测 → factory/export；live 测试默认 skip | Intentional divergence | `uv run --frozen pytest tests/pi_ai/providers/test_deepseek_provider.py && uv run --frozen pytest --collect-only tests/live/test_deepseek.py` / G4 | `P4-T08: expose tested DeepSeek provider` |
+
+## Phase 5：Coding Tools
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P5-T01 | cwd/path 输入；输出 Filesystem/Process/Search Protocol 与 canonical path | `core/tools/path-utils.ts`; P4-T08 | `src/pi_coding_agent/tools/operations.py`, `src/pi_coding_agent/tools/paths.py`, `tests/pi_coding_agent/tools/test_operations.py` | symlink/case/space 红测 → OS adapter ports | Supported | `uv run --frozen pytest tests/pi_coding_agent/tools/test_operations.py` / G5 | `P5-T01: define coding tool operation ports` |
+| [ ] P5-T02 | file/offset/limit 输入；输出 head 截断文本与继续提示 | `core/tools/read.ts`, `truncate.ts`; P5-T01 | `src/pi_coding_agent/tools/read.py`, `tests/pi_coding_agent/tools/test_read.py` | Unicode/长行/BOM/offset 红测 → 不保存完整输出的 read | Supported | `uv run --frozen pytest tests/pi_coding_agent/tools/test_read.py` / G5 | `P5-T02: implement source-faithful read tool` |
+| [ ] P5-T03 | path/content 输入；输出完整写入并保留指定换行/BOM | `core/tools/write.ts`; P5-T01 | `src/pi_coding_agent/tools/write.py`, `tests/pi_coding_agent/tools/test_write.py` | parent/CRLF/BOM/abort 红测 → 临时写+replace | Supported | `uv run --frozen pytest tests/pi_coding_agent/tools/test_write.py` / G5 | `P5-T03: implement atomic write tool` |
+| [ ] P5-T04 | old/new edits 输入；输出全匹配修改或字节不变失败 | `core/tools/edit.ts`, `edit-diff.ts`; P5-T01 | `src/pi_coding_agent/tools/edit.py`, `tests/pi_coding_agent/tools/test_edit.py` | missing/duplicate/overlap/partial 红测 → 预计算后一次 replace | Supported | `uv run --frozen pytest tests/pi_coding_agent/tools/test_edit.py` / G5 | `P5-T04: make edit all-or-nothing` |
+| [ ] P5-T05 | 并行文件 mutation 输入；输出同真实路径串行、异路径并行 | `file-mutation-queue.ts`; P5-T03,P5-T04 | `src/pi_coding_agent/tools/mutation_queue.py`, `tests/pi_coding_agent/tools/test_mutation_queue.py` | symlink alias race 红测 → canonical-key asyncio lock | Supported | `uv run --frozen pytest tests/pi_coding_agent/tools/test_mutation_queue.py` / G5 | `P5-T05: serialize mutations by real path` |
+| [ ] P5-T06 | Windows/Linux 环境输入；输出源码顺序发现的 Bash 或诊断 | `core/bash-executor.ts`, `utils/shell.ts`; P5-T01 | `src/pi_coding_agent/tools/bash_resolver.py`, `tests/pi_coding_agent/tools/test_bash_resolver.py` | custom/Git Bash/PATH/WSL/missing 红测 → 平台 resolver | Supported | `uv run --frozen pytest tests/pi_coding_agent/tools/test_bash_resolver.py` / G5 | `P5-T06: resolve bash consistently across platforms` |
+| [ ] P5-T07 | command/timeout/abort 输入；输出尾部、exit code 和完整截断文件 | `core/tools/bash.ts`, `output-accumulator.ts`; P5-T06 | `src/pi_coding_agent/tools/bash.py`, `src/pi_coding_agent/tools/output.py`, `tests/pi_coding_agent/tools/test_bash.py` | stdout/stderr/process tree/late output 红测 → process group 终止与 accumulator | Supported | `uv run --frozen pytest tests/pi_coding_agent/tools/test_bash.py` / G5 | `P5-T07: implement cancellable bash tool` |
+| [ ] P5-T08 | pattern/path 输入；输出 grep/find/ls 的稳定排序结果 | `core/tools/{grep,find,ls}.ts`; P5-T01 | `src/pi_coding_agent/tools/search.py`, `src/pi_coding_agent/tools/listing.py`, `tests/pi_coding_agent/tools/test_search_listing.py` | 中文/隐藏/limit/error 红测 → Operations-backed 实现 | Supported | `uv run --frozen pytest tests/pi_coding_agent/tools/test_search_listing.py` / G5 | `P5-T08: implement search and listing tools` |
+| [ ] P5-T09 | rg/fd availability/offline 输入；输出系统工具或校验下载 | `core/tools/*`, package assets; P5-T08 | `src/pi_coding_agent/tools/binaries.py`, `tests/pi_coding_agent/tools/test_binaries.py`, `docs/decisions/0006-search-binaries.md` | offline/download/hash mismatch 红测 → 固定版本 SHA256 cache | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/tools/test_binaries.py` / G5 | `P5-T09: manage pinned search binaries safely` |
+| [ ] P5-T10 | 七工具配置输入；输出 AgentTool registry 和稳定 schema/order | `core/tools/index.ts`; P5-T02..P5-T09 | `src/pi_coding_agent/tools/registry.py`, `src/pi_coding_agent/tools/__init__.py`, `tests/pi_coding_agent/tools/test_registry.py` | exports/schema/order 红测 → 明确 factory | Supported | `uv run --frozen pytest tests/pi_coding_agent/tools/test_registry.py` / G5 | `P5-T10: expose canonical coding tool set` |
+
+## Phase 6：可运行的无头产品切片
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P6-T01 | 服务配置输入；输出唯一 bootstrap/main 组合根 | `coding-agent/src/main.ts`, `core/sdk.ts`; P5-T10 | `src/pi_coding_agent/bootstrap.py`, `src/pi_coding_agent/services.py`, `tests/pi_coding_agent/test_bootstrap.py` | CLI/SDK 服务身份红测 → constructor graph | Supported | `uv run --frozen pytest tests/pi_coding_agent/test_bootstrap.py` / G6 | `P6-T01: establish product composition root` |
+| [ ] P6-T02 | new/resume/fork/switch 输入；输出 cwd-bound 服务重建 | `core/agent-session-runtime.ts`; P6-T01 | `src/pi_coding_agent/agent_session_runtime.py`, `tests/pi_coding_agent/agent_session/test_runtime.py` | cwd 和 service generation 红测 → lifecycle owner | Supported | `uv run --frozen pytest tests/pi_coding_agent/agent_session/test_runtime.py` / G6 | `P6-T02: implement session runtime lifecycle` |
+| [ ] P6-T03 | Agent 与 service ports 输入；输出持有 Agent 的基础 AgentSession | `core/agent-session.ts`; P6-T02 | `src/pi_coding_agent/agent_session.py`, `tests/pi_coding_agent/agent_session/test_basic.py` | 所有权/event persistence 红测 → 最小 facade | Supported | `uv run --frozen pytest tests/pi_coding_agent/agent_session/test_basic.py` / G6 | `P6-T03: compose agent inside agent session` |
+| [ ] P6-T04 | model/provider 配置输入；输出 DeepSeek ModelRuntime stream | `core/model-runtime.ts`; P6-T01 | `src/pi_coding_agent/model_runtime.py`, `src/pi_coding_agent/providers.py`, `tests/pi_coding_agent/test_model_runtime.py` | model/provider/capability 红测 → provider factory | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/test_model_runtime.py` / G6 | `P6-T04: add DeepSeek model runtime` |
+| [ ] P6-T05 | SDK options 输入；输出 async session factory 与明确 cleanup | `core/sdk.ts`; P6-T03,P6-T04 | `src/pi_coding_agent/sdk.py`, `tests/pi_coding_agent/sdk/test_async_sdk.py` | context manager/cleanup 红测 → `create_agent_session()` | Supported | `uv run --frozen pytest tests/pi_coding_agent/sdk/test_async_sdk.py` / G6 | `P6-T05: expose asynchronous coding agent sdk` |
+| [ ] P6-T06 | 同步调用输入；输出结果；活动 event loop 中明确失败 | SDK surface；P6-T05 | `src/pi_coding_agent/sync_sdk.py`, `tests/pi_coding_agent/sdk/test_sync_sdk.py` | running-loop deadlock 红测 → `asyncio.run` wrapper guard | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/sdk/test_sync_sdk.py` / G6 | `P6-T06: add safe synchronous sdk wrapper` |
+| [ ] P6-T07 | v3 source/options 输入；输出公开 SDK `import_pi_session()` 的 ImportResult | Phase3 importer；P3-T12,P6-T05 | `src/pi_coding_agent/sdk.py`, `src/pi_coding_agent/__init__.py`, `tests/pi_coding_agent/sdk/test_import_session.py` | export/signature/source hash 红测 → SDK facade 委托 importer | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/sdk/test_import_session.py` / G6 | `P6-T07: expose v3 session import in the sdk` |
+| [ ] P6-T08 | argv 输入；输出 help/version/models/auth 与统一 exit code | `cli/args.ts`, `cli.ts`; P6-T01,P6-T04 | `src/pi_coding_agent/cli/parser.py`, `src/pi_coding_agent/cli/main.py`, `tests/pi_coding_agent/cli/test_basics.py`, `pyproject.toml` | argparse/secret 输出红测 → `pi-python` entry point | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/cli/test_basics.py` / G6 | `P6-T08: add headless cli entry point` |
+| [ ] P6-T09 | `import-pi-session <source> [--session-dir]` 输入；输出新文件信息或 typed error | Phase3 importer；P6-T07,P6-T08 | `src/pi_coding_agent/cli/import_session.py`, `src/pi_coding_agent/cli/parser.py`, `tests/pi_coding_agent/cli/test_import_session.py` | source hash/stdout/旧版本红测 → 专用 CLI adapter | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/cli/test_import_session.py` / G6 | `P6-T09: add the explicit v3 session import command` |
+| [ ] P6-T10 | print/text/json/session flags 输入；输出 stdout 契约和持久化选择 | `modes/print-mode.ts`, `json-event.ts`; P6-T03,P6-T08 | `src/pi_coding_agent/cli/run.py`, `src/pi_coding_agent/presenters.py`, `tests/pi_coding_agent/cli/test_headless_modes.py` | stdout 污染/session selection 红测 → FakeProvider 黑盒路径 | Supported | `uv run --frozen pytest tests/pi_coding_agent/cli/test_headless_modes.py` / G6 | `P6-T10: run text and json cli modes` |
+| [ ] P6-T11 | 未配对 ToolCall branch 输入；输出一次错误 ToolResult 且不执行工具 | `agent-session.ts` recovery; P6-T02,P6-T03 | `src/pi_coding_agent/session/recovery.py`, `src/pi_coding_agent/agent_session_runtime.py`, `tests/pi_coding_agent/session/test_recovery.py` | 执行 spy/重复恢复红测 → 固定文案与 idempotent append | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/session/test_recovery.py` / G6 | `P6-T11: recover unknown tool execution without replay` |
+| [ ] P6-T12 | 全绿 Phase 6 输入；输出版本 `0.2.0` 的可安装 checkpoint artifact | P6-T01..P6-T11 | `pyproject.toml`, `uv.lock`, `CHANGELOG.md` | 版本不一致/仓库外失败红测 → bump、build、checkpoint smoke；用户确认后 tag/release | Intentional divergence | `uv build --no-sources && uv run --frozen python scripts/verify_checkpoint.py --version 0.2.0` / G6 | `P6-T12: cut the 0.2.0 checkpoint` |
+
+## Phase 7：Settings 与资源发现
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P7-T01 | HOME/cwd 输入；输出全局/项目路径及 `PI_PYTHON_*` 优先级 | `config.ts`, `utils/paths.ts`; P6-T12 | `src/pi_coding_agent/config/paths.py`, `src/pi_coding_agent/config/env.py`, `tests/pi_coding_agent/resources/test_paths_env.py` | 新旧变量冲突/告警红测 → canonical paths | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/resources/test_paths_env.py` / G7 | `P7-T01: define Python configuration paths` |
+| [ ] P7-T02 | settings 文件层输入；输出已知验证值和未知兼容区 | `core/settings-manager.ts`; P7-T01 | `src/pi_coding_agent/config/settings.py`, `src/pi_coding_agent/config/models.py`, `tests/pi_coding_agent/resources/test_settings.py` | precedence/unknown/invalid 红测 → sync manager | Supported | `uv run --frozen pytest tests/pi_coding_agent/resources/test_settings.py` / G7 | `P7-T02: load layered settings safely` |
+| [ ] P7-T03 | 项目 canonical path 输入；输出 trust 决策且默认不执行资源 | `project-trust.ts`, `trust-manager.ts`; P7-T01 | `src/pi_coding_agent/resources/trust.py`, `tests/pi_coding_agent/resources/test_trust.py` | symlink/moved/untrusted 红测 → trust store protocol | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/resources/test_trust.py` / G7 | `P7-T03: gate project resources by canonical trust` |
+| [ ] P7-T04 | 显式/项目/兼容/全局/内建资源输入；输出 descriptor 优先序 | `core/resource-loader.ts`; P7-T02,P7-T03 | `src/pi_coding_agent/resources/descriptors.py`, `src/pi_coding_agent/resources/discovery.py`, `tests/pi_coding_agent/resources/test_precedence.py` | 冲突矩阵红测 → 只枚举 descriptor | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/resources/test_precedence.py` / G7 | `P7-T04: discover resource descriptors deterministically` |
+| [ ] P7-T05 | 显式 `.pi` 源输入；输出只读可导资源，不含凭据/TS 执行 | `resource-loader.ts`, migrations; P7-T03,P7-T04 | `src/pi_coding_agent/resources/pi_compat.py`, `tests/pi_coding_agent/resources/test_pi_compat.py` | 写回/extension/npm spy 红测 → read-only adapter | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/resources/test_pi_compat.py` / G7 | `P7-T05: add explicit read-only Pi compatibility` |
+| [ ] P7-T06 | root→cwd 文件树输入；输出确定顺序 Context/System prompt | `core/system-prompt.ts`; P7-T04 | `src/pi_coding_agent/resources/context_files.py`, `src/pi_coding_agent/prompts/system.py`, `tests/pi_coding_agent/resources/test_context_prompt.py` | 顺序/APPEND/XML 红测 → 文件收集和行为适配 prompt | Supported | `uv run --frozen pytest tests/pi_coding_agent/resources/test_context_prompt.py` / G7 | `P7-T06: build context and system prompts` |
+| [ ] P7-T07 | Prompt/Skill metadata 输入；输出命令描述，内容按需加载 | `prompt-templates.ts`, `skills.ts`; P7-T04 | `src/pi_coding_agent/resources/prompts.py`, `src/pi_coding_agent/resources/skills.py`, `tests/pi_coding_agent/resources/test_prompts_skills.py` | duplicate/frontmatter/XML/lazy 红测 → descriptor loaders | Supported | `uv run --frozen pytest tests/pi_coding_agent/resources/test_prompts_skills.py` / G7 | `P7-T07: load prompts and skills lazily` |
+| [ ] P7-T08 | Theme JSON 输入；输出验证后的主题数据，不导入 TUI 产品代码 | `interactive/theme/*`; P7-T04 | `src/pi_coding_agent/resources/themes.py`, `src/pi_tui/theme.py`, `tests/pi_coding_agent/resources/test_themes.py` | invalid/ref cycle/precedence 红测 → schema 与 resolver | Supported | `uv run --frozen pytest tests/pi_coding_agent/resources/test_themes.py` / G7 | `P7-T08: resolve validated theme resources` |
+
+## Phase 8：AgentSession 高级行为
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P8-T01 | Core AgentEvent 输入；输出分层 AgentSessionEvent 与持久化动作 | `core/agent-session.ts`; P7-T08 | `src/pi_coding_agent/agent_session_events.py`, `src/pi_coding_agent/agent_session.py`, `tests/pi_coding_agent/agent_session/test_events.py` | 事件映射/重复持久化红测 → adapter | Supported | `uv run --frozen pytest tests/pi_coding_agent/agent_session/test_events.py` / G8 | `P8-T01: separate product and core agent events` |
+| [ ] P8-T02 | 可重试整轮错误输入；输出 2/4/8s 最多三次和状态事件 | `agent-session.ts` retry; P8-T01 | `src/pi_coding_agent/retry.py`, `src/pi_coding_agent/agent_session.py`, `tests/pi_coding_agent/agent_session/test_retry.py` | success/exhaust/cancel 红测 → FakeClock policy | Supported | `uv run --frozen pytest tests/pi_coding_agent/agent_session/test_retry.py` / G8 | `P8-T02: implement bounded turn retries` |
+| [ ] P8-T03 | SDK/Provider/Session retry 组合输入；输出可精确断言的总尝试 | provider retry + session retry; P8-T02 | `src/pi_coding_agent/retry.py`, `tests/pi_coding_agent/agent_session/test_retry_layers.py` | 倍增请求红测 → attempt metadata 与互斥条件 | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/agent_session/test_retry_layers.py` / G8 | `P8-T03: prevent retry layer multiplication` |
+| [ ] P8-T04 | overflow 输入；输出至多一次 recovery，独立于 retry | `agent-session.ts`, `ai/utils/overflow.ts`; P8-T02 | `src/pi_coding_agent/context_overflow.py`, `src/pi_coding_agent/agent_session.py`, `tests/pi_coding_agent/agent_session/test_overflow.py` | overflow/retry 交错红测 → one-shot state | Supported | `uv run --frozen pytest tests/pi_coding_agent/agent_session/test_overflow.py` / G8 | `P8-T04: isolate context overflow recovery` |
+| [ ] P8-T05 | context/token budget 输入；输出不切断 ToolResult 对的 compaction 切点 | `core/compaction/compaction.ts`; P8-T01 | `src/pi_coding_agent/compaction/cutpoint.py`, `tests/pi_coding_agent/session/test_compaction_cutpoint.py` | 边界矩阵红测 → 纯切点算法 | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_compaction_cutpoint.py` / G8 | `P8-T05: choose safe compaction cutpoints` |
+| [ ] P8-T06 | 切点+旧摘要输入；输出 manual/auto 增量 summary entry | `core/compaction/*`; P8-T05 | `src/pi_coding_agent/compaction/service.py`, `src/pi_coding_agent/compaction/summarizer.py`, `tests/pi_coding_agent/session/test_compaction.py` | FakeSummarizer/旧摘要红测 → 可替换 summarizer | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_compaction.py` / G8 | `P8-T06: persist incremental compaction summaries` |
+| [ ] P8-T07 | 两个 branch path 输入；输出唯一 LCA 与从/到 entry diff | `compaction/branch-summarization.ts`; P8-T05 | `src/pi_coding_agent/branches.py`, `tests/pi_coding_agent/session/test_branch_diff.py` | root/same/disjoint 路径红测 → 纯 graph diff | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_branch_diff.py` / G8 | `P8-T07: compute divergent branch paths` |
+| [ ] P8-T08 | 活动分支 ToolCall/ToolResult 输入；输出确定的文件 read/write/rename 集合 | `compaction/branch-summarization.ts`; P8-T01 | `src/pi_coding_agent/file_tracking.py`, `tests/pi_coding_agent/session/test_file_tracking.py` | read/write/edit/rename 顺序红测 → 纯 event reducer | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_file_tracking.py` / G8 | `P8-T08: track branch file operations` |
+| [ ] P8-T09 | branch diff 与文件集合输入；输出一条 branch_summary entry | `compaction/branch-summarization.ts`; P8-T07,P8-T08 | `src/pi_coding_agent/branch_summary.py`, `tests/pi_coding_agent/session/test_branch_summary.py` | FakeSummarizer/重复 append 红测 → summary service | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_branch_summary.py` / G8 | `P8-T09: persist divergent branch summaries` |
+| [ ] P8-T10 | resume tree 输入；输出 model/thinking/compaction 状态与 tree view | `agent-session.ts`, `session-manager.ts`; P8-T06,P8-T09 | `src/pi_coding_agent/session/restore.py`, `src/pi_coding_agent/session/view.py`, `tests/pi_coding_agent/session/test_restore_view.py` | TS fixture 状态红测 → branch replay reducer | Supported | `uv run --frozen pytest tests/pi_coding_agent/session/test_restore_view.py` / G8 | `P8-T10: restore advanced session state` |
+| [ ] P8-T11 | 全绿 Phase 8 输入；输出版本 `0.3.0` 的可安装 checkpoint artifact | P8-T01..P8-T10 | `pyproject.toml`, `uv.lock`, `CHANGELOG.md` | 版本不一致/仓库外失败红测 → bump、build、checkpoint smoke；用户确认后 tag/release | Intentional divergence | `uv build --no-sources && uv run --frozen python scripts/verify_checkpoint.py --version 0.3.0` / G8 | `P8-T11: cut the 0.3.0 checkpoint` |
+
+## Phase 9：通用 `pi_tui`
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P9-T01 | clean install 元数据输入；输出可导入固定版本 `prompt_toolkit` 的 runtime dependency | TUI 设计；P8-T11 | `pyproject.toml`, `uv.lock`, `tests/test_runtime_dependencies.py` | distribution metadata 无 prompt_toolkit 红测 → 增加单一直接依赖并重锁 | Intentional divergence | `uv lock --check && uv run --frozen pytest tests/test_runtime_dependencies.py -k prompt_toolkit` / G9 | `P9-T01: add the prompt toolkit runtime dependency` |
+| [ ] P9-T02 | Terminal I/O 输入；输出 prompt_toolkit Adapter 和 MemoryTerminal | `tui/src/terminal.ts`; P9-T01 | `src/pi_tui/terminal.py`, `src/pi_tui/testing.py`, `tests/pi_tui/test_terminal.py` | pipe/memory/cleanup 红测 → Protocol adapters | Intentional divergence | `uv run --frozen pytest tests/pi_tui/test_terminal.py` / G9 | `P9-T02: establish terminal adapters` |
+| [ ] P9-T03 | Component tree 输入；输出 Text/Stack/Box/Status 的渲染片段 | `tui/src/components/*`, `layout.ts`; P9-T02 | `src/pi_tui/components.py`, `src/pi_tui/layout.py`, `tests/pi_tui/test_components.py` | 80x24/40x10 快照红测 → 通用组件 | Intentional divergence | `uv run --frozen pytest tests/pi_tui/test_components.py` / G9 | `P9-T03: implement foundational tui components` |
+| [ ] P9-T04 | 文本按键输入；输出 Editor history/undo/navigation 状态 | `editor-component.ts`, `undo-stack.ts`; P9-T02 | `src/pi_tui/editor.py`, `src/pi_tui/history.py`, `tests/pi_tui/test_editor.py` | unicode/history/undo 红测 → prompt_toolkit buffer adapter | Supported | `uv run --frozen pytest tests/pi_tui/test_editor.py` / G9 | `P9-T04: implement reusable editor behavior` |
+| [ ] P9-T05 | Dialog/Overlay/Selector 输入；输出正确 focus/cancel/result | `components/select-list.ts`, TUI overlay; P9-T03 | `src/pi_tui/dialogs.py`, `src/pi_tui/overlays.py`, `tests/pi_tui/test_dialogs.py` | Escape/focus/nesting 红测 → modal containers | Supported | `uv run --frozen pytest tests/pi_tui/test_dialogs.py` / G9 | `P9-T05: implement modal tui primitives` |
+| [ ] P9-T06 | CJK/emoji/ANSI 输入；输出准确显示宽度与截断 | `tui/src/utils.ts`; P9-T03 | `src/pi_tui/width.py`, `tests/pi_tui/test_width.py` | combining/wide/escape 红测 → wcwidth-aware helpers | Supported | `uv run --frozen pytest tests/pi_tui/test_width.py` / G9 | `P9-T06: handle terminal display width correctly` |
+| [ ] P9-T07 | resize/streaming 更新输入；输出 regular/fullscreen 无残影屏幕 | `tui.ts`, `tui-main-screen.ts`, `tui-alt-screen.ts`; P9-T03,P9-T06 | `src/pi_tui/application.py`, `src/pi_tui/render.py`, `tests/pi_tui/test_resize_stream.py` | resize/dirty region 红测 → invalidate/render strategy | Intentional divergence | `uv run --frozen pytest tests/pi_tui/test_resize_stream.py` / G9 | `P9-T07: render streaming and resize cleanly` |
+| [ ] P9-T08 | action/key map 输入；输出 Pi 动作名、默认键或登记替代键 | `tui/src/keybindings.ts`, coding keybindings; P9-T04 | `src/pi_tui/actions.py`, `src/pi_tui/keybindings.py`, `tests/pi_tui/test_keybindings.py`, `docs/compatibility/tui-keys.md` | action surface 红测 → stable registry | Intentional divergence | `uv run --frozen pytest tests/pi_tui/test_keybindings.py` / G9 | `P9-T08: align tui action semantics` |
+| [ ] P9-T09 | paste/autocomplete 输入；输出一致 editor 更新且 `pi_tui` 的 `pi_*` allowlist 为空 | `autocomplete.ts`, `stdin-buffer.ts`; P9-T04 | `src/pi_tui/autocomplete.py`, `src/pi_tui/paste.py`, `tests/pi_tui/test_input_features.py`, `tests/test_import_boundaries.py` | bracketed paste/completion/任何 `pi_*` import 红测 → generic providers | Supported | `uv run --frozen pytest tests/pi_tui/test_input_features.py tests/test_import_boundaries.py` / G9 | `P9-T09: complete isolated tui input features` |
+
+## Phase 10：Extension 与 Pi Package
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P10-T01 | extension metadata 输入；输出 trust 前只枚举、trust 后才 import | `core/extensions/loader.ts`; P9-T09 | `src/pi_coding_agent/extensions/metadata.py`, `src/pi_coding_agent/extensions/loader.py`, `tests/pi_coding_agent/extensions/test_trust_load.py` | import side-effect spy 红测 → 两阶段 loader | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/extensions/test_trust_load.py` / G10 | `P10-T01: defer extension imports until trusted` |
+| [ ] P10-T02 | sync/async hooks 输入；输出统一 await 与第三方异常隔离 | `extensions/runner.ts`; P10-T01 | `src/pi_coding_agent/extensions/hooks.py`, `tests/pi_coding_agent/extensions/test_hooks.py` | hook error/cancel/order 红测 → normalizer + diagnostic | Supported | `uv run --frozen pytest tests/pi_coding_agent/extensions/test_hooks.py` / G10 | `P10-T02: isolate extension hook execution` |
+| [ ] P10-T03 | Tool/Command/Provider/Flag/Shortcut 注册输入；输出冲突检测 registry | `extensions/types.ts`; P10-T01 | `src/pi_coding_agent/extensions/registry.py`, `src/pi_coding_agent/extensions/api.py`, `tests/pi_coding_agent/extensions/test_registry.py` | duplicate/invalid/dynamic flags 红测 → typed registrations | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/extensions/test_registry.py` / G10 | `P10-T03: implement extension capability registry` |
+| [ ] P10-T04 | Auth/UI/renderer/session action 注册输入；输出稳定桥接协议 | `extensions/types.ts`, `wrapper.ts`; P10-T03 | `src/pi_coding_agent/extensions/ui_api.py`, `src/pi_coding_agent/extensions/auth_api.py`, `tests/pi_coding_agent/extensions/test_ui_auth_api.py` | missing UI/no credential store/renderer error 红测 → ports only | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/extensions/test_ui_auth_api.py` / G10 | `P10-T04: expose extension ui and auth ports` |
+| [ ] P10-T05 | local/Git/PyPI spec 输入；输出解析后的来源/version/commit/hash | `core/package-manager.ts`; P10-T01 | `src/pi_coding_agent/packages/spec.py`, `src/pi_coding_agent/packages/resolver.py`, `tests/pi_coding_agent/packages/test_resolver.py` | invalid/offline/ref drift 红测 → uv-backed resolver protocol | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/packages/test_resolver.py` / G10 | `P10-T05: resolve Python extension packages` |
+| [ ] P10-T06 | install/update 输入；输出托管环境与原子扩展锁文件 | `package-manager.ts`; P10-T05 | `src/pi_coding_agent/packages/environment.py`, `src/pi_coding_agent/packages/lockfile.py`, `tests/pi_coding_agent/packages/test_install_lock.py` | no-uv/hash/update/rollback 红测 → explicit commands only | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/packages/test_install_lock.py` / G10 | `P10-T06: manage locked extension environments` |
+| [ ] P10-T07 | npm package spec 输入；输出隔离缓存中的 Skill/Prompt/Theme 数据 | `package-manager.ts`, manifest; P10-T05 | `src/pi_coding_agent/packages/npm_data.py`, `tests/pi_coding_agent/packages/test_npm_data.py` | scripts/TS extension/hash/offline 红测 → `npm pack --ignore-scripts` reader | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/packages/test_npm_data.py` / G10 | `P10-T07: ingest npm data resources without scripts` |
+| [ ] P10-T08 | descriptors/package/extensions 输入；输出最终 DefaultResourceLoader | `core/resource-loader.ts`; P10-T01,P10-T06,P10-T07 | `src/pi_coding_agent/resources/default_loader.py`, `tests/pi_coding_agent/resources/test_default_loader.py` | precedence/trust/diagnostics 红测 → composition only | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/resources/test_default_loader.py` / G10 | `P10-T08: compose the default resource loader` |
+| [ ] P10-T09 | reload/session close 输入；输出 teardown 一次且旧 hooks 不再运行 | `extensions/loader.ts`, `runner.ts`; P10-T02,P10-T08 | `src/pi_coding_agent/extensions/lifecycle.py`, `tests/pi_coding_agent/extensions/test_lifecycle.py` | double teardown/stale hook 红测 → generation-scoped lifecycle | Supported | `uv run --frozen pytest tests/pi_coding_agent/extensions/test_lifecycle.py` / G10 | `P10-T09: make extension lifecycle reload-safe` |
+| [ ] P10-T10 | opt-in 配置输入；输出默认关闭 permission gate 与 PowerShell 扩展 | 上游 extension examples/PowerShell差异；P10-T03 | `src/pi_coding_agent/builtin_extensions/permission_gate.py`, `src/pi_coding_agent/builtin_extensions/powershell.py`, `tests/pi_coding_agent/extensions/test_builtins.py` | default disabled/deny/PowerShell platform 红测 → 两个内建 Python extensions | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/extensions/test_builtins.py` / G10 | `P10-T10: ship opt-in permission and PowerShell extensions` |
+| [ ] P10-T11 | 全绿 Phase 10 输入；输出版本 `0.4.0` 的可安装 checkpoint artifact | P10-T01..P10-T10 | `pyproject.toml`, `uv.lock`, `CHANGELOG.md` | 版本不一致/仓库外失败红测 → bump、build、checkpoint smoke；用户确认后 tag/release | Intentional divergence | `uv build --no-sources && uv run --frozen python scripts/verify_checkpoint.py --version 0.4.0` / G10 | `P10-T11: cut the 0.4.0 checkpoint` |
+
+## Phase 11：交互式 Coding Agent TUI
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P11-T01 | Assistant/Thinking/Event 流输入；输出产品 renderer 更新 | `modes/interactive/components/assistant-message.ts`; P10-T11 | `src/pi_coding_agent/tui/render_messages.py`, `tests/pi_coding_agent/tui/test_message_rendering.py` | delta/thinking/error 快照红测 → Agent-aware renderer | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/tui/test_message_rendering.py` / G11 | `P11-T01: render agent message streams` |
+| [ ] P11-T02 | Tool lifecycle 输入；输出 in-place 工具状态与 compaction/retry 行 | `components/tool-execution.ts`, summary components; P11-T01 | `src/pi_coding_agent/tui/render_tools.py`, `src/pi_coding_agent/tui/render_status.py`, `tests/pi_coding_agent/tui/test_tool_status.py` | 并行/abort/retry/compact 红测 → product components | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/tui/test_tool_status.py` / G11 | `P11-T02: render tool and session status` |
+| [ ] P11-T03 | Session catalog/tree/fork 输入；输出 selector 动作和 runtime switch | `components/session-selector.ts`, `tree-selector.ts`; P11-T02 | `src/pi_coding_agent/tui/session_ui.py`, `tests/pi_coding_agent/tui/test_session_ui.py` | select/fork/cancel/cwd 红测 → dialogs bound to runtime | Supported | `uv run --frozen pytest tests/pi_coding_agent/tui/test_session_ui.py` / G11 | `P11-T03: add interactive session navigation` |
+| [ ] P11-T04 | model/thinking/settings 输入；输出 selector 与持久化选择 | 对应 interactive selectors; P11-T03 | `src/pi_coding_agent/tui/config_ui.py`, `tests/pi_coding_agent/tui/test_config_ui.py` | capability/invalid/current selection 红测 → generic selectors | Supported | `uv run --frozen pytest tests/pi_coding_agent/tui/test_config_ui.py` / G11 | `P11-T04: add interactive configuration selectors` |
+| [ ] P11-T05 | slash/Skill/Prompt/Extension command 输入；输出分派或 UI request | `slash-commands.ts`, `interactive-mode.ts`; P11-T04 | `src/pi_coding_agent/tui/commands.py`, `src/pi_coding_agent/tui/extension_ui.py`, `tests/pi_coding_agent/tui/test_commands.py` | conflicts/async dialog/cancel 红测 → command registry bridge | Supported | `uv run --frozen pytest tests/pi_coding_agent/tui/test_commands.py` / G11 | `P11-T05: dispatch interactive commands and extension ui` |
+| [ ] P11-T06 | 模式/clipboard/附件输入；输出文本粘贴与文件/图片 message contract | `utils/clipboard*.ts`, image utilities; P11-T05 | `src/pi_coding_agent/tui/application.py`, `src/pi_coding_agent/attachments.py`, `tests/pi_coding_agent/tui/test_clipboard_attachments.py` | regular/fullscreen/text/file/image capability 红测 → 无图形协议 | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/tui/test_clipboard_attachments.py` / G11 | `P11-T06: support clipboard and attachment contracts` |
+| [ ] P11-T07 | FakeProvider 完整脚本输入；输出可操作的交互 TUI 与 Windows smoke | `interactive-mode.ts`; P11-T01..P11-T06 | `src/pi_coding_agent/tui/main.py`, `tests/pi_coding_agent/tui/test_interactive_flow.py`, `tests/smoke/test_windows_terminal.py` | stream/tool/switch/dialog/CJK 红测 → CLI interactive wiring | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/tui/test_interactive_flow.py` / G11 | `P11-T07: integrate the interactive coding agent tui` |
+| [ ] P11-T08 | 全绿 Phase 11 输入；输出版本 `0.5.0` 的可安装 checkpoint artifact | P11-T01..P11-T07 | `pyproject.toml`, `uv.lock`, `CHANGELOG.md` | 版本不一致/仓库外失败红测 → bump、build、checkpoint smoke；用户确认后 tag/release | Intentional divergence | `uv build --no-sources && uv run --frozen python scripts/verify_checkpoint.py --version 0.5.0` / G11 | `P11-T08: cut the 0.5.0 checkpoint` |
+
+## Phase 12：完整稳定产品面
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P12-T01 | surface matrix CLI argv 输入；输出完整稳定 flags/subcommands | `cli/args.ts`, `package-manager-cli.ts`; P11-T08 | `src/pi_coding_agent/cli/parser.py`, `src/pi_coding_agent/cli/commands.py`, `tests/pi_coding_agent/cli/test_surface.py` | 每个 Supported 参数快照红测 → argparse 两阶段解析 | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/cli/test_surface.py` / G12 | `P12-T01: complete stable cli surface` |
+| [ ] P12-T02 | `@file`/export 输入；输出安全消息与转义后的 HTML | `cli/file-processor.ts`, `core/export-html/*`; P12-T01 | `src/pi_coding_agent/cli/file_args.py`, `src/pi_coding_agent/export/html.py`, `tests/pi_coding_agent/export/test_html.py` | script/HTML injection/path 红测 → escape-first exporter | Supported | `uv run --frozen pytest tests/pi_coding_agent/export/test_html.py` / G12 | `P12-T02: add file arguments and safe html export` |
+| [ ] P12-T03 | approve/offline/trust/package flags 输入；输出不混淆的安全动作 | `cli/project-trust.ts`, package CLI; P12-T01 | `src/pi_coding_agent/cli/trust.py`, `src/pi_coding_agent/cli/packages.py`, `tests/pi_coding_agent/cli/test_trust_packages.py` | `--approve` 工具授权误用红测 → 仅资源 trust | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/cli/test_trust_packages.py` / G12 | `P12-T03: finalize trust and package commands` |
+| [ ] P12-T04 | RPC JSON 行输入；输出 command/response/state/event Pydantic schema | `modes/rpc/rpc-types.ts`; P12-T01 | `src/pi_coding_agent/rpc/models.py`, `tests/pi_coding_agent/rpc/test_models.py` | alias/request-id/unknown-command 红测 → 判别 wire models | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_models.py` / G12 | `P12-T04: freeze local rpc wire schema` |
+| [ ] P12-T05 | stdin JSONL/AgentSession events 输入；输出纯 stdout、有 backpressure 的 RPC | `rpc/jsonl.ts`, `rpc-mode.ts`; P12-T04 | `src/pi_coding_agent/rpc/server.py`, `src/pi_coding_agent/rpc/framing.py`, `tests/pi_coding_agent/rpc/test_server.py` | malformed/slow consumer/log pollution 红测 → bounded queue server | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_server.py` / G12 | `P12-T05: implement local stdio rpc server` |
+| [ ] P12-T06 | Extension UI request/response 输入；输出关联、取消和超时 | `rpc-types.ts`, extension UI; P12-T05 | `src/pi_coding_agent/rpc/ui_bridge.py`, `tests/pi_coding_agent/rpc/test_ui_bridge.py` | unknown/duplicate/disconnect 红测 → pending request map | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_ui_bridge.py` / G12 | `P12-T06: bridge extension ui over rpc` |
+| [ ] P12-T07 | 子进程 transport 输入；输出 Python RpcClient state 和 cleanup | `modes/rpc/rpc-client.ts`; P12-T05 | `src/pi_coding_agent/rpc/client.py`, `tests/pi_coding_agent/rpc/test_client.py` | disposal/out-of-order/error 红测 → async client | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_client.py` / G12 | `P12-T07: expose local Python rpc client` |
+| [ ] P12-T08 | CLI/SDK/TUI/RPC 入口输入；输出同一 bootstrap identity、exit/stdout 契约 | `main.ts`, `rpc-entry.ts`; P12-T01,P12-T05,P12-T07 | `src/pi_coding_agent/main.py`, `src/pi_coding_agent/cli/main.py`, `tests/pi_coding_agent/cli/test_entrypoints.py` | service divergence/key/traceback/Darwin 红测 → shared bootstrap and exit mapping | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/cli/test_entrypoints.py` / G12 | `P12-T08: unify all product entry points` |
+| [ ] P12-T09 | 全绿 Phase 12 输入；输出版本 `0.6.0` 的可安装 checkpoint artifact | P12-T01..P12-T08 | `pyproject.toml`, `uv.lock`, `CHANGELOG.md` | 版本不一致/仓库外失败红测 → bump、build、checkpoint smoke；用户确认后 tag/release | Intentional divergence | `uv build --no-sources && uv run --frozen python scripts/verify_checkpoint.py --version 0.6.0` / G12 | `P12-T09: cut the 0.6.0 checkpoint` |
+
+## Phase 13：差分、Evals、安全与发布
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P13-T01 | Python/TS 场景输出输入；输出去时间/ID/绝对路径后的语义 diff | 冻结源码测试；P12-T09 | `scripts/differential_oracle.py`, `tests/differential/test_oracle.py`, `tests/fixtures/differential/*.json` | nondeterminism/dialect 红测 → normalizers；TUI 比不变量 | Supported | `uv run --frozen pytest tests/differential/test_oracle.py` / G13 | `P13-T01: add semantic differential oracle` |
+| [ ] P13-T02 | 历史问题输入；输出每个问题一条独立 regression test | 全阶段缺陷记录；P13-T01 | `tests/regressions/README.md`, `tests/regressions/test_agent.py`, `tests/regressions/test_session.py`, `tests/regressions/test_tools.py` | 逐项先重现 → 只固定已确认行为 | Supported | `uv run --frozen pytest tests/regressions` / G13 | `P13-T02: preserve confirmed regressions` |
+| [ ] P13-T03 | public surface 输入；输出中文架构/使用文档与英文 help/error | 所有 Supported surface；P12-T09 | `README.md`, `docs/architecture.md`, `docs/usage.md`, `tests/contracts/test_documented_cli.py` | doc/help mismatch 红测 → 可复制命令和图 | Intentional divergence | `uv run --frozen pytest tests/contracts/test_documented_cli.py` / G13 | `P13-T03: publish architecture and usage documentation` |
+| [ ] P13-T04 | threat/dependency/secret 输入；输出关闭或接受的风险清单 | Phase0 threat model；P13-T02 | `docs/security/release-review.md`, `SECURITY.md`, `.github/workflows/release-security.yml`, `tests/security/test_redaction.py` | Key/header/env/repr 泄漏红测 → redaction fixes and audit gate | Supported | `uv run --frozen pytest tests/security && uv run --frozen pip-audit --local` / G13 | `P13-T04: close release security risks` |
+| [ ] P13-T05 | wheel+全新 HOME+仓库外 cwd 输入；输出可运行 CLI/SDK/RPC | 发布阻断场景；P13-T03,P13-T04 | `scripts/verify_wheel.py`, `tests/release/test_clean_install.py`, `.github/workflows/release.yml` | editable-import/HOME leak 红测 → isolated install verifier | Supported | `uv run --frozen pytest tests/release/test_clean_install.py` / G13 | `P13-T05: verify clean external installation` |
+| [ ] P13-T06 | surface/coverage/CI 输入；输出无未分类项且关键 branch ≥90% | Phase0 matrix；P13-T01..P13-T05 | `scripts/check_surface_matrix.py`, `pyproject.toml`, `docs/compatibility/surface-matrix.md`, `.github/workflows/ci.yml` | incomplete row/coverage gate 红测 → machine-readable checks | Supported | `uv run --frozen python scripts/check_surface_matrix.py && uv run --frozen pytest --cov --cov-branch` / G13 | `P13-T06: enforce release completeness gates` |
+| [ ] P13-T07 | tag/批准的 live matrix 输入；输出 0.9 RC，验收后 1.0 artifacts | GitHub Release 要求；P13-T06 | `scripts/release.py`, `.github/workflows/release.yml`, `CHANGELOG.md`, `docs/release-checklist.md` | artifact hash/attestation/token cap 红测 → wheel/sdist/SHA256/build proof；live 每次先问 | Supported | `uv run --frozen python scripts/release.py --check-only` / G13 | `P13-T07: prepare reproducible 1.0 release` |
+
+## 当前停止点
+
+Phase 0 完成后必须停止。不得自动开始 P1-T01；先提交 Phase 0 门禁结果、已知差异、远端保护状态和回滚方法给用户验收。
