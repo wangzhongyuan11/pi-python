@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pi-python"
+version = "0.0.0"
+description = "A from-scratch Python reimplementation of the Pi coding agent"
+requires-python = ">=3.12"
+license-files = ["THIRD_PARTY_NOTICES.md"]
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pip-audit==2.10.1",
+    "pre-commit==4.6.2",
+    "pyright==1.1.403",
+    "pytest==9.0.3",
+    "ruff==0.12.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "src/pi_telemetry",
+    "src/pi_ai",
+    "src/pi_agent",
+    "src/pi_tui",
+    "src/pi_coding_agent",
+]
+
+[tool.pytest.ini_options]
+addopts = ["--strict-config", "--strict-markers", "-ra"]
+testpaths = ["tests"]
+markers = [
+    "live_provider: tests that explicitly access a real provider",
+    "network: tests that explicitly access the external network",
+    "parity: tests that compare Python behavior with the frozen TypeScript source",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+
+[tool.pyright]
+include = ["src", "scripts", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
