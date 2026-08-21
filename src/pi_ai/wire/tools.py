@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import cast
 
 from pydantic import BaseModel, ConfigDict
@@ -27,4 +28,8 @@ def dump_tool[ParamsT](tool: Tool[ParamsT]) -> dict[str, JsonValue]:
     return cast("dict[str, JsonValue]", wire.model_dump(mode="json"))
 
 
-__all__ = ["ToolWire", "dump_tool"]
+def tool_wire_schema() -> JsonObject:
+    return deepcopy(cast("JsonObject", ToolWire.model_json_schema(mode="validation")))
+
+
+__all__ = ["ToolWire", "dump_tool", "tool_wire_schema"]

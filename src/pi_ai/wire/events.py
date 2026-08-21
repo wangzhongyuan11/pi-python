@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Annotated, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
@@ -22,7 +23,7 @@ from ..events import (
     ToolCallEndEvent,
     ToolCallStartEvent,
 )
-from ..messages import AssistantMessage, JsonValue, ToolCall
+from ..messages import AssistantMessage, JsonObject, JsonValue, ToolCall
 from .messages import AssistantMessageWire, ToolCallWire, dump_message, parse_message
 
 
@@ -313,6 +314,12 @@ def dump_event(event: AssistantMessageEvent) -> dict[str, JsonValue]:
     )
 
 
+def event_wire_schema() -> JsonObject:
+    return deepcopy(
+        cast("JsonObject", _EVENT_ADAPTER.json_schema(by_alias=True, mode="validation"))
+    )
+
+
 __all__ = [
     "AssistantMessageEventWire",
     "AssistantMessageStartEventWire",
@@ -328,5 +335,6 @@ __all__ = [
     "ToolCallEndEventWire",
     "ToolCallStartEventWire",
     "dump_event",
+    "event_wire_schema",
     "parse_event",
 ]

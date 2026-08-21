@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Annotated, Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -426,6 +427,12 @@ def dump_message(message: Message) -> dict[str, JsonValue]:
     return cast("dict[str, JsonValue]", dumped)
 
 
+def message_wire_schema() -> JsonObject:
+    return deepcopy(
+        cast("JsonObject", _MESSAGE_ADAPTER.json_schema(by_alias=True, mode="validation"))
+    )
+
+
 __all__ = [
     "AssistantMessageDiagnosticWire",
     "AssistantMessageWire",
@@ -441,5 +448,6 @@ __all__ = [
     "UsageWire",
     "UserMessageWire",
     "dump_message",
+    "message_wire_schema",
     "parse_message",
 ]
