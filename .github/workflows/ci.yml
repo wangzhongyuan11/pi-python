@@ -74,5 +74,8 @@ jobs:
       - name: Build wheel and source distribution
         run: uv build --no-sources
 
+      - name: Verify distribution structure and legal notice
+        run: uv run --frozen python scripts/verify_distribution.py
+
       - name: Audit installed dependencies
         run: uv run --frozen pip-audit --local
