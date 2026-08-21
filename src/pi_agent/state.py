@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
-from pi_ai import AssistantMessage, Model, ModelThinkingLevel, Tool
+from pi_ai import AssistantMessage, Model, ModelThinkingLevel
 
 from .messages import AgentMessage
+from .tools import AgentTool
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -15,7 +17,7 @@ class AgentState:
     system_prompt: str
     model: Model
     thinking_level: ModelThinkingLevel
-    tools: tuple[Tool[object], ...]
+    tools: tuple[AgentTool[Any, Any], ...]
     messages: tuple[AgentMessage, ...]
     is_streaming: bool
     streaming_message: AssistantMessage | None
@@ -28,7 +30,7 @@ class AgentState:
         system_prompt: str,
         model: Model,
         thinking_level: ModelThinkingLevel = "off",
-        tools: Iterable[Tool[object]] = (),
+        tools: Iterable[AgentTool[Any, Any]] = (),
         messages: Iterable[AgentMessage] = (),
         is_streaming: bool = False,
         streaming_message: AssistantMessage | None = None,

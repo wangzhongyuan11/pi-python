@@ -43,6 +43,7 @@ from .tool_pipeline import (
 from .tools import ToolExecutionMode
 
 type AgentEventSink = Callable[[AgentEvent], None | Awaitable[None]]
+type PendingMessageSource = Callable[[], Awaitable[Sequence[AgentMessage]]]
 
 
 def _now_ms() -> int:
@@ -62,6 +63,8 @@ class AgentLoopConfig:
     max_turns: int = 100
     clock: Callable[[], int] = _now_ms
     tool_execution: ToolExecutionMode = "parallel"
+    get_steering_messages: PendingMessageSource | None = None
+    get_follow_up_messages: PendingMessageSource | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.max_turns, bool) or self.max_turns <= 0:
@@ -99,11 +102,22 @@ async def run_agent_loop(
         await emitter.emit(MessageStartEvent(message=prompt))
         await emitter.emit(MessageEndEvent(message=prompt))
 
+    pending_messages = (
+        tuple(await config.get_steering_messages())
+        if config.get_steering_messages is not None
+        else ()
+    )
     turn = 0
     while True:
         turn += 1
         if turn > 1:
             await emitter.emit(TurnStartEvent())
+        for pending_message in pending_messages:
+            await emitter.emit(MessageStartEvent(message=pending_message))
+            await emitter.emit(MessageEndEvent(message=pending_message))
+            current_messages.append(pending_message)
+            new_messages.append(pending_message)
+        pending_messages = ()
         turn_context = AgentContext(
             system_prompt=context.system_prompt,
             messages=current_messages,
@@ -153,10 +167,27 @@ async def run_agent_loop(
         await emitter.emit(TurnEndEvent(message=assistant, tool_results=tuple(tool_results)))
         if assistant.stop_reason in ("error", "aborted"):
             break
-        if not tool_calls or turn >= config.max_turns:
+        if turn >= config.max_turns:
             break
-        if outcomes and all(outcome.terminate for outcome in outcomes):
+        steering = (
+            tuple(await config.get_steering_messages())
+            if config.get_steering_messages is not None
+            else ()
+        )
+        tool_chain_continues = bool(tool_calls) and not (
+            outcomes and all(outcome.terminate for outcome in outcomes)
+        )
+        if steering or tool_chain_continues:
+            pending_messages = steering
+            continue
+        follow_up = (
+            tuple(await config.get_follow_up_messages())
+            if config.get_follow_up_messages is not None
+            else ()
+        )
+        if not follow_up:
             break
+        pending_messages = follow_up
 
     await emitter.emit(AgentEndEvent(messages=tuple(new_messages)))
     return tuple(new_messages)
@@ -205,4 +236,9 @@ async def _stream_assistant(
     return final_message
 
 
-__all__ = ["AgentEventSink", "AgentLoopConfig", "run_agent_loop"]
+__all__ = [
+    "AgentEventSink",
+    "AgentLoopConfig",
+    "PendingMessageSource",
+    "run_agent_loop",
+]
