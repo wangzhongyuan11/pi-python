@@ -228,6 +228,29 @@ async def execute_tool_call(
     return await _finalize(tool_call, result, is_error, timestamp, event_sink)
 
 
+async def fail_tool_call(
+    tool_call: ToolCall,
+    message: str,
+    *,
+    timestamp: int,
+    event_sink: ToolEventSink | None = None,
+) -> ToolCallOutcome:
+    await _emit(
+        event_sink,
+        ToolExecutionStartEvent(
+            tool_call_id=tool_call.id,
+            tool_name=tool_call.name,
+            args=tool_call.arguments,
+        ),
+    )
+    return await _finalize_immediate(
+        tool_call,
+        _error_result(message),
+        timestamp,
+        event_sink,
+    )
+
+
 async def _finalize_immediate(
     tool_call: ToolCall,
     result: AgentToolResult[Any],
@@ -284,4 +307,5 @@ __all__ = [
     "ToolCallOutcome",
     "ToolEventSink",
     "execute_tool_call",
+    "fail_tool_call",
 ]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
@@ -15,6 +16,8 @@ from pi_ai import (
     Model,
     StreamFunction,
     StreamOptions,
+    ToolCall,
+    ToolResultMessage,
 )
 
 from .context import AgentContext, ConvertToLlm, TransformContext, build_llm_context
@@ -30,8 +33,19 @@ from .events import (
     TurnStartEvent,
 )
 from .messages import AgentMessage, default_convert_to_llm
+from .tool_pipeline import (
+    AfterToolCallHook,
+    BeforeToolCallHook,
+    ToolCallOutcome,
+    execute_tool_call,
+    fail_tool_call,
+)
 
 type AgentEventSink = Callable[[AgentEvent], None | Awaitable[None]]
+
+
+def _now_ms() -> int:
+    return time.time_ns() // 1_000_000
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -42,6 +56,14 @@ class AgentLoopConfig:
     convert_to_llm: ConvertToLlm = default_convert_to_llm
     event_sink: AgentEventSink | None = None
     abort_event: asyncio.Event | None = None
+    before_tool_call: BeforeToolCallHook | None = None
+    after_tool_call: AfterToolCallHook | None = None
+    max_turns: int = 100
+    clock: Callable[[], int] = _now_ms
+
+    def __post_init__(self) -> None:
+        if isinstance(self.max_turns, bool) or self.max_turns <= 0:
+            raise ValueError("max_turns must be a positive integer")
 
 
 class _EventEmitter:
@@ -75,19 +97,61 @@ async def run_agent_loop(
         await emitter.emit(MessageStartEvent(message=prompt))
         await emitter.emit(MessageEndEvent(message=prompt))
 
-    assistant = await _stream_assistant(
-        AgentContext(
+    turn = 0
+    while True:
+        turn += 1
+        if turn > 1:
+            await emitter.emit(TurnStartEvent())
+        turn_context = AgentContext(
             system_prompt=context.system_prompt,
             messages=current_messages,
             tools=context.tools,
-        ),
-        config,
-        emitter,
-    )
-    current_messages.append(assistant)
-    new_messages.append(assistant)
+        )
+        assistant = await _stream_assistant(turn_context, config, emitter)
+        current_messages.append(assistant)
+        new_messages.append(assistant)
 
-    await emitter.emit(TurnEndEvent(message=assistant, tool_results=()))
+        tool_calls = tuple(
+            content for content in assistant.content if isinstance(content, ToolCall)
+        )
+        tool_results: list[ToolResultMessage] = []
+        outcomes: list[ToolCallOutcome] = []
+        for tool_call in tool_calls:
+            if assistant.stop_reason == "length":
+                outcome = await fail_tool_call(
+                    tool_call,
+                    (
+                        f'Tool call "{tool_call.name}" was not executed: the response hit '
+                        "the output token limit, so its arguments may be truncated."
+                    ),
+                    timestamp=config.clock(),
+                    event_sink=emitter.emit,
+                )
+            else:
+                outcome = await execute_tool_call(
+                    tool_call,
+                    assistant,
+                    turn_context,
+                    context.tools or (),
+                    before_tool_call=config.before_tool_call,
+                    after_tool_call=config.after_tool_call,
+                    abort_event=config.abort_event,
+                    event_sink=emitter.emit,
+                    timestamp=config.clock(),
+                )
+            outcomes.append(outcome)
+            tool_results.append(outcome.message)
+            current_messages.append(outcome.message)
+            new_messages.append(outcome.message)
+
+        await emitter.emit(TurnEndEvent(message=assistant, tool_results=tuple(tool_results)))
+        if assistant.stop_reason in ("error", "aborted"):
+            break
+        if not tool_calls or turn >= config.max_turns:
+            break
+        if outcomes and all(outcome.terminate for outcome in outcomes):
+            break
+
     await emitter.emit(AgentEndEvent(messages=tuple(new_messages)))
     return tuple(new_messages)
 

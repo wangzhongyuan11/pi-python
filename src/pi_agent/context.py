@@ -5,10 +5,12 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
-from pi_ai import Context, Message, Tool
+from pi_ai import Context, Message
 
 from .messages import AgentMessage, default_convert_to_llm
+from .tools import AgentTool
 
 type TransformContext = Callable[
     [Sequence[AgentMessage]],
@@ -24,14 +26,14 @@ type ConvertToLlm = Callable[
 class AgentContext:
     system_prompt: str
     messages: tuple[AgentMessage, ...]
-    tools: tuple[Tool[object], ...] | None
+    tools: tuple[AgentTool[Any, Any], ...] | None
 
     def __init__(
         self,
         *,
         system_prompt: str,
         messages: Iterable[AgentMessage],
-        tools: Iterable[Tool[object]] | None = None,
+        tools: Iterable[AgentTool[Any, Any]] | None = None,
     ) -> None:
         object.__setattr__(self, "system_prompt", system_prompt)
         object.__setattr__(self, "messages", tuple(messages))
