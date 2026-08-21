@@ -6,20 +6,21 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .messages import Message
+from .tools import Tool
 
 
 @dataclass(frozen=True, slots=True, init=False)
 class Context:
     system_prompt: str | None
     messages: tuple[Message, ...]
-    tools: tuple[object, ...] | None
+    tools: tuple[Tool[object], ...] | None
 
     def __init__(
         self,
         *,
         messages: Iterable[Message],
         system_prompt: str | None = None,
-        tools: Iterable[object] | None = None,
+        tools: Iterable[Tool[object]] | None = None,
     ) -> None:
         object.__setattr__(self, "system_prompt", system_prompt)
         object.__setattr__(self, "messages", tuple(messages))
