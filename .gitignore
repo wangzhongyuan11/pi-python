@@ -1,0 +1,53 @@
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Virtual environments
+.venv/
+venv/
+env/
+__pypackages__/
+
+# Python bytecode and tool caches
+__pycache__/
+*.py[cod]
+*$py.class
+.cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+
+# Local application state that can contain prompts or credentials
+.pi-python/auth.json
+.pi-python/credentials.json
+.pi-python/cache/
+.pi-python/logs/
+.pi-python/sessions/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log

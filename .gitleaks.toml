@@ -1,0 +1,11 @@
+title = "pi-python secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deliberately invalid documentation and CI placeholders"
+stopwords = [
+  "invalid-placeholder-do-not-use",
+  "invalid-ci-placeholder-do-not-use",
+]
