@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
@@ -15,6 +16,7 @@ from pi_ai import (
     UserMessage,
 )
 
+from .cancellation import CancellationController, RunCancellation
 from .context import AgentContext, ConvertToLlm, TransformContext
 from .events import (
     AgentEvent,
@@ -22,6 +24,7 @@ from .events import (
     MessageUpdateEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
 )
 from .loop import AgentLoopConfig, run_agent_loop
 from .messages import AgentMessage, default_convert_to_llm
@@ -70,6 +73,7 @@ class Agent:
         self._clock: Callable[[], int] = clock or _now_ms
         self._steering_queue = PendingMessageQueue(mode=steering_mode)
         self._follow_up_queue = PendingMessageQueue(mode=follow_up_mode)
+        self._cancellation = CancellationController()
         self._is_streaming = False
         self._streaming_message: AssistantMessage | None = None
         self._pending_tool_calls: set[str] = set()
@@ -109,6 +113,13 @@ class Agent:
     def has_queued_messages(self) -> bool:
         return self._steering_queue.has_items or self._follow_up_queue.has_items
 
+    @property
+    def signal(self) -> asyncio.Event | None:
+        return self._cancellation.signal
+
+    def abort(self) -> None:
+        self._cancellation.abort()
+
     async def prompt(self, prompt: str | AgentMessage | Sequence[AgentMessage]) -> None:
         if self._is_streaming:
             raise RuntimeError(
@@ -116,6 +127,7 @@ class Agent:
                 "messages, or wait for completion."
             )
         prompts = self._normalize_prompt(prompt)
+        run = self._cancellation.begin()
         self._is_streaming = True
         self._streaming_message = None
         self._error_message = None
@@ -132,7 +144,8 @@ class Agent:
                     stream_function=self._stream_function,
                     transform_context=self._transform_context,
                     convert_to_llm=self._convert_to_llm,
-                    event_sink=self._process_event,
+                    event_sink=lambda event: self._process_event(run, event),
+                    abort_event=run.abort_event,
                     before_tool_call=self._before_tool_call,
                     after_tool_call=self._after_tool_call,
                     max_turns=self._max_turns,
@@ -147,14 +160,13 @@ class Agent:
             self._is_streaming = False
             self._streaming_message = None
             self._pending_tool_calls.clear()
+            self._cancellation.finish(run)
 
     def _normalize_prompt(
         self, prompt: str | AgentMessage | Sequence[AgentMessage]
     ) -> tuple[AgentMessage, ...]:
         if isinstance(prompt, str):
-            return (
-                UserMessage(content=(TextContent(text=prompt),), timestamp=self._clock()),
-            )
+            return (UserMessage(content=(TextContent(text=prompt),), timestamp=self._clock()),)
         if isinstance(prompt, Sequence):
             return tuple(prompt)
         return (prompt,)
@@ -165,7 +177,12 @@ class Agent:
     async def _drain_follow_up(self) -> tuple[AgentMessage, ...]:
         return self._follow_up_queue.drain()
 
-    def _process_event(self, event: AgentEvent) -> None:
+    def _process_event(self, run: RunCancellation, event: AgentEvent) -> None:
+        if isinstance(event, MessageUpdateEvent | ToolExecutionUpdateEvent):
+            if not self._cancellation.accepts_update(run):
+                return
+        elif not self._cancellation.accepts(run):
+            return
         if isinstance(event, MessageUpdateEvent):
             self._streaming_message = event.message
         elif isinstance(event, MessageEndEvent) and isinstance(event.message, AssistantMessage):
