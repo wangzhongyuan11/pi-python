@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
+from uuid import UUID
 
 import pytest
 
@@ -12,11 +17,27 @@ from tests._bootstrap import (
     PytestEnvironment,
 )
 
+if TYPE_CHECKING:
+    from tests.fakes import FakeProvider, FakeTool
+
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _ACTIVE_ENVIRONMENT = PytestEnvironment(_REPOSITORY_ROOT)
 _ACTIVE_ENVIRONMENT.start()
 
 _ENVIRONMENT_KEY = pytest.StashKey[PytestEnvironment]()
+
+
+@dataclass(slots=True)
+class FakeClock:
+    """Small deterministic clock for tests that need explicit time control."""
+
+    _current: datetime
+
+    def now(self) -> datetime:
+        return self._current
+
+    def advance(self, delta: timedelta) -> None:
+        self._current += delta
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -76,6 +97,14 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture(autouse=True)
+def deterministic_random() -> Iterator[None]:
+    from tests.randomness import seeded_random
+
+    with seeded_random(0):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def cleared_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     if _ACTIVE_ENVIRONMENT.allow_live_provider:
         return
@@ -90,7 +119,31 @@ def no_external_network() -> None:
 
 
 @pytest.fixture
+def fake_clock() -> FakeClock:
+    return FakeClock(datetime(2020, 1, 1, tzinfo=UTC))
+
+
+@pytest.fixture
+def fixed_uuid() -> UUID:
+    return UUID("00000000-0000-0000-0000-000000000001")
+
+
+@pytest.fixture
 def workspace(tmp_path: Path) -> Path:
     path = tmp_path / "workspace"
     path.mkdir()
     return path
+
+
+@pytest.fixture
+def fake_provider() -> FakeProvider:
+    from tests.fakes import FakeProvider
+
+    return FakeProvider()
+
+
+@pytest.fixture
+def fake_tool() -> FakeTool:
+    from tests.fakes import FakeTool
+
+    return FakeTool()
