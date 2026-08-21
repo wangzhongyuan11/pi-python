@@ -107,60 +107,72 @@ async def execute_tool_call(
     abort_event: asyncio.Event | None = None,
     event_sink: ToolEventSink | None = None,
     timestamp: int,
+    _preparation_gate: asyncio.Lock | None = None,
+    _emit_message_events: bool = True,
 ) -> ToolCallOutcome:
-    await _emit(
-        event_sink,
-        ToolExecutionStartEvent(
-            tool_call_id=tool_call.id,
-            tool_name=tool_call.name,
-            args=tool_call.arguments,
-        ),
-    )
-    tool = next((candidate for candidate in tools if candidate.name == tool_call.name), None)
-    if tool is None:
-        return await _finalize_immediate(
-            tool_call,
-            _error_result(f"Tool {tool_call.name} not found"),
-            timestamp,
-            event_sink,
-        )
-
+    if _preparation_gate is not None:
+        await _preparation_gate.acquire()
     try:
-        prepared = tool.prepare_arguments(tool_call.arguments)
-        args = tool.validate_arguments(prepared)
-        if before_tool_call is not None:
-            before = await before_tool_call(
-                BeforeToolCallContext(
-                    assistant_message=assistant_message,
-                    tool_call=tool_call,
-                    args=args,
-                    context=context,
-                )
-            )
-            if before is not None and before.block:
-                return await _finalize_immediate(
-                    tool_call,
-                    _error_result(
-                        before.reason or "Tool execution was blocked",
-                        terminate=before.terminate,
-                    ),
-                    timestamp,
-                    event_sink,
-                )
-        if abort_event is not None and abort_event.is_set():
+        await _emit(
+            event_sink,
+            ToolExecutionStartEvent(
+                tool_call_id=tool_call.id,
+                tool_name=tool_call.name,
+                args=tool_call.arguments,
+            ),
+        )
+        tool = next((candidate for candidate in tools if candidate.name == tool_call.name), None)
+        if tool is None:
             return await _finalize_immediate(
                 tool_call,
-                _error_result("Operation aborted"),
+                _error_result(f"Tool {tool_call.name} not found"),
                 timestamp,
                 event_sink,
+                emit_message_events=_emit_message_events,
             )
-    except Exception as error:
-        return await _finalize_immediate(
-            tool_call,
-            _error_result(str(error)),
-            timestamp,
-            event_sink,
-        )
+
+        try:
+            prepared = tool.prepare_arguments(tool_call.arguments)
+            args = tool.validate_arguments(prepared)
+            if before_tool_call is not None:
+                before = await before_tool_call(
+                    BeforeToolCallContext(
+                        assistant_message=assistant_message,
+                        tool_call=tool_call,
+                        args=args,
+                        context=context,
+                    )
+                )
+                if before is not None and before.block:
+                    return await _finalize_immediate(
+                        tool_call,
+                        _error_result(
+                            before.reason or "Tool execution was blocked",
+                            terminate=before.terminate,
+                        ),
+                        timestamp,
+                        event_sink,
+                        emit_message_events=_emit_message_events,
+                    )
+            if abort_event is not None and abort_event.is_set():
+                return await _finalize_immediate(
+                    tool_call,
+                    _error_result("Operation aborted"),
+                    timestamp,
+                    event_sink,
+                    emit_message_events=_emit_message_events,
+                )
+        except Exception as error:
+            return await _finalize_immediate(
+                tool_call,
+                _error_result(str(error)),
+                timestamp,
+                event_sink,
+                emit_message_events=_emit_message_events,
+            )
+    finally:
+        if _preparation_gate is not None:
+            _preparation_gate.release()
 
     update_tasks: list[asyncio.Task[None]] = []
     accepting_updates = True
@@ -225,7 +237,14 @@ async def execute_tool_call(
             result = _error_result(str(error))
             is_error = True
 
-    return await _finalize(tool_call, result, is_error, timestamp, event_sink)
+    return await _finalize(
+        tool_call,
+        result,
+        is_error,
+        timestamp,
+        event_sink,
+        emit_message_events=_emit_message_events,
+    )
 
 
 async def fail_tool_call(
@@ -256,8 +275,17 @@ async def _finalize_immediate(
     result: AgentToolResult[Any],
     timestamp: int,
     event_sink: ToolEventSink | None,
+    *,
+    emit_message_events: bool = True,
 ) -> ToolCallOutcome:
-    return await _finalize(tool_call, result, True, timestamp, event_sink)
+    return await _finalize(
+        tool_call,
+        result,
+        True,
+        timestamp,
+        event_sink,
+        emit_message_events=emit_message_events,
+    )
 
 
 async def _finalize(
@@ -266,6 +294,8 @@ async def _finalize(
     is_error: bool,
     timestamp: int,
     event_sink: ToolEventSink | None,
+    *,
+    emit_message_events: bool = True,
 ) -> ToolCallOutcome:
     await _emit(
         event_sink,
@@ -286,8 +316,9 @@ async def _finalize(
         is_error=is_error,
         timestamp=timestamp,
     )
-    await _emit(event_sink, MessageStartEvent(message=message))
-    await _emit(event_sink, MessageEndEvent(message=message))
+    if emit_message_events:
+        await _emit(event_sink, MessageStartEvent(message=message))
+        await _emit(event_sink, MessageEndEvent(message=message))
     return ToolCallOutcome(
         tool_call=tool_call,
         result=result,

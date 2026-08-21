@@ -33,13 +33,14 @@ from .events import (
     TurnStartEvent,
 )
 from .messages import AgentMessage, default_convert_to_llm
+from .scheduler import schedule_tool_calls
 from .tool_pipeline import (
     AfterToolCallHook,
     BeforeToolCallHook,
     ToolCallOutcome,
-    execute_tool_call,
     fail_tool_call,
 )
+from .tools import ToolExecutionMode
 
 type AgentEventSink = Callable[[AgentEvent], None | Awaitable[None]]
 
@@ -60,6 +61,7 @@ class AgentLoopConfig:
     after_tool_call: AfterToolCallHook | None = None
     max_turns: int = 100
     clock: Callable[[], int] = _now_ms
+    tool_execution: ToolExecutionMode = "parallel"
 
     def __post_init__(self) -> None:
         if isinstance(self.max_turns, bool) or self.max_turns <= 0:
@@ -116,8 +118,8 @@ async def run_agent_loop(
         )
         tool_results: list[ToolResultMessage] = []
         outcomes: list[ToolCallOutcome] = []
-        for tool_call in tool_calls:
-            if assistant.stop_reason == "length":
+        if assistant.stop_reason == "length":
+            for tool_call in tool_calls:
                 outcome = await fail_tool_call(
                     tool_call,
                     (
@@ -127,19 +129,23 @@ async def run_agent_loop(
                     timestamp=config.clock(),
                     event_sink=emitter.emit,
                 )
-            else:
-                outcome = await execute_tool_call(
-                    tool_call,
+                outcomes.append(outcome)
+        else:
+            outcomes.extend(
+                await schedule_tool_calls(
+                    tool_calls,
                     assistant,
                     turn_context,
                     context.tools or (),
+                    execution_mode=config.tool_execution,
                     before_tool_call=config.before_tool_call,
                     after_tool_call=config.after_tool_call,
                     abort_event=config.abort_event,
                     event_sink=emitter.emit,
-                    timestamp=config.clock(),
+                    clock=config.clock,
                 )
-            outcomes.append(outcome)
+            )
+        for outcome in outcomes:
             tool_results.append(outcome.message)
             current_messages.append(outcome.message)
             new_messages.append(outcome.message)
