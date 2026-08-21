@@ -101,7 +101,8 @@ def test_abort_discards_provider_updates_but_keeps_aborted_terminal_message() ->
         await late_update_sent.wait()
 
         streaming = agent.state.streaming_message
-        assert streaming is None
+        assert streaming is not None
+        assert streaming.content == ()
 
         release_terminal.set()
         await active

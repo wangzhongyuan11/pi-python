@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Coroutine, Iterable, Sequence
 from typing import Any
 
 from pi_ai import (
@@ -19,17 +19,21 @@ from pi_ai import (
 from .cancellation import CancellationController, RunCancellation
 from .context import AgentContext, ConvertToLlm, TransformContext
 from .events import (
+    AgentEndEvent,
     AgentEvent,
     MessageEndEvent,
+    MessageStartEvent,
     MessageUpdateEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
 )
+from .listeners import AgentEventListener, AgentListenerRegistry
 from .loop import AgentLoopConfig, run_agent_loop
 from .messages import AgentMessage, default_convert_to_llm
 from .queues import PendingMessageQueue, QueueMode
 from .state import AgentState
+from .stream_function import get_default_stream_function
 from .tool_pipeline import AfterToolCallHook, BeforeToolCallHook
 from .tools import AgentTool, ToolExecutionMode
 
@@ -43,7 +47,7 @@ class Agent:
         self,
         *,
         model: Model,
-        stream_function: StreamFunction,
+        stream_function: StreamFunction | None = None,
         system_prompt: str = "",
         thinking_level: ModelThinkingLevel = "off",
         tools: Iterable[AgentTool[Any, Any]] = (),
@@ -59,7 +63,9 @@ class Agent:
         clock: Callable[[], int] | None = None,
     ) -> None:
         self._model = model
-        self._stream_function = stream_function
+        self._stream_function = (
+            stream_function if stream_function is not None else get_default_stream_function()
+        )
         self._system_prompt = system_prompt
         self._thinking_level: ModelThinkingLevel = thinking_level
         self._tools = tuple(tools)
@@ -74,6 +80,7 @@ class Agent:
         self._steering_queue = PendingMessageQueue(mode=steering_mode)
         self._follow_up_queue = PendingMessageQueue(mode=follow_up_mode)
         self._cancellation = CancellationController()
+        self._listeners = AgentListenerRegistry()
         self._is_streaming = False
         self._streaming_message: AssistantMessage | None = None
         self._pending_tool_calls: set[str] = set()
@@ -120,6 +127,12 @@ class Agent:
     def abort(self) -> None:
         self._cancellation.abort()
 
+    def subscribe(self, listener: AgentEventListener) -> Callable[[], None]:
+        return self._listeners.subscribe(listener)
+
+    def wait_for_idle(self) -> Coroutine[Any, Any, None]:
+        return self._cancellation.wait_for_idle()
+
     async def prompt(self, prompt: str | AgentMessage | Sequence[AgentMessage]) -> None:
         if self._is_streaming:
             raise RuntimeError(
@@ -132,7 +145,7 @@ class Agent:
         self._streaming_message = None
         self._error_message = None
         try:
-            result = await run_agent_loop(
+            await run_agent_loop(
                 prompts,
                 AgentContext(
                     system_prompt=self._system_prompt,
@@ -155,8 +168,8 @@ class Agent:
                     clock=self._clock,
                 ),
             )
-            self._messages.extend(result)
         finally:
+            await self._listeners.wait_for_pending()
             self._is_streaming = False
             self._streaming_message = None
             self._pending_tool_calls.clear()
@@ -177,21 +190,30 @@ class Agent:
     async def _drain_follow_up(self) -> tuple[AgentMessage, ...]:
         return self._follow_up_queue.drain()
 
-    def _process_event(self, run: RunCancellation, event: AgentEvent) -> None:
+    async def _process_event(self, run: RunCancellation, event: AgentEvent) -> None:
         if isinstance(event, MessageUpdateEvent | ToolExecutionUpdateEvent):
             if not self._cancellation.accepts_update(run):
                 return
         elif not self._cancellation.accepts(run):
             return
-        if isinstance(event, MessageUpdateEvent):
+        if isinstance(event, MessageStartEvent):
+            self._streaming_message = (
+                event.message if isinstance(event.message, AssistantMessage) else None
+            )
+        elif isinstance(event, MessageUpdateEvent):
             self._streaming_message = event.message
-        elif isinstance(event, MessageEndEvent) and isinstance(event.message, AssistantMessage):
+        elif isinstance(event, MessageEndEvent):
             self._streaming_message = None
-            self._error_message = event.message.error_message
+            self._messages.append(event.message)
+            if isinstance(event.message, AssistantMessage):
+                self._error_message = event.message.error_message
         elif isinstance(event, ToolExecutionStartEvent):
             self._pending_tool_calls.add(event.tool_call_id)
         elif isinstance(event, ToolExecutionEndEvent):
             self._pending_tool_calls.discard(event.tool_call_id)
+        elif isinstance(event, AgentEndEvent):
+            self._streaming_message = None
+        await self._listeners.emit(event, run.abort_event)
 
 
 __all__ = ["Agent"]
