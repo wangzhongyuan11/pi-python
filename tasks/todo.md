@@ -60,7 +60,7 @@ G13 先运行 G0-FINAL，再运行 `uv run --frozen pytest --cov --cov-branch te
 | [x] P0-T17 | 依赖清单输入；输出仅针对受控清单的更新 PR 配置 | Python/GitHub Actions dependencies；P0-T14 | `.github/dependabot.yml` | 配置校验失败 → 最小 Dependabot policy | Intentional divergence | `git diff --check -- .github/dependabot.yml` / G0-CORE | `P0-T17: automate dependency update proposals` |
 | [x] P0-T18 | wheel+sdist 输入；输出五包与逐字相同 MIT notice，拒绝缺失/重复 artifact | build metadata；P0-T09,P0-T10,P0-T14 | `scripts/verify_distribution.py`, `tests/test_distribution.py`, `.github/workflows/ci.yml` | 缺 sdist/namespace/notice 红测 → 双 artifact verifier 并接入 CI | Intentional divergence | `uv build --no-sources && uv run --frozen pytest tests/test_distribution.py && uv run --frozen python scripts/verify_distribution.py` / G0-FINAL | `P0-T18: verify distribution artifacts in ci` |
 | [x] P0-T19 | 已冻结仓库状态输入；输出准确 README、CHANGELOG 与贡献规则 | P0-T02..P0-T18 | `README.md`, `CHANGELOG.md`, `AGENTS.md` | 状态/命令/边界过期红测 → 只记录已实现事实和执行规则 | Intentional divergence | `git diff --check -- README.md CHANGELOG.md AGENTS.md` / G0-FINAL | `P0-T19: document the phase zero repository` |
-| [ ] P0-T20 | 全绿 Phase 0 输入；输出远端 main、required checks、禁止直推并停止 | P0-T02..P0-T19 | Git/GitHub 设置（无源码文件） | 远端/保护查询失败 → push main、设置规则、回读验证 | Supported | `git status --porcelain` 与 GitHub ruleset 查询 / G0-FINAL | `P0-T20: complete phase zero bootstrap`（无空提交） |
+| [x] P0-T20 | 全绿 Phase 0 输入；输出远端 main 并记录用户对分支保护的明确豁免 | P0-T02..P0-T19；用户于 2026-08-21 明确决定不启用保护 | `docs/decisions/0004-development-workflow.md`, `tasks/todo.md` | 远端/本地门禁查询失败 → push main、验证 CI 与 secret scan、记录保护豁免 | Intentional divergence | `git status --porcelain` 与远端 CI/secret scan 成功状态 / G0-FINAL | `P0-T20: record the phase zero protection waiver` |
 
 ## Phase 1：`pi_telemetry` 与 `pi_ai`
 

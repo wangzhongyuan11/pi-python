@@ -39,6 +39,12 @@
 - 不使用破坏性 reset/checkout，不擅自 commit、push 或创建 PR。
 - Phase gate 通过后才进入下一阶段；发布候选必须从仓库外、全新 HOME 安装 wheel 验证。
 
+### Phase 0 远端保护豁免
+
+- Phase 0 代码、CI 和 secret scan 已直接建立并推送到远端 `main`。
+- 2026-08-21，用户明确决定不启用 GitHub required checks 和禁止直推规则。
+- 该豁免只改变远端治理设置；原子任务、本地门禁、CI 矩阵和每阶段停止验收规则继续执行。
+
 ## 源码证据
 
 - 上游 `npm run check` 包含 `biome check --write`，会改写仓库：`D:\pi\package.json:L18 @ e14afc648`。
