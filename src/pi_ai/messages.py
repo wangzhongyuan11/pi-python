@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from .usage import Usage
+
 type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
 type StopReason = Literal["pending", "stop", "length", "toolUse", "error", "aborted", "deferred"]
@@ -86,7 +88,7 @@ class AssistantMessage:
     api: str
     provider: str
     model: str
-    usage: JsonObject
+    usage: Usage
     stop_reason: StopReason
     timestamp: int
     response_model: str | None = None
@@ -107,7 +109,7 @@ class ToolResultMessage:
     is_error: bool
     timestamp: int
     details: JsonValue = None
-    usage: JsonObject | None = None
+    usage: Usage | None = None
     added_tool_names: tuple[str, ...] | None = None
     role: Literal["toolResult"] = field(default="toolResult", init=False)
 

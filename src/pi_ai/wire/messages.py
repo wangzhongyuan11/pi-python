@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from pydantic.alias_generators import to_camel
 
 from ..messages import (
@@ -22,6 +22,7 @@ from ..messages import (
     ToolResultMessage,
     UserMessage,
 )
+from ..usage import Usage, UsageCost
 
 
 class _WireModel(BaseModel):
@@ -92,6 +93,38 @@ class DeferredHandleWire(_WireModel):
     data: JsonValue = None
 
 
+class UsageCostWire(_WireModel):
+    input: float = Field(ge=0)
+    output: float = Field(ge=0)
+    cache_read: float = Field(ge=0)
+    cache_write: float = Field(ge=0)
+    total: float = Field(ge=0)
+
+
+class UsageWire(_WireModel):
+    input: int = Field(ge=0)
+    output: int = Field(ge=0)
+    cache_read: int = Field(ge=0)
+    cache_write: int = Field(ge=0)
+    cache_write_1h: int | None = Field(
+        default=None,
+        ge=0,
+        validation_alias="cacheWrite1h",
+        serialization_alias="cacheWrite1h",
+    )
+    reasoning: int | None = Field(default=None, ge=0)
+    total_tokens: int = Field(ge=0)
+    cost: UsageCostWire
+
+    @model_validator(mode="after")
+    def validate_subsets(self) -> Self:
+        if self.cache_write_1h is not None and self.cache_write_1h > self.cache_write:
+            raise ValueError("cacheWrite1h cannot exceed cacheWrite")
+        if self.reasoning is not None and self.reasoning > self.output:
+            raise ValueError("reasoning cannot exceed output")
+        return self
+
+
 class UserMessageWire(_WireModel):
     role: Literal["user"]
     content: str | list[TextOrImageWire]
@@ -104,7 +137,7 @@ class AssistantMessageWire(_WireModel):
     api: str
     provider: str
     model: str
-    usage: JsonObject
+    usage: UsageWire
     stop_reason: Literal["pending", "stop", "length", "toolUse", "error", "aborted", "deferred"]
     timestamp: int
     response_model: str | None = None
@@ -122,7 +155,7 @@ class ToolResultMessageWire(_WireModel):
     tool_name: str
     content: list[TextOrImageWire]
     details: JsonValue = None
-    usage: JsonObject | None = None
+    usage: UsageWire | None = None
     added_tool_names: list[str] | None = None
     is_error: bool
     timestamp: int
@@ -242,6 +275,44 @@ def _deferred_to_domain(value: DeferredHandleWire) -> DeferredHandle:
     )
 
 
+def _usage_to_wire(value: Usage) -> UsageWire:
+    return UsageWire(
+        input=value.input,
+        output=value.output,
+        cache_read=value.cache_read,
+        cache_write=value.cache_write,
+        cache_write_1h=value.cache_write_1h,
+        reasoning=value.reasoning,
+        total_tokens=value.total_tokens,
+        cost=UsageCostWire(
+            input=value.cost.input,
+            output=value.cost.output,
+            cache_read=value.cost.cache_read,
+            cache_write=value.cost.cache_write,
+            total=value.cost.total,
+        ),
+    )
+
+
+def _usage_to_domain(value: UsageWire) -> Usage:
+    return Usage(
+        input=value.input,
+        output=value.output,
+        cache_read=value.cache_read,
+        cache_write=value.cache_write,
+        cache_write_1h=value.cache_write_1h,
+        reasoning=value.reasoning,
+        total_tokens=value.total_tokens,
+        cost=UsageCost(
+            input=value.cost.input,
+            output=value.cost.output,
+            cache_read=value.cost.cache_read,
+            cache_write=value.cost.cache_write,
+            total=value.cost.total,
+        ),
+    )
+
+
 def _message_to_wire(message: Message) -> MessageWire:
     if isinstance(message, UserMessage):
         content = (
@@ -264,7 +335,7 @@ def _message_to_wire(message: Message) -> MessageWire:
             api=message.api,
             provider=message.provider,
             model=message.model,
-            usage=message.usage,
+            usage=_usage_to_wire(message.usage),
             stop_reason=message.stop_reason,
             timestamp=message.timestamp,
             response_model=message.response_model,
@@ -281,7 +352,7 @@ def _message_to_wire(message: Message) -> MessageWire:
         tool_name=message.tool_name,
         content=[cast("TextOrImageWire", _content_to_wire(item)) for item in message.content],
         details=message.details,
-        usage=message.usage,
+        usage=None if message.usage is None else _usage_to_wire(message.usage),
         added_tool_names=(
             None if message.added_tool_names is None else list(message.added_tool_names)
         ),
@@ -310,7 +381,7 @@ def _message_to_domain(message: MessageWire) -> Message:
             api=message.api,
             provider=message.provider,
             model=message.model,
-            usage=message.usage,
+            usage=_usage_to_domain(message.usage),
             stop_reason=message.stop_reason,
             timestamp=message.timestamp,
             response_model=message.response_model,
@@ -332,7 +403,7 @@ def _message_to_domain(message: MessageWire) -> Message:
             cast("TextContent | ImageContent", _content_to_domain(item)) for item in message.content
         ),
         details=message.details,
-        usage=message.usage,
+        usage=None if message.usage is None else _usage_to_domain(message.usage),
         added_tool_names=(
             None if message.added_tool_names is None else tuple(message.added_tool_names)
         ),
@@ -366,6 +437,8 @@ __all__ = [
     "ThinkingContentWire",
     "ToolCallWire",
     "ToolResultMessageWire",
+    "UsageCostWire",
+    "UsageWire",
     "UserMessageWire",
     "dump_message",
     "parse_message",

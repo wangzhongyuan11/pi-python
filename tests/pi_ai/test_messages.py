@@ -17,7 +17,19 @@ from pi_ai.messages import (
     ToolResultMessage,
     UserMessage,
 )
+from pi_ai.usage import Usage, UsageCost
 from pi_ai.wire.messages import dump_message, parse_message
+
+
+def _usage() -> Usage:
+    return Usage(
+        input=1,
+        output=2,
+        cache_read=0,
+        cache_write=0,
+        total_tokens=3,
+        cost=UsageCost(input=0.0, output=0.0, cache_read=0.0, cache_write=0.0, total=0.0),
+    )
 
 
 def test_user_message_round_trips_string_and_content_blocks() -> None:
@@ -67,20 +79,7 @@ def test_assistant_message_round_trips_all_content_discriminators() -> None:
         api="openai-completions",
         provider="deepseek",
         model="deepseek-chat",
-        usage={
-            "input": 1,
-            "output": 2,
-            "cacheRead": 0,
-            "cacheWrite": 0,
-            "totalTokens": 3,
-            "cost": {
-                "input": 0.0,
-                "output": 0.0,
-                "cacheRead": 0.0,
-                "cacheWrite": 0.0,
-                "total": 0.0,
-            },
-        },
+        usage=_usage(),
         stop_reason="toolUse",
         timestamp=3,
         response_model="deepseek-v4",
@@ -141,7 +140,7 @@ def test_tool_result_round_trips_camel_case_and_json_details() -> None:
         is_error=False,
         timestamp=4,
         details={"lines": [1, 2]},
-        usage={"input": 0, "output": 1},
+        usage=_usage(),
         added_tool_names=("write", "edit"),
     )
 
