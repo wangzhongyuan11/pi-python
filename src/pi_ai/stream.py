@@ -107,12 +107,18 @@ class AssistantStream:
             self._require_open_block(event.content_index, "toolcall")
             del self._open_blocks[event.content_index]
         elif isinstance(event, DoneEvent):
-            self._validate_terminal_reason(event.reason, event.message)
+            self._validate_terminal_reason(event.reason, event.message, require_closed=True)
         else:
-            self._validate_terminal_reason(event.reason, event.error)
+            self._validate_terminal_reason(event.reason, event.error, require_closed=False)
 
-    def _validate_terminal_reason(self, reason: str, message: AssistantMessage) -> None:
-        if self._open_blocks:
+    def _validate_terminal_reason(
+        self,
+        reason: str,
+        message: AssistantMessage,
+        *,
+        require_closed: bool,
+    ) -> None:
+        if require_closed and self._open_blocks:
             raise StreamProtocolError("assistant stream cannot terminate with open content blocks")
         if message.stop_reason != reason:
             raise StreamProtocolError(
