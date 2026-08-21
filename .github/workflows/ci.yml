@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          - "3.12"
+          - "3.13"
+    env:
+      CI: "1"
+      DEEPSEEK_API_KEY: invalid-ci-placeholder-do-not-use
+      OPENAI_API_KEY: invalid-ci-placeholder-do-not-use
+      PYTHONUTF8: "1"
+      UV_NO_PROGRESS: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          version: "0.9.4"
+
+      - name: Verify lockfile is current
+        run: uv lock --check
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --all-groups
+
+      - name: Ruff lint
+        run: uv run --frozen ruff check .
+
+      - name: Ruff format
+        run: uv run --frozen ruff format --check .
+
+      - name: Pyright
+        run: uv run --frozen pyright
+
+      - name: Offline tests
+        run: uv run --frozen pytest tests -m "not live_provider and not network"
+
+      - name: Build wheel and source distribution
+        run: uv build --no-sources
+
+      - name: Audit installed dependencies
+        run: uv run --frozen pip-audit --local
