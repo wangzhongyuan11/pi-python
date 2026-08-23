@@ -26,6 +26,7 @@ from .agent_session_events import (
     EntryAppendedEvent,
 )
 from .agent_session_runtime import RuntimeReason
+from .context_overflow import OverflowRecovery, is_context_overflow
 from .retry import RetryPolicy, Sleep, is_retryable_assistant_error
 from .services import ProductServices
 from .session.manager import SessionManager
@@ -50,6 +51,7 @@ class AgentSession:
         "_entry_id_factory",
         "_listeners",
         "_on_close",
+        "_overflow_recovery",
         "_retry_cancel",
         "_retry_policy",
         "_sleep",
@@ -71,6 +73,7 @@ class AgentSession:
         on_close: Callable[[RuntimeReason], None] | None = None,
         retry_policy: RetryPolicy | None = None,
         sleep: Sleep = asyncio.sleep,
+        overflow_recovery: OverflowRecovery | None = None,
     ) -> None:
         self.agent = agent
         self.session_manager = session_manager
@@ -81,6 +84,7 @@ class AgentSession:
         self._retry_policy = retry_policy or RetryPolicy()
         self._sleep = sleep
         self._retry_cancel = asyncio.Event()
+        self._overflow_recovery = overflow_recovery
         self._listeners: list[AgentSessionEventListener] = []
         self._closed = False
         self._unsubscribe_agent = agent.subscribe(self._handle_agent_event)
@@ -112,8 +116,21 @@ class AgentSession:
         baseline = self.agent.state.messages
         self._retry_cancel = asyncio.Event()
         attempt = 0
+        overflow_attempted = False
         while True:
             await self.agent.prompt(prompt)
+            last = self.agent.state.messages[-1] if self.agent.state.messages else None
+            if (
+                isinstance(last, AssistantMessage)
+                and is_context_overflow(last)
+                and self._overflow_recovery is not None
+                and not overflow_attempted
+            ):
+                overflow_attempted = True
+                self.agent.restore_messages(baseline)
+                if await self._overflow_recovery():
+                    continue
+                return
             error = self._retryable_error()
             if error is None:
                 if attempt:
