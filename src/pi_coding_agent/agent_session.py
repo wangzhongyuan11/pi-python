@@ -18,8 +18,15 @@ from pi_agent import (
 from pi_ai import AssistantMessage, ToolResultMessage, UserMessage
 from pi_ai.wire.messages import dump_message
 
-from .agent_session_events import AgentSessionEvent, AgentSessionEventListener, EntryAppendedEvent
+from .agent_session_events import (
+    AgentSessionEvent,
+    AgentSessionEventListener,
+    AutoRetryEndEvent,
+    AutoRetryStartEvent,
+    EntryAppendedEvent,
+)
 from .agent_session_runtime import RuntimeReason
+from .retry import RetryPolicy, Sleep, is_retryable_assistant_error
 from .services import ProductServices
 from .session.manager import SessionManager
 from .session.models import MessageEntry
@@ -43,6 +50,9 @@ class AgentSession:
         "_entry_id_factory",
         "_listeners",
         "_on_close",
+        "_retry_cancel",
+        "_retry_policy",
+        "_sleep",
         "_timestamp_factory",
         "_unsubscribe_agent",
         "agent",
@@ -59,6 +69,8 @@ class AgentSession:
         entry_id_factory: Callable[[], str] = _entry_id,
         timestamp_factory: Callable[[], str] = _timestamp,
         on_close: Callable[[RuntimeReason], None] | None = None,
+        retry_policy: RetryPolicy | None = None,
+        sleep: Sleep = asyncio.sleep,
     ) -> None:
         self.agent = agent
         self.session_manager = session_manager
@@ -66,6 +78,9 @@ class AgentSession:
         self._entry_id_factory = entry_id_factory
         self._timestamp_factory = timestamp_factory
         self._on_close = on_close
+        self._retry_policy = retry_policy or RetryPolicy()
+        self._sleep = sleep
+        self._retry_cancel = asyncio.Event()
         self._listeners: list[AgentSessionEventListener] = []
         self._closed = False
         self._unsubscribe_agent = agent.subscribe(self._handle_agent_event)
@@ -94,9 +109,56 @@ class AgentSession:
 
     async def prompt(self, prompt: str | AgentMessage | Sequence[AgentMessage]) -> None:
         self._ensure_open()
-        await self.agent.prompt(prompt)
+        baseline = self.agent.state.messages
+        self._retry_cancel = asyncio.Event()
+        attempt = 0
+        while True:
+            await self.agent.prompt(prompt)
+            error = self._retryable_error()
+            if error is None:
+                if attempt:
+                    await self._emit(
+                        AutoRetryEndEvent(success=True, attempt=attempt), asyncio.Event()
+                    )
+                return
+            if (
+                not self._retry_policy.enabled
+                or attempt >= self._retry_policy.max_retries
+                or self._retry_cancel.is_set()
+            ):
+                if attempt:
+                    await self._emit(
+                        AutoRetryEndEvent(success=False, attempt=attempt, final_error=error),
+                        asyncio.Event(),
+                    )
+                return
+            attempt += 1
+            delay = self._retry_policy.delay(attempt)
+            await self._emit(
+                AutoRetryStartEvent(
+                    attempt=attempt,
+                    max_attempts=self._retry_policy.max_retries,
+                    delay_seconds=delay,
+                    error_message=error,
+                ),
+                asyncio.Event(),
+            )
+            await self._sleep(delay)
+            if self._retry_cancel.is_set():
+                await self._emit(
+                    AutoRetryEndEvent(
+                        success=False, attempt=attempt, final_error="retry cancelled"
+                    ),
+                    asyncio.Event(),
+                )
+                return
+            self.agent.restore_messages(baseline)
+
+    def cancel_retry(self) -> None:
+        self._retry_cancel.set()
 
     def abort(self) -> None:
+        self.cancel_retry()
         self.agent.abort()
 
     async def wait_for_idle(self) -> None:
@@ -144,6 +206,14 @@ class AgentSession:
     def _ensure_open(self) -> None:
         if self._closed:
             raise AgentSessionClosedError("AgentSession is closed")
+
+    def _retryable_error(self) -> str | None:
+        if not self.agent.state.messages:
+            return None
+        message = self.agent.state.messages[-1]
+        if not isinstance(message, AssistantMessage) or not is_retryable_assistant_error(message):
+            return None
+        return message.error_message or "provider turn failed"
 
 
 __all__ = ["AgentSession", "AgentSessionClosedError"]

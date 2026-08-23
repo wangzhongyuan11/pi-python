@@ -116,6 +116,12 @@ class Agent:
         self.clear_steering_queue()
         self.clear_follow_up_queue()
 
+    def restore_messages(self, messages: Iterable[AgentMessage]) -> None:
+        if self._is_streaming:
+            raise RuntimeError("cannot restore messages while Agent is streaming")
+        self._messages = list(messages)
+        self._error_message = None
+
     @property
     def has_queued_messages(self) -> bool:
         return self._steering_queue.has_items or self._follow_up_queue.has_items
