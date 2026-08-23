@@ -18,11 +18,16 @@ from ...events import (
     ThinkingDeltaEvent,
     ThinkingEndEvent,
     ThinkingStartEvent,
+    ToolCallDeltaEvent,
+    ToolCallEndEvent,
+    ToolCallStartEvent,
 )
 from ...messages import AssistantMessage, StopReason, TextContent, ThinkingContent
 from ...models import Model
 from ...stream import AssistantStream
 from ...usage import Usage, UsageCost
+
+from .tool_calls import StreamingToolCall, ToolCallAssembler
 
 
 def _field(value: object, name: str) -> object | None:
@@ -119,6 +124,9 @@ async def _produce(
     stream.push(AssistantMessageStartEvent(partial=partial))
     thinking_index: int | None = None
     text_index: int | None = None
+    tool_calls = ToolCallAssembler()
+    tool_content_indices: dict[int, int] = {}
+    tool_buffers: dict[int, StreamingToolCall] = {}
     raw_finish_reason: str | None = None
     stop_reason: StopReason = "pending"
     error_message: str | None = None
@@ -216,10 +224,55 @@ async def _produce(
                     TextDeltaEvent(content_index=text_index, delta=content, partial=partial)
                 )
 
+            raw_tool_calls = _field(delta, "tool_calls")
+            if isinstance(raw_tool_calls, list | tuple):
+                for raw_call in cast("Sequence[object]", raw_tool_calls):
+                    call, created, arguments_delta = tool_calls.consume(raw_call)
+                    if created:
+                        content_index = len(partial.content)
+                        tool_content_indices[call.stream_index] = content_index
+                        tool_buffers[call.stream_index] = call
+                        partial = _replace_message(
+                            partial,
+                            content=(*partial.content, call.partial()),
+                        )
+                        stream.push(
+                            ToolCallStartEvent(content_index=content_index, partial=partial)
+                        )
+                    else:
+                        content_index = tool_content_indices[call.stream_index]
+                        partial = _replace_message(
+                            partial,
+                            content=(
+                                *partial.content[:content_index],
+                                call.partial(),
+                                *partial.content[content_index + 1 :],
+                            ),
+                        )
+                    if arguments_delta:
+                        stream.push(
+                            ToolCallDeltaEvent(
+                                content_index=content_index,
+                                delta=arguments_delta,
+                                partial=partial,
+                            )
+                        )
+
         if stop_reason == "pending":
             raise RuntimeError("DeepSeek stream ended without finish_reason")
         if stop_reason == "error":
             raise RuntimeError(error_message or "DeepSeek stream failed")
+
+        for stream_index, content_index in tool_content_indices.items():
+            call = tool_buffers[stream_index].finalize()
+            partial = _replace_message(
+                partial,
+                content=(
+                    *partial.content[:content_index],
+                    call,
+                    *partial.content[content_index + 1 :],
+                ),
+            )
 
         for index, block in enumerate(partial.content):
             if isinstance(block, ThinkingContent):
@@ -228,6 +281,10 @@ async def _produce(
                 )
             elif isinstance(block, TextContent):
                 stream.push(TextEndEvent(content_index=index, content=block.text, partial=partial))
+            else:
+                stream.push(
+                    ToolCallEndEvent(content_index=index, tool_call=block, partial=partial)
+                )
 
         completed = _replace_message(
             partial,
