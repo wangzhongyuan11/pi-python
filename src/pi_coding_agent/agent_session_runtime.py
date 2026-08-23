@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from .session.manager import SessionManager
+from .session.recovery import recover_unmatched_tool_calls
 
 type RuntimeReason = Literal["initial", "new", "resume", "fork", "switch", "quit"]
 
@@ -71,6 +72,7 @@ class AgentSessionRuntime[SessionT: RuntimeSession, ServicesT]:
             reason="initial",
             generation=0,
         )
+        recover_unmatched_tool_calls(session_manager)
         components = await factory(target)
         return cls(factory, _Binding(target=target, components=components))
 
@@ -142,6 +144,7 @@ class AgentSessionRuntime[SessionT: RuntimeSession, ServicesT]:
             generation=generation,
         )
         try:
+            recover_unmatched_tool_calls(session_manager)
             components = await self._factory(target)
         except BaseException:
             self._closed = True
