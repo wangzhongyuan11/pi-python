@@ -48,6 +48,7 @@ from .models import (
     models_are_equal,
 )
 from .provider import CredentialResolver, Provider, StreamFunction, StreamOptions
+from .providers.deepseek import DeepSeekProvider, create_deepseek_provider
 from .stream import (
     AssistantStream,
     StreamConsumedError,
@@ -87,6 +88,7 @@ __all__ = [
     "Context",
     "CredentialResolver",
     "DeferredHandle",
+    "DeepSeekProvider",
     "DiagnosticErrorInfo",
     "DoneEvent",
     "ErrorEvent",
@@ -131,6 +133,7 @@ __all__ = [
     "__version__",
     "clamp_thinking_level",
     "create_assistant_stream",
+    "create_deepseek_provider",
     "decode_event_json",
     "decode_message_json",
     "encode_event_json",

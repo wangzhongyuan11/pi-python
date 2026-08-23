@@ -194,6 +194,7 @@ class DeepSeekProvider:
         thinking_level: ModelThinkingLevel = "high",
         max_request_retries: int = 0,
         timeout_seconds: float = 300.0,
+        max_tokens: int | None = None,
         sleep: SleepFunction = asyncio.sleep,
         timestamp_ms: Callable[[], int] = lambda: int(time.time() * 1000),
     ) -> None:
@@ -203,11 +204,14 @@ class DeepSeekProvider:
             raise ValueError("max_request_retries must be non-negative")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if max_tokens is not None and max_tokens <= 0:
+            raise ValueError("max_tokens must be positive")
         self._credential_resolver = credential_resolver
         self._client_factory = client_factory
         self._thinking_level: ModelThinkingLevel = cast("ModelThinkingLevel", thinking_level)
         self._max_request_retries = max_request_retries
         self._timeout_seconds = timeout_seconds
+        self._max_tokens = max_tokens
         self._sleep = sleep
         self._timestamp_ms = timestamp_ms
 
@@ -258,6 +262,7 @@ class DeepSeekProvider:
                 model,
                 context,
                 thinking_level=self._thinking_level,
+                max_tokens=self._max_tokens,
             )
             client = self._client_factory(credential, model.base_url, self._timeout_seconds)
 
@@ -354,4 +359,26 @@ def _consume_task_exception(task: asyncio.Task[None]) -> None:
         task.exception()
 
 
-__all__ = ["DeepSeekClientPort", "DeepSeekProvider", "create_deepseek_client"]
+def create_deepseek_provider(
+    *,
+    credential_resolver: CredentialResolver,
+    thinking_level: ModelThinkingLevel = "high",
+    max_request_retries: int = 0,
+    timeout_seconds: float = 300.0,
+    max_tokens: int | None = None,
+) -> DeepSeekProvider:
+    return DeepSeekProvider(
+        credential_resolver=credential_resolver,
+        thinking_level=thinking_level,
+        max_request_retries=max_request_retries,
+        timeout_seconds=timeout_seconds,
+        max_tokens=max_tokens,
+    )
+
+
+__all__ = [
+    "DeepSeekClientPort",
+    "DeepSeekProvider",
+    "create_deepseek_client",
+    "create_deepseek_provider",
+]

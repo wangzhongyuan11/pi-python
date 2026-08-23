@@ -125,11 +125,14 @@ def build_deepseek_request(
     context: Context,
     *,
     thinking_level: ModelThinkingLevel = "high",
+    max_tokens: int | None = None,
 ) -> DeepSeekRequest:
     if model.provider != "deepseek":
         raise ValueError("DeepSeek request conversion requires a DeepSeek model")
     if thinking_level not in ("off", "high", "max"):
         raise ValueError("DeepSeek thinking level must be off, high, or max")
+    if max_tokens is not None and (max_tokens <= 0 or max_tokens > model.max_tokens):
+        raise ValueError("DeepSeek max_tokens must be positive and within the model limit")
 
     _reject_images(context, model)
     request: DeepSeekRequest = {
@@ -137,10 +140,8 @@ def build_deepseek_request(
         "messages": _convert_messages(context),
         "stream": True,
         "stream_options": {"include_usage": True},
-        "max_tokens": model.max_tokens,
-        "extra_body": {
-            "thinking": {"type": "disabled" if thinking_level == "off" else "enabled"}
-        },
+        "max_tokens": model.max_tokens if max_tokens is None else max_tokens,
+        "extra_body": {"thinking": {"type": "disabled" if thinking_level == "off" else "enabled"}},
     }
     if thinking_level != "off":
         request["reasoning_effort"] = thinking_level
