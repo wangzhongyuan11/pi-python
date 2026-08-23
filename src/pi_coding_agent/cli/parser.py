@@ -5,8 +5,7 @@ from __future__ import annotations
 import argparse
 
 
-def create_parser(*, version: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="pi-python")
+def _add_common(parser: argparse.ArgumentParser, *, version: str) -> None:
     parser.add_argument("--version", "-v", action="version", version=f"pi-python {version}")
     parser.add_argument(
         "--list-models",
@@ -17,6 +16,11 @@ def create_parser(*, version: str) -> argparse.ArgumentParser:
     )
     parser.add_argument("--api-key", help=argparse.SUPPRESS)
     parser.add_argument("--env-file", type=str, help="read DEEPSEEK_API_KEY from this file")
+
+
+def create_parser(*, version: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="pi-python")
+    _add_common(parser, version=version)
 
     commands = parser.add_subparsers(dest="command")
     auth = commands.add_parser("auth", help="inspect DeepSeek credential readiness")
@@ -37,4 +41,26 @@ def create_parser(*, version: str) -> argparse.ArgumentParser:
     return parser
 
 
-__all__ = ["create_parser"]
+def create_run_parser(*, version: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="pi-python")
+    _add_common(parser, version=version)
+    parser.add_argument("--mode", choices=("text", "json"), default="text")
+    parser.add_argument("--print", "-p", action="store_true", dest="print_mode")
+    parser.add_argument("--provider", default="deepseek")
+    parser.add_argument("--model")
+    parser.add_argument(
+        "--thinking",
+        choices=("off", "minimal", "low", "medium", "high", "xhigh", "max"),
+        default="high",
+    )
+    sessions = parser.add_mutually_exclusive_group()
+    sessions.add_argument("--no-session", action="store_true")
+    sessions.add_argument("--session")
+    sessions.add_argument("--resume", "-r", action="store_true")
+    sessions.add_argument("--continue", "-c", action="store_true", dest="continue_session")
+    parser.add_argument("--session-dir")
+    parser.add_argument("messages", nargs="*")
+    return parser
+
+
+__all__ = ["create_parser", "create_run_parser"]

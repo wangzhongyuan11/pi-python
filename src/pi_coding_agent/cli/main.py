@@ -10,15 +10,19 @@ import sys
 from collections.abc import Mapping, Sequence
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, cast
 
 from pi_ai.credentials import CredentialResolutionError
 from pi_ai.providers.deepseek import DEEPSEEK_MODELS, DEFAULT_DEEPSEEK_MODEL
 from pi_coding_agent import __version__
 
 from ..deepseek_credentials import DeepSeekCredentialResolver
+from ..model_runtime import ModelRuntime, UnknownModelError
+from ..providers import UnknownProviderError
+from ..session.errors import SessionError
 from .import_session import run_import_session
-from .parser import create_parser
+from .parser import create_parser, create_run_parser
+from .run import HeadlessOptions, run_headless
 
 
 def _resolver(
@@ -91,21 +95,28 @@ def main(
     stderr: TextIO | None = None,
     cwd: Path | None = None,
     environ: Mapping[str, str] | None = None,
+    model_runtime: ModelRuntime | None = None,
 ) -> int:
     output = sys.stdout if stdout is None else stdout
     errors = sys.stderr if stderr is None else stderr
     runtime_cwd = Path.cwd() if cwd is None else cwd.resolve()
     runtime_environ = os.environ if environ is None else environ
-    parser = create_parser(version=__version__)
+    raw_arguments = list(sys.argv[1:] if argv is None else argv)
+    command_mode = bool(raw_arguments and raw_arguments[0] in {"auth", "import-pi-session"})
+    parser = (
+        create_parser(version=__version__)
+        if command_mode
+        else create_run_parser(version=__version__)
+    )
     try:
         with redirect_stdout(output), redirect_stderr(errors):
-            arguments = parser.parse_args(argv)
+            arguments = parser.parse_args(raw_arguments)
     except SystemExit as error:
         return error.code if isinstance(error.code, int) else int(error.code is not None)
 
     if arguments.list_models is not None:
         return _list_models(arguments.list_models, output)
-    if arguments.command == "auth":
+    if command_mode and arguments.command == "auth":
         return _auth(
             arguments,
             stdout=output,
@@ -113,13 +124,54 @@ def main(
             cwd=runtime_cwd,
             environ=runtime_environ,
         )
-    if arguments.command == "import-pi-session":
+    if command_mode and arguments.command == "import-pi-session":
         return run_import_session(
             arguments.source,
             session_dir=arguments.session_dir,
             stdout=output,
             stderr=errors,
         )
+    messages = cast("list[str]", arguments.messages)
+    if not messages:
+        parser.print_help(output)
+        return 0
+    session_dir = None
+    if arguments.session_dir:
+        candidate = Path(arguments.session_dir)
+        session_dir = (candidate if candidate.is_absolute() else runtime_cwd / candidate).resolve()
+    resolver = _resolver(arguments, cwd=runtime_cwd, environ=runtime_environ)
+    try:
+        return asyncio.run(
+            run_headless(
+                HeadlessOptions(
+                    cwd=runtime_cwd,
+                    prompt=" ".join(messages),
+                    mode=arguments.mode,
+                    credential_resolver=resolver,
+                    provider_id=arguments.provider,
+                    model_id=arguments.model,
+                    thinking_level=arguments.thinking,
+                    no_session=arguments.no_session,
+                    session=arguments.session,
+                    resume=arguments.resume or arguments.continue_session,
+                    session_dir=session_dir,
+                    model_runtime=model_runtime,
+                ),
+                stdout=output,
+                stderr=errors,
+            )
+        )
+    except KeyboardInterrupt:
+        return 130
+    except (
+        CredentialResolutionError,
+        SessionError,
+        UnknownModelError,
+        UnknownProviderError,
+        ValueError,
+    ) as error:
+        errors.write(f"{error}\n")
+        return 1
     parser.print_help(output)
     return 0
 
