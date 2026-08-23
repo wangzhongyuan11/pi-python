@@ -17,6 +17,7 @@ from pi_ai.providers.deepseek import DEEPSEEK_MODELS, DEFAULT_DEEPSEEK_MODEL
 from pi_coding_agent import __version__
 
 from ..deepseek_credentials import DeepSeekCredentialResolver
+from .import_session import run_import_session
 from .parser import create_parser
 
 
@@ -111,6 +112,13 @@ def main(
             stderr=errors,
             cwd=runtime_cwd,
             environ=runtime_environ,
+        )
+    if arguments.command == "import-pi-session":
+        return run_import_session(
+            arguments.source,
+            session_dir=arguments.session_dir,
+            stdout=output,
+            stderr=errors,
         )
     parser.print_help(output)
     return 0

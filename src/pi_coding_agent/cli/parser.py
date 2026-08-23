@@ -28,6 +28,12 @@ def create_parser(*, version: str) -> argparse.ArgumentParser:
         "print-api-key",
         help="explicitly print the resolved DeepSeek API key",
     )
+    importer = commands.add_parser(
+        "import-pi-session",
+        help="validate and import one upstream Session v3 file",
+    )
+    importer.add_argument("source")
+    importer.add_argument("--session-dir")
     return parser
 
 
