@@ -26,8 +26,11 @@ from ...messages import AssistantMessage, StopReason, TextContent, ThinkingConte
 from ...models import Model
 from ...stream import AssistantStream
 from ...usage import Usage, UsageCost
+from .tool_calls import StreamingToolCall, ToolCallAssembler, ToolCallAssemblyError
 
-from .tool_calls import StreamingToolCall, ToolCallAssembler
+
+class DeepSeekStreamProtocolError(RuntimeError):
+    """Raised for malformed stream state without exposing transport details."""
 
 
 def _field(value: object, name: str) -> object | None:
@@ -176,12 +179,10 @@ async def _produce(
                             ),
                         ),
                     )
-                    stream.push(
-                        ThinkingStartEvent(content_index=thinking_index, partial=partial)
-                    )
+                    stream.push(ThinkingStartEvent(content_index=thinking_index, partial=partial))
                 current = partial.content[thinking_index]
                 if not isinstance(current, ThinkingContent):
-                    raise TypeError("DeepSeek thinking stream state is invalid")
+                    raise DeepSeekStreamProtocolError("DeepSeek thinking stream state is invalid")
                 updated = replace(current, thinking=current.thinking + reasoning)
                 partial = _replace_message(
                     partial,
@@ -210,7 +211,7 @@ async def _produce(
                     stream.push(TextStartEvent(content_index=text_index, partial=partial))
                 current = partial.content[text_index]
                 if not isinstance(current, TextContent):
-                    raise TypeError("DeepSeek text stream state is invalid")
+                    raise DeepSeekStreamProtocolError("DeepSeek text stream state is invalid")
                 updated = replace(current, text=current.text + content)
                 partial = _replace_message(
                     partial,
@@ -259,9 +260,9 @@ async def _produce(
                         )
 
         if stop_reason == "pending":
-            raise RuntimeError("DeepSeek stream ended without finish_reason")
+            raise DeepSeekStreamProtocolError("DeepSeek stream ended without finish_reason")
         if stop_reason == "error":
-            raise RuntimeError(error_message or "DeepSeek stream failed")
+            raise DeepSeekStreamProtocolError(error_message or "DeepSeek stream failed")
 
         for stream_index, content_index in tool_content_indices.items():
             call = tool_buffers[stream_index].finalize()
@@ -282,9 +283,7 @@ async def _produce(
             elif isinstance(block, TextContent):
                 stream.push(TextEndEvent(content_index=index, content=block.text, partial=partial))
             else:
-                stream.push(
-                    ToolCallEndEvent(content_index=index, tool_call=block, partial=partial)
-                )
+                stream.push(ToolCallEndEvent(content_index=index, tool_call=block, partial=partial))
 
         completed = _replace_message(
             partial,
@@ -292,10 +291,19 @@ async def _produce(
             raw_stop_reason=raw_finish_reason,
         )
         if stop_reason not in ("stop", "length", "toolUse", "deferred"):
-            raise RuntimeError("DeepSeek stream produced an invalid terminal reason")
+            raise DeepSeekStreamProtocolError("DeepSeek stream produced an invalid terminal reason")
         stream.push(DoneEvent(reason=stop_reason, message=completed))
     except Exception as error:
-        failed = _replace_message(partial, stop_reason="error", error_message=str(error))
+        error_message = (
+            str(error)
+            if isinstance(error, DeepSeekStreamProtocolError | ToolCallAssemblyError)
+            else "DeepSeek stream failed"
+        )
+        failed = _replace_message(
+            partial,
+            stop_reason="error",
+            error_message=error_message,
+        )
         stream.push(ErrorEvent(reason="error", error=failed))
 
 
@@ -317,4 +325,4 @@ def _consume_task_exception(task: asyncio.Task[None]) -> None:
         task.exception()
 
 
-__all__ = ["adapt_deepseek_stream"]
+__all__ = ["DeepSeekStreamProtocolError", "adapt_deepseek_stream"]
