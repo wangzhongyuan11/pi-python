@@ -32,6 +32,10 @@ class EntryValidationError(SessionGraphError):
         super().__init__(reason)
 
 
+class SessionNotFoundError(SessionError):
+    """No Session matched an exact path or id."""
+
+
 class InvalidSessionIdError(SessionError):
     """A caller supplied an unsafe or malformed Session id."""
 
@@ -42,4 +46,5 @@ __all__ = [
     "SessionCorruptError",
     "SessionError",
     "SessionGraphError",
+    "SessionNotFoundError",
 ]
