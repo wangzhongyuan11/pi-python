@@ -4,6 +4,19 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+## 0.2.0 - 2026-08-24
+
+### Phase 4–6
+
+- Add the reviewed DeepSeek V4 Flash/Pro streaming provider, safe credential precedence,
+  explicit request retry controls, and the default Pro model runtime.
+- Add the seven coding tools with atomic mutation, cancellation, deterministic ordering,
+  Bash discovery, output truncation, and hash-verified search binary management.
+- Add AgentSession ownership, cwd-aware lifecycle replacement, async and synchronous SDKs,
+  v3 import, headless text/JSON CLI modes, and conservative unmatched Tool Call recovery.
+- Add the `pi-python` console entry point with model listing, credential readiness checks,
+  explicit key printing, Session selection, and stable exit/output contracts.
+
 ## 0.1.0 - 2026-08-24
 
 ### Phase 1–3

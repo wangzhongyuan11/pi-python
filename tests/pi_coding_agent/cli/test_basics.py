@@ -67,3 +67,15 @@ def test_auth_check_never_prints_key_and_explicit_print_command_does(tmp_path: P
     assert ready == (0, '{"provider":"deepseek","ready":true}\n', "")
     assert secret not in ready[1] + ready[2]
     assert printed == (0, f"{secret}\n", "")
+
+
+def test_global_api_key_before_auth_command_is_not_treated_as_a_prompt(tmp_path: Path) -> None:
+    secret = "explicit-secret"
+
+    result = _run(
+        ["--api-key", secret, "auth", "check", "--json"],
+        cwd=tmp_path,
+    )
+
+    assert result == (0, '{"provider":"deepseek","ready":true}\n', "")
+    assert secret not in result[1] + result[2]

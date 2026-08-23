@@ -9,12 +9,12 @@ import os
 import sys
 from collections.abc import Mapping, Sequence
 from contextlib import redirect_stderr, redirect_stdout
+from importlib.metadata import version
 from pathlib import Path
 from typing import TextIO, cast
 
 from pi_ai.credentials import CredentialResolutionError
 from pi_ai.providers.deepseek import DEEPSEEK_MODELS, DEFAULT_DEEPSEEK_MODEL
-from pi_coding_agent import __version__
 
 from ..deepseek_credentials import DeepSeekCredentialResolver
 from ..model_runtime import ModelRuntime, UnknownModelError
@@ -23,6 +23,22 @@ from ..session.errors import SessionError
 from .import_session import run_import_session
 from .parser import create_parser, create_run_parser
 from .run import HeadlessOptions, run_headless
+
+_GLOBAL_VALUE_OPTIONS = {"--api-key", "--env-file"}
+
+
+def _uses_command_parser(arguments: Sequence[str]) -> bool:
+    index = 0
+    while index < len(arguments):
+        value = arguments[index]
+        if any(value.startswith(f"{option}=") for option in _GLOBAL_VALUE_OPTIONS):
+            index += 1
+            continue
+        if value in _GLOBAL_VALUE_OPTIONS:
+            index += 2
+            continue
+        return value in {"auth", "import-pi-session"}
+    return False
 
 
 def _resolver(
@@ -102,11 +118,11 @@ def main(
     runtime_cwd = Path.cwd() if cwd is None else cwd.resolve()
     runtime_environ = os.environ if environ is None else environ
     raw_arguments = list(sys.argv[1:] if argv is None else argv)
-    command_mode = bool(raw_arguments and raw_arguments[0] in {"auth", "import-pi-session"})
+    command_mode = _uses_command_parser(raw_arguments)
     parser = (
-        create_parser(version=__version__)
+        create_parser(version=version("pi-python"))
         if command_mode
-        else create_run_parser(version=__version__)
+        else create_run_parser(version=version("pi-python"))
     )
     try:
         with redirect_stdout(output), redirect_stderr(errors):
