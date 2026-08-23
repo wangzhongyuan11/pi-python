@@ -12,5 +12,5 @@ PACKAGE_NAMES = ("pi_telemetry", "pi_ai", "pi_agent", "pi_tui", "pi_coding_agent
 def test_package_is_importable_with_distribution_version(package_name: str) -> None:
     package = importlib.import_module(package_name)
 
-    assert package.__version__ == "0.1.0"
+    assert package.__version__ == "0.2.0"
     assert package.__version__ == version("pi-python")

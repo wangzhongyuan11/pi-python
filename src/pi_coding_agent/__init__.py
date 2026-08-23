@@ -15,7 +15,7 @@ from .ports import (
     SessionImporter,
     Settings,
 )
-from .session.importer import import_pi_session
+from .sdk import import_pi_session
 from .session.manager import SessionManager
 from .session.models import ImportResult
 

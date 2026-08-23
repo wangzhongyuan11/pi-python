@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pi-python"
-version = "0.1.0"
+version = "0.2.0"
 description = "A from-scratch Python reimplementation of the Pi coding agent"
 requires-python = ">=3.12"
 license-files = ["THIRD_PARTY_NOTICES.md"]
@@ -12,6 +12,9 @@ dependencies = [
     "openai==3.1.0",
     "pydantic==2.13.4",
 ]
+
+[project.scripts]
+pi-python = "pi_coding_agent.cli.main:main"
 
 [dependency-groups]
 dev = [
