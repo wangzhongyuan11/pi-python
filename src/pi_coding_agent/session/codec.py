@@ -8,7 +8,7 @@ from pydantic import TypeAdapter
 
 from pi_ai import JsonValue
 
-from .models import SessionRecord
+from .models import SessionEntry, SessionHeader, SessionRecord
 
 _RECORD_ADAPTER = TypeAdapter[SessionRecord](SessionRecord)
 
@@ -19,12 +19,12 @@ def parse_record(payload: object) -> SessionRecord:
     return _RECORD_ADAPTER.validate_python(payload)
 
 
-def dump_record(record: SessionRecord) -> dict[str, JsonValue]:
+def dump_record(record: SessionHeader | SessionEntry) -> dict[str, JsonValue]:
     """Serialize a record with the upstream-compatible camelCase field names."""
 
     return cast(
         "dict[str, JsonValue]",
-        record.model_dump(mode="json", by_alias=True, exclude_none=True),
+        record.model_dump(mode="json", by_alias=True, exclude_unset=True),
     )
 
 
