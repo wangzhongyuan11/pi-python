@@ -13,7 +13,9 @@ from .session.importer import import_pi_session
 from .session.models import ImportResult
 
 type ResourceKind = Literal["context", "extension", "prompt", "skill", "theme"]
-type ResourceSource = Literal["builtin", "explicit", "global", "package", "project"]
+type ResourceSource = Literal[
+    "builtin", "compatibility", "explicit", "global", "package", "project"
+]
 
 
 class Settings(Protocol):
