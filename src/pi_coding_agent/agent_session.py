@@ -122,7 +122,7 @@ class AgentSession:
                     )
                 return
             if (
-                not self._retry_policy.enabled
+                not self._retry_policy.allows_turn_retry
                 or attempt >= self._retry_policy.max_retries
                 or self._retry_cancel.is_set()
             ):

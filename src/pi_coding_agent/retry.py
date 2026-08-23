@@ -28,10 +28,21 @@ class RetryPolicy:
     enabled: bool = True
     max_retries: int = 3
     base_delay_seconds: float = 2.0
+    provider_request_retries: int = 0
 
     def __post_init__(self) -> None:
-        if self.max_retries < 0 or self.base_delay_seconds < 0:
+        if self.max_retries < 0 or self.provider_request_retries < 0 or self.base_delay_seconds < 0:
             raise ValueError("retry counts and delays must be non-negative")
+
+    @property
+    def allows_turn_retry(self) -> bool:
+        return self.enabled and self.provider_request_retries == 0
+
+    @property
+    def maximum_total_requests(self) -> int:
+        if self.provider_request_retries:
+            return self.provider_request_retries + 1
+        return self.max_retries + 1 if self.enabled else 1
 
     def delay(self, attempt: int) -> float:
         if attempt < 1:
@@ -46,4 +57,19 @@ def is_retryable_assistant_error(message: AssistantMessage) -> bool:
     return _RETRYABLE.search(error) is not None
 
 
-__all__ = ["RetryPolicy", "Sleep", "is_retryable_assistant_error"]
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RetryAttemptMetadata:
+    provider_attempt: int = 0
+    turn_attempt: int = 0
+
+    @property
+    def total_request_attempt(self) -> int:
+        return self.provider_attempt + self.turn_attempt + 1
+
+
+__all__ = [
+    "RetryAttemptMetadata",
+    "RetryPolicy",
+    "Sleep",
+    "is_retryable_assistant_error",
+]
