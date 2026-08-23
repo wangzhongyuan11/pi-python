@@ -7,8 +7,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .mutation_queue import FileMutationQueue, default_mutation_queue
 from .paths import resolve_tool_path
-from .write import WriteToolError, write_file
+from .write import WriteToolError, write_resolved_bytes
 
 
 class EditToolError(RuntimeError):
@@ -100,32 +101,40 @@ async def edit_file(
     *,
     cwd: Path,
     abort_event: asyncio.Event | None = None,
+    mutation_queue: FileMutationQueue | None = None,
 ) -> EditResult:
     if abort_event is not None and abort_event.is_set():
         raise EditToolError("Edit operation aborted")
     resolved = resolve_tool_path(path, cwd=cwd)
-    try:
-        raw = await asyncio.to_thread(resolved.read_bytes)
-    except OSError as error:
-        reason = error.strerror or type(error).__name__
-        raise EditToolError(f"Could not edit {resolved}: {reason}") from None
-    if abort_event is not None and abort_event.is_set():
-        raise EditToolError("Edit operation aborted")
 
-    decoded = raw.decode("utf-8", errors="replace")
-    bom = "\ufeff" if decoded.startswith("\ufeff") else ""
-    content = decoded[len(bom) :]
-    ending = _line_ending(content)
-    normalized = _normalize_newlines(content)
-    edited = _prepare_edits(normalized, edits, resolved)
-    restored = edited.replace("\n", "\r\n") if ending == "\r\n" else edited
-    if abort_event is not None and abort_event.is_set():
-        raise EditToolError("Edit operation aborted")
-    try:
-        await write_file(resolved, bom + restored, cwd=cwd, abort_event=abort_event)
-    except WriteToolError as error:
-        raise EditToolError(str(error)) from None
-    return EditResult(path=resolved, replacements=len(edits))
+    async def edit_resolved() -> EditResult:
+        if abort_event is not None and abort_event.is_set():
+            raise EditToolError("Edit operation aborted")
+        try:
+            raw = await asyncio.to_thread(resolved.read_bytes)
+        except OSError as error:
+            reason = error.strerror or type(error).__name__
+            raise EditToolError(f"Could not edit {resolved}: {reason}") from None
+        if abort_event is not None and abort_event.is_set():
+            raise EditToolError("Edit operation aborted")
+
+        decoded = raw.decode("utf-8", errors="replace")
+        bom = "\ufeff" if decoded.startswith("\ufeff") else ""
+        content = decoded[len(bom) :]
+        ending = _line_ending(content)
+        normalized = _normalize_newlines(content)
+        edited = _prepare_edits(normalized, edits, resolved)
+        restored = edited.replace("\n", "\r\n") if ending == "\r\n" else edited
+        if abort_event is not None and abort_event.is_set():
+            raise EditToolError("Edit operation aborted")
+        try:
+            await write_resolved_bytes(resolved, (bom + restored).encode("utf-8"), abort_event)
+        except WriteToolError as error:
+            raise EditToolError(str(error)) from None
+        return EditResult(path=resolved, replacements=len(edits))
+
+    queue = default_mutation_queue() if mutation_queue is None else mutation_queue
+    return await queue.run(resolved, cwd=cwd, operation=edit_resolved)
 
 
 __all__ = ["Edit", "EditResult", "EditToolError", "edit_file"]

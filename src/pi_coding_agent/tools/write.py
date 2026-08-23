@@ -8,6 +8,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .mutation_queue import FileMutationQueue, default_mutation_queue
 from .paths import resolve_tool_path
 
 
@@ -53,26 +54,46 @@ def _replace_file(path: Path, data: bytes, abort_event: asyncio.Event | None) ->
             pass
 
 
+async def write_resolved_bytes(
+    path: Path,
+    data: bytes,
+    abort_event: asyncio.Event | None,
+) -> None:
+    if abort_event is not None and abort_event.is_set():
+        raise WriteToolError("Write operation aborted")
+    try:
+        await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(_replace_file, path, data, abort_event)
+    except WriteToolError:
+        raise
+    except OSError as error:
+        reason = error.strerror or type(error).__name__
+        raise WriteToolError(f"Could not write {path}: {reason}") from None
+
+
 async def write_file(
     path: str | Path,
     content: str,
     *,
     cwd: Path,
     abort_event: asyncio.Event | None = None,
+    mutation_queue: FileMutationQueue | None = None,
 ) -> WriteResult:
     if abort_event is not None and abort_event.is_set():
         raise WriteToolError("Write operation aborted")
     resolved = resolve_tool_path(path, cwd=cwd)
     data = content.encode("utf-8")
+
+    queue = default_mutation_queue() if mutation_queue is None else mutation_queue
     try:
-        await asyncio.to_thread(resolved.parent.mkdir, parents=True, exist_ok=True)
-        await asyncio.to_thread(_replace_file, resolved, data, abort_event)
+        await queue.run(
+            resolved,
+            cwd=cwd,
+            operation=lambda: write_resolved_bytes(resolved, data, abort_event),
+        )
     except WriteToolError:
         raise
-    except OSError as error:
-        reason = error.strerror or type(error).__name__
-        raise WriteToolError(f"Could not write {resolved}: {reason}") from None
     return WriteResult(path=resolved, bytes_written=len(data))
 
 
-__all__ = ["WriteResult", "WriteToolError", "write_file"]
+__all__ = ["WriteResult", "WriteToolError", "write_file", "write_resolved_bytes"]
