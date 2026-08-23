@@ -21,7 +21,9 @@ from .deepseek_credentials import DeepSeekCredentialResolver
 from .model_runtime import ModelRuntime, create_model_runtime
 from .services import ProductServices, ServiceOverrides, create_product_services
 from .session.context import project_session_context
+from .session.importer import import_pi_session as _import_pi_session
 from .session.manager import SessionManager
+from .session.models import ImportResult
 from .session.tree import SessionTree
 
 
@@ -169,4 +171,17 @@ async def create_agent_session(
     )
 
 
-__all__ = ["CreateAgentSessionOptions", "CreatedAgentSession", "create_agent_session"]
+def import_pi_session(
+    source: str | Path,
+    *,
+    session_dir: str | Path | None = None,
+) -> ImportResult:
+    return _import_pi_session(source, session_dir=session_dir)
+
+
+__all__ = [
+    "CreateAgentSessionOptions",
+    "CreatedAgentSession",
+    "create_agent_session",
+    "import_pi_session",
+]
