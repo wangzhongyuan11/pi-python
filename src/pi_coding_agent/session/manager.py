@@ -9,6 +9,7 @@ from pi_agent import AgentMessage
 from .errors import SessionGraphError
 from .ids import validate_session_id
 from .models import MessageEntry, SessionEntry, SessionHeader
+from .tree import SessionTree
 from .validation import SessionEntryValidator
 from .writer import append_session_record, create_session_file
 
@@ -82,6 +83,16 @@ class SessionManager:
     @property
     def entries(self) -> tuple[SessionEntry, ...]:
         return tuple(self._entries)
+
+    def branch(self, entry_id: str) -> None:
+        tree = SessionTree.build(self.entries)
+        tree.active_path(entry_id)
+        self.leaf_id = entry_id
+
+    def active_path(self) -> tuple[SessionEntry, ...]:
+        if self.leaf_id is None:
+            return ()
+        return SessionTree.build(self.entries).active_path(self.leaf_id)
 
     def append(self, entry: SessionEntry) -> None:
         if entry.parent_id != self.leaf_id:
