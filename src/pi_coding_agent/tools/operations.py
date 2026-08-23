@@ -48,6 +48,7 @@ class ProcessOperations(Protocol):
         *,
         cwd: Path,
         environment: Mapping[str, str] | None,
+        stdin: bytes | None,
         stdout: OutputSink,
         stderr: OutputSink,
         timeout: float | None,
