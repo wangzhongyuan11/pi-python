@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -111,11 +113,19 @@ type KnownSessionEntry = Annotated[
 type SessionRecord = Annotated[SessionHeader | KnownSessionEntry, Field(discriminator="type")]
 
 
+@dataclass(frozen=True, slots=True)
+class ImportResult:
+    session_id: str
+    session_file: Path
+    source_file: Path
+
+
 __all__ = [
     "BranchSummaryEntry",
     "CompactionEntry",
     "CustomEntry",
     "CustomMessageEntry",
+    "ImportResult",
     "KnownSessionEntry",
     "LabelEntry",
     "MessageEntry",

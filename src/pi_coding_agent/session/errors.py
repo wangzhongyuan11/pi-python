@@ -40,11 +40,16 @@ class InvalidSessionIdError(SessionError):
     """A caller supplied an unsafe or malformed Session id."""
 
 
+class SessionImportError(SessionError):
+    """An explicit upstream Session import cannot be completed safely."""
+
+
 __all__ = [
     "EntryValidationError",
     "InvalidSessionIdError",
     "SessionCorruptError",
     "SessionError",
     "SessionGraphError",
+    "SessionImportError",
     "SessionNotFoundError",
 ]
