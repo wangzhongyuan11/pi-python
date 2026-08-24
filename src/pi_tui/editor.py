@@ -73,6 +73,16 @@ class Editor:
         self._checkpoint()
         self._apply(value, min(self._buffer.cursor_position, len(value)))
 
+    def paste(self, data: str) -> None:
+        """Insert bracketed-paste payload atomically, newlines included."""
+        if not data:
+            return
+        self._checkpoint()
+        text = self._buffer.text
+        position = self._buffer.cursor_position
+        combined = f"{text[:position]}{data}{text[position:]}"
+        self._apply(combined, position + len(data))
+
     def submit(self) -> str:
         value = self._buffer.text
         self._history.append(value)
