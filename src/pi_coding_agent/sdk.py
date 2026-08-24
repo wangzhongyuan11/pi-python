@@ -8,11 +8,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Self, cast
 from uuid import uuid4
 
 from pi_agent import Agent, AgentTool
-from pi_ai import CredentialResolver, ModelThinkingLevel
+from pi_ai import CredentialResolver, ModelThinkingLevel, clamp_thinking_level
 
 from .agent_session import AgentSession
 from .agent_session_runtime import AgentSessionRuntime, RuntimeComponents, RuntimeTarget
@@ -22,7 +22,7 @@ from .compaction.cutpoint import TokenCounter, estimate_entry_tokens
 from .compaction.service import CompactionService
 from .compaction.summarizer import CompactionSummarizer
 from .deepseek_credentials import DeepSeekCredentialResolver
-from .model_runtime import ModelRuntime, create_model_runtime
+from .model_runtime import ModelRuntime, UnknownModelError, create_model_runtime
 from .services import ProductServices, ServiceOverrides, create_product_services
 from .session.context import project_session_context
 from .session.importer import import_pi_session as _import_pi_session
@@ -42,6 +42,12 @@ def _default_session_dir(cwd: Path) -> Path:
         Path(configured).expanduser() if configured else Path.home() / ".pi-python" / "agent"
     )
     return agent_dir.resolve() / "sessions" / f"--{encoded}--"
+
+
+def _restore_thinking_level(value: str) -> ModelThinkingLevel:
+    if value not in {"off", "minimal", "low", "medium", "high", "xhigh", "max"}:
+        raise ValueError(f"invalid restored thinking level: {value}")
+    return cast("ModelThinkingLevel", value)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -146,14 +152,28 @@ async def create_agent_session(
             else create_product_services(target.cwd, selected.service_overrides)
         )
         messages = ()
+        agent_model = model_runtime.model
+        thinking_level = selected.thinking_level
         if target.session_manager.leaf_id is not None:
             tree = SessionTree.build(target.session_manager.entries)
-            messages = project_session_context(tree, target.session_manager.leaf_id).messages
+            context = project_session_context(tree, target.session_manager.leaf_id)
+            messages = context.messages
+            if context.model is not None:
+                if context.model.provider != model_runtime.provider.id:
+                    raise UnknownModelError(
+                        "restored model provider "
+                        f'"{context.model.provider}" does not match runtime provider '
+                        f'"{model_runtime.provider.id}"'
+                    )
+                agent_model = model_runtime.select_model(context.model.model_id)
+            thinking_level = clamp_thinking_level(
+                agent_model, _restore_thinking_level(context.thinking_level)
+            )
         agent = Agent(
-            model=model_runtime.model,
+            model=agent_model,
             stream_function=model_runtime.stream,
             system_prompt=selected.system_prompt,
-            thinking_level=selected.thinking_level,
+            thinking_level=thinking_level,
             tools=selected.tools,
             messages=messages,
             clock=selected.agent_clock,

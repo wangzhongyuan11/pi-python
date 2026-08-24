@@ -105,16 +105,46 @@ def test_view_resolves_labels_and_append_order_children() -> None:
     assert all(node.label is None for node in labeled)
 
 
-def test_view_lists_later_siblings_in_append_order() -> None:
+def test_view_sorts_siblings_by_timestamp() -> None:
     tree = SessionTree.build(
         (
             SessionInfoEntry(type="session_info", id="root", parent_id=None, timestamp=STAMP),
-            SessionInfoEntry(type="session_info", id="left", parent_id="root", timestamp=STAMP),
-            SessionInfoEntry(type="session_info", id="right", parent_id="root", timestamp=STAMP),
+            SessionInfoEntry(
+                type="session_info",
+                id="later",
+                parent_id="root",
+                timestamp="2026-08-24T00:00:03.000Z",
+            ),
+            SessionInfoEntry(
+                type="session_info",
+                id="earlier",
+                parent_id="root",
+                timestamp="2026-08-24T00:00:02.000Z",
+            ),
         )
     )
 
     roots = session_tree_view(tree)
 
     assert [node.entry.id for node in roots] == ["root"]
-    assert [child.entry.id for child in roots[0].children] == ["left", "right"]
+    assert [child.entry.id for child in roots[0].children] == ["earlier", "later"]
+
+
+def test_view_handles_deep_session_without_recursion() -> None:
+    entries = tuple(
+        SessionInfoEntry(
+            type="session_info",
+            id=f"e{index}",
+            parent_id=f"e{index - 1}" if index else None,
+            timestamp=STAMP,
+        )
+        for index in range(1_500)
+    )
+
+    node = session_tree_view(SessionTree.build(entries))[0]
+    depth = 1
+    while node.children:
+        node = node.children[0]
+        depth += 1
+
+    assert depth == 1_500
