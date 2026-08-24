@@ -6,10 +6,18 @@ import asyncio
 import json
 from typing import TextIO
 
-from pi_agent import AgentEvent, MessageEndEvent, MessageStartEvent, MessageUpdateEvent
+from pi_agent import MessageEndEvent, MessageStartEvent, MessageUpdateEvent
 from pi_ai import AssistantMessage, TextContent, ToolResultMessage, UserMessage
 from pi_ai.wire.events import dump_event
 from pi_ai.wire.messages import dump_message
+
+from .agent_session_events import (
+    AgentSessionEvent,
+    AutoRetryEndEvent,
+    AutoRetryStartEvent,
+    EntryAppendedEvent,
+)
+from .session.codec import dump_record
 
 
 def assistant_text(message: AssistantMessage) -> str:
@@ -22,9 +30,22 @@ class JsonEventPresenter:
     def __init__(self, stdout: TextIO) -> None:
         self._stdout = stdout
 
-    def __call__(self, event: AgentEvent, _signal: asyncio.Event) -> None:
+    def __call__(self, event: AgentSessionEvent, _signal: asyncio.Event) -> None:
         payload: dict[str, object] = {"type": event.type}
-        if isinstance(event, MessageStartEvent | MessageEndEvent):
+        if isinstance(event, AutoRetryStartEvent):
+            payload.update(
+                attempt=event.attempt,
+                maxAttempts=event.max_attempts,
+                delayMs=int(event.delay_seconds * 1000),
+                errorMessage=event.error_message,
+            )
+        elif isinstance(event, AutoRetryEndEvent):
+            payload.update(success=event.success, attempt=event.attempt)
+            if event.final_error is not None:
+                payload["finalError"] = event.final_error
+        elif isinstance(event, EntryAppendedEvent):
+            payload["entry"] = dump_record(event.entry)
+        elif isinstance(event, MessageStartEvent | MessageEndEvent):
             message = event.message
             payload["message"] = (
                 dump_message(message)

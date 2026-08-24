@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from pi_agent import Agent, AgentEvent, MessageEndEvent
+from pi_agent import Agent, MessageEndEvent
 from pi_ai import FakeProvider, fake_assistant_message, fake_model
 from pi_coding_agent.agent_session import AgentSession, AgentSessionClosedError
+from pi_coding_agent.agent_session_events import AgentSessionEvent
 from pi_coding_agent.agent_session_runtime import RuntimeReason
 from pi_coding_agent.services import create_product_services
 from pi_coding_agent.session.manager import SessionManager
@@ -49,7 +50,7 @@ def test_agent_session_owns_agent_services_and_persists_message_end_events(
             timestamp_factory=lambda: "2026-08-24T00:00:01.000Z",
         )
 
-        def observe(event: AgentEvent, _signal: asyncio.Event) -> None:
+        def observe(event: AgentSessionEvent, _signal: asyncio.Event) -> None:
             if isinstance(event, MessageEndEvent):
                 latest = manager.entries[-1]
                 assert isinstance(latest, MessageEntry)

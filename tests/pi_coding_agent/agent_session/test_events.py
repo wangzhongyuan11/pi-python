@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from io import StringIO
 from pathlib import Path
 
 from pi_agent import Agent, MessageEndEvent
 from pi_ai import FakeProvider, fake_assistant_message, fake_model
 from pi_coding_agent.agent_session import AgentSession
-from pi_coding_agent.agent_session_events import EntryAppendedEvent
+from pi_coding_agent.agent_session_events import (
+    AutoRetryEndEvent,
+    AutoRetryStartEvent,
+    EntryAppendedEvent,
+)
+from pi_coding_agent.presenters import JsonEventPresenter
 from pi_coding_agent.services import create_product_services
 from pi_coding_agent.session.manager import SessionManager
 
@@ -43,3 +50,43 @@ def test_core_events_are_forwarded_and_each_message_is_persisted_once(tmp_path: 
 
     assert observed == ["core:user", "entry:user", "core:assistant", "entry:assistant"]
     assert entry_count == 2
+
+
+def test_json_presenter_preserves_product_retry_event_metadata() -> None:
+    stdout = StringIO()
+    presenter = JsonEventPresenter(stdout)
+    signal = asyncio.Event()
+
+    presenter(
+        AutoRetryStartEvent(
+            attempt=2,
+            max_attempts=3,
+            delay_seconds=4.0,
+            error_message="503 service unavailable",
+        ),
+        signal,
+    )
+    presenter(
+        AutoRetryEndEvent(
+            success=False,
+            attempt=2,
+            final_error="retry cancelled",
+        ),
+        signal,
+    )
+
+    assert [json.loads(line) for line in stdout.getvalue().splitlines()] == [
+        {
+            "type": "auto_retry_start",
+            "attempt": 2,
+            "maxAttempts": 3,
+            "delayMs": 4000,
+            "errorMessage": "503 service unavailable",
+        },
+        {
+            "type": "auto_retry_end",
+            "success": False,
+            "attempt": 2,
+            "finalError": "retry cancelled",
+        },
+    ]
