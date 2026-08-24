@@ -543,6 +543,7 @@ dependencies = [
     { name = "openai" },
     { name = "prompt-toolkit" },
     { name = "pydantic" },
+    { name = "wcwidth" },
 ]
 
 [package.dev-dependencies]
@@ -559,6 +560,7 @@ requires-dist = [
     { name = "openai", specifier = "==3.1.0" },
     { name = "prompt-toolkit", specifier = "==3.0.53" },
     { name = "pydantic", specifier = "==2.13.4" },
+    { name = "wcwidth", specifier = "==0.8.2" },
 ]
 
 [package.metadata.requires-dev]
