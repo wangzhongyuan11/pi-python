@@ -17,6 +17,7 @@ from pi_ai import CredentialResolver, ModelThinkingLevel
 from .agent_session import AgentSession
 from .agent_session_runtime import AgentSessionRuntime, RuntimeComponents, RuntimeTarget
 from .bootstrap import BootstrapConfig, ProductBootstrap, bootstrap
+from .branch_summary import BranchSummarizer, BranchSummaryService
 from .compaction.cutpoint import TokenCounter, estimate_entry_tokens
 from .compaction.service import CompactionService
 from .compaction.summarizer import CompactionSummarizer
@@ -59,6 +60,7 @@ class CreateAgentSessionOptions:
     compaction_summarizer: CompactionSummarizer | None = None
     compaction_keep_recent_tokens: int = 20_000
     compaction_token_count: TokenCounter = estimate_entry_tokens
+    branch_summarizer: BranchSummarizer | None = None
 
 
 class CreatedAgentSession:
@@ -166,6 +168,16 @@ async def create_agent_session(
             if selected.compaction_summarizer is not None
             else None
         )
+        branch_summary_service = (
+            BranchSummaryService(
+                session_manager=target.session_manager,
+                summarizer=selected.branch_summarizer,
+                entry_id_factory=selected.entry_id_factory,
+                timestamp_factory=selected.timestamp_factory,
+            )
+            if selected.branch_summarizer is not None
+            else None
+        )
         session = AgentSession(
             agent=agent,
             session_manager=target.session_manager,
@@ -175,6 +187,7 @@ async def create_agent_session(
             compaction_service=compaction_service,
             compaction_keep_recent_tokens=selected.compaction_keep_recent_tokens,
             compaction_token_count=selected.compaction_token_count,
+            branch_summary_service=branch_summary_service,
         )
         return RuntimeComponents(session=session, services=services)
 

@@ -26,6 +26,8 @@ from .agent_session_events import (
     EntryAppendedEvent,
 )
 from .agent_session_runtime import RuntimeReason
+from .branch_summary import BranchSummaryService
+from .branches import diff_branch_paths
 from .compaction.cutpoint import (
     TokenCounter,
     choose_compaction_cutpoint,
@@ -33,11 +35,12 @@ from .compaction.cutpoint import (
 )
 from .compaction.service import CompactionReason, CompactionService
 from .context_overflow import OverflowRecovery, is_context_overflow
+from .file_tracking import FileOperations
 from .retry import RetryPolicy, Sleep, is_retryable_assistant_error
 from .services import ProductServices
 from .session.context import project_session_context
 from .session.manager import SessionManager
-from .session.models import CompactionEntry, MessageEntry
+from .session.models import BranchSummaryEntry, CompactionEntry, MessageEntry
 from .session.tree import SessionTree
 
 
@@ -55,6 +58,7 @@ class AgentSessionClosedError(RuntimeError):
 
 class AgentSession:
     __slots__ = (
+        "_branch_summary_service",
         "_closed",
         "_compaction_keep_recent_tokens",
         "_compaction_service",
@@ -88,6 +92,7 @@ class AgentSession:
         compaction_service: CompactionService | None = None,
         compaction_keep_recent_tokens: int = 20_000,
         compaction_token_count: TokenCounter = estimate_entry_tokens,
+        branch_summary_service: BranchSummaryService | None = None,
     ) -> None:
         self.agent = agent
         self.session_manager = session_manager
@@ -102,6 +107,7 @@ class AgentSession:
         self._compaction_service = compaction_service
         self._compaction_keep_recent_tokens = compaction_keep_recent_tokens
         self._compaction_token_count = compaction_token_count
+        self._branch_summary_service = branch_summary_service
         self._listeners: list[AgentSessionEventListener] = []
         self._closed = False
         self._unsubscribe_agent = agent.subscribe(self._handle_agent_event)
@@ -221,6 +227,31 @@ class AgentSession:
             tokens_before=sum(self._compaction_token_count(item) for item in entries),
             previous_summary=previous_summary,
         )
+        self._restore_active_context()
+        return entry
+
+    async def branch(
+        self,
+        target_id: str,
+        *,
+        summarize: bool = False,
+        file_ops: FileOperations | None = None,
+    ) -> BranchSummaryEntry | None:
+        self._ensure_open()
+        tree = SessionTree.build(self.session_manager.entries)
+        target_path = tree.active_path(target_id)
+        if not summarize:
+            self.session_manager.branch(target_id)
+            self._restore_active_context()
+            return None
+        if self._branch_summary_service is None:
+            raise RuntimeError("branch summarization is not configured for this AgentSession")
+        diff = diff_branch_paths(self.session_manager.active_path(), target_path)
+        entry = await self._branch_summary_service.record(
+            diff, target_id=target_id, file_ops=file_ops
+        )
+        if entry is None:
+            self.session_manager.branch(target_id)
         self._restore_active_context()
         return entry
 

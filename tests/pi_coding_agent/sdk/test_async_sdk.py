@@ -6,9 +6,11 @@ from pathlib import Path
 import pytest
 
 from pi_ai import FakeProvider, fake_assistant_message
+from pi_coding_agent.branch_summary import BranchSummarizer
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.sdk import CreateAgentSessionOptions, create_agent_session
 from pi_coding_agent.session.manager import SessionManager
+from pi_coding_agent.session.models import BranchSummaryEntry, SessionEntry, SessionInfoEntry
 
 
 def _manager(cwd: Path) -> SessionManager:
@@ -84,3 +86,59 @@ def test_factory_rejects_session_cwd_mismatch(tmp_path: Path) -> None:
             )
 
     asyncio.run(scenario())
+
+
+class FakeBranchSummarizer(BranchSummarizer):
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+
+    async def summarize(self, entries: tuple[SessionEntry, ...]) -> str:
+        self.calls.append(tuple(entry.id for entry in entries))
+        return "abandoned work"
+
+
+def test_sdk_branch_navigation_can_persist_divergent_summary(tmp_path: Path) -> None:
+    async def scenario() -> tuple[FakeBranchSummarizer, SessionManager, tuple[str, ...]]:
+        manager = _manager(tmp_path)
+        manager.append(
+            SessionInfoEntry(
+                type="session_info", id="root", parent_id=None, timestamp="2026-08-24T00:00:01Z"
+            )
+        )
+        manager.append(
+            SessionInfoEntry(
+                type="session_info", id="target", parent_id="root", timestamp="2026-08-24T00:00:02Z"
+            )
+        )
+        manager.branch("root")
+        manager.append(
+            SessionInfoEntry(
+                type="session_info",
+                id="abandoned",
+                parent_id="root",
+                timestamp="2026-08-24T00:00:03Z",
+            )
+        )
+        provider = FakeProvider()
+        summarizer = FakeBranchSummarizer()
+        created = await create_agent_session(
+            CreateAgentSessionOptions(
+                cwd=tmp_path,
+                model_runtime=ModelRuntime(provider=provider, model=provider.models[0]),
+                session_manager=manager,
+                branch_summarizer=summarizer,
+                entry_id_factory=lambda: "summary",
+                timestamp_factory=lambda: "2026-08-24T00:00:04Z",
+            )
+        )
+        entry = await created.session.branch("target", summarize=True)
+        roles = tuple(message.role for message in created.session.messages)
+        await created.close()
+        assert isinstance(entry, BranchSummaryEntry)
+        return summarizer, manager, roles
+
+    summarizer, manager, roles = asyncio.run(scenario())
+
+    assert summarizer.calls == [("abandoned",)]
+    assert manager.leaf_id == "summary"
+    assert roles == ("branchSummary",)
