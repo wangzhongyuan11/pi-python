@@ -17,6 +17,9 @@ from pi_ai import CredentialResolver, ModelThinkingLevel
 from .agent_session import AgentSession
 from .agent_session_runtime import AgentSessionRuntime, RuntimeComponents, RuntimeTarget
 from .bootstrap import BootstrapConfig, ProductBootstrap, bootstrap
+from .compaction.cutpoint import TokenCounter, estimate_entry_tokens
+from .compaction.service import CompactionService
+from .compaction.summarizer import CompactionSummarizer
 from .deepseek_credentials import DeepSeekCredentialResolver
 from .model_runtime import ModelRuntime, create_model_runtime
 from .services import ProductServices, ServiceOverrides, create_product_services
@@ -53,6 +56,9 @@ class CreateAgentSessionOptions:
     agent_clock: Callable[[], int] | None = None
     entry_id_factory: Callable[[], str] = lambda: uuid4().hex
     timestamp_factory: Callable[[], str] = _timestamp
+    compaction_summarizer: CompactionSummarizer | None = None
+    compaction_keep_recent_tokens: int = 20_000
+    compaction_token_count: TokenCounter = estimate_entry_tokens
 
 
 class CreatedAgentSession:
@@ -150,12 +156,25 @@ async def create_agent_session(
             messages=messages,
             clock=selected.agent_clock,
         )
+        compaction_service = (
+            CompactionService(
+                session_manager=target.session_manager,
+                summarizer=selected.compaction_summarizer,
+                entry_id_factory=selected.entry_id_factory,
+                timestamp_factory=selected.timestamp_factory,
+            )
+            if selected.compaction_summarizer is not None
+            else None
+        )
         session = AgentSession(
             agent=agent,
             session_manager=target.session_manager,
             services=services,
             entry_id_factory=selected.entry_id_factory,
             timestamp_factory=selected.timestamp_factory,
+            compaction_service=compaction_service,
+            compaction_keep_recent_tokens=selected.compaction_keep_recent_tokens,
+            compaction_token_count=selected.compaction_token_count,
         )
         return RuntimeComponents(session=session, services=services)
 

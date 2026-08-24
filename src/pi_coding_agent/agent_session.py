@@ -26,11 +26,19 @@ from .agent_session_events import (
     EntryAppendedEvent,
 )
 from .agent_session_runtime import RuntimeReason
+from .compaction.cutpoint import (
+    TokenCounter,
+    choose_compaction_cutpoint,
+    estimate_entry_tokens,
+)
+from .compaction.service import CompactionReason, CompactionService
 from .context_overflow import OverflowRecovery, is_context_overflow
 from .retry import RetryPolicy, Sleep, is_retryable_assistant_error
 from .services import ProductServices
+from .session.context import project_session_context
 from .session.manager import SessionManager
-from .session.models import MessageEntry
+from .session.models import CompactionEntry, MessageEntry
+from .session.tree import SessionTree
 
 
 def _entry_id() -> str:
@@ -48,6 +56,9 @@ class AgentSessionClosedError(RuntimeError):
 class AgentSession:
     __slots__ = (
         "_closed",
+        "_compaction_keep_recent_tokens",
+        "_compaction_service",
+        "_compaction_token_count",
         "_entry_id_factory",
         "_listeners",
         "_on_close",
@@ -74,6 +85,9 @@ class AgentSession:
         retry_policy: RetryPolicy | None = None,
         sleep: Sleep = asyncio.sleep,
         overflow_recovery: OverflowRecovery | None = None,
+        compaction_service: CompactionService | None = None,
+        compaction_keep_recent_tokens: int = 20_000,
+        compaction_token_count: TokenCounter = estimate_entry_tokens,
     ) -> None:
         self.agent = agent
         self.session_manager = session_manager
@@ -85,6 +99,9 @@ class AgentSession:
         self._sleep = sleep
         self._retry_cancel = asyncio.Event()
         self._overflow_recovery = overflow_recovery
+        self._compaction_service = compaction_service
+        self._compaction_keep_recent_tokens = compaction_keep_recent_tokens
+        self._compaction_token_count = compaction_token_count
         self._listeners: list[AgentSessionEventListener] = []
         self._closed = False
         self._unsubscribe_agent = agent.subscribe(self._handle_agent_event)
@@ -113,7 +130,6 @@ class AgentSession:
 
     async def prompt(self, prompt: str | AgentMessage | Sequence[AgentMessage]) -> None:
         self._ensure_open()
-        baseline = self.agent.state.messages
         next_prompt: str | AgentMessage | Sequence[AgentMessage] = prompt
         self._retry_cancel = asyncio.Event()
         attempt = 0
@@ -124,12 +140,20 @@ class AgentSession:
             if (
                 isinstance(last, AssistantMessage)
                 and is_context_overflow(last)
-                and self._overflow_recovery is not None
+                and (self._overflow_recovery is not None or self._compaction_service is not None)
                 and not overflow_attempted
             ):
                 overflow_attempted = True
-                self.agent.restore_messages(baseline)
-                if await self._overflow_recovery():
+                recovered = (
+                    await self._overflow_recovery()
+                    if self._overflow_recovery is not None
+                    else await self._compact_for_overflow()
+                )
+                if recovered:
+                    messages = self.agent.state.messages
+                    if messages and isinstance(messages[-1], AssistantMessage):
+                        self.agent.restore_messages(messages[:-1])
+                    next_prompt = ()
                     continue
                 return
             error = self._retryable_error()
@@ -174,6 +198,31 @@ class AgentSession:
 
     def cancel_retry(self) -> None:
         self._retry_cancel.set()
+
+    async def compact(self, *, reason: CompactionReason = "manual") -> CompactionEntry:
+        self._ensure_open()
+        if self._compaction_service is None:
+            raise RuntimeError("compaction is not configured for this AgentSession")
+        path = self.session_manager.active_path()
+        previous = next(
+            (entry for entry in reversed(path) if isinstance(entry, CompactionEntry)), None
+        )
+        previous_summary = previous.summary if previous is not None else None
+        entries = path[path.index(previous) + 1 :] if previous is not None else path
+        cutpoint = choose_compaction_cutpoint(
+            entries,
+            keep_recent_tokens=self._compaction_keep_recent_tokens,
+            token_count=self._compaction_token_count,
+        )
+        entry = await self._compaction_service.compact(
+            entries,
+            cutpoint,
+            reason=reason,
+            tokens_before=sum(self._compaction_token_count(item) for item in entries),
+            previous_summary=previous_summary,
+        )
+        self._restore_active_context()
+        return entry
 
     def abort(self) -> None:
         self.cancel_retry()
@@ -255,6 +304,23 @@ class AgentSession:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(sleep_task, cancel_task, return_exceptions=True)
+
+    async def _compact_for_overflow(self) -> bool:
+        try:
+            await self.compact(reason="overflow")
+        except ValueError:
+            return False
+        return True
+
+    def _restore_active_context(self) -> None:
+        leaf_id = self.session_manager.leaf_id
+        if leaf_id is None:
+            self.agent.restore_messages(())
+            return
+        context = project_session_context(
+            SessionTree.build(self.session_manager.entries), leaf_id
+        )
+        self.agent.restore_messages(context.messages)
 
 
 __all__ = ["AgentSession", "AgentSessionClosedError"]

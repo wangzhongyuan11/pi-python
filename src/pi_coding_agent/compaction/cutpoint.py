@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from ..session.models import CompactionEntry, MessageEntry, SessionEntry
 
 type TokenCounter = Callable[[SessionEntry], int]
+
+
+def estimate_entry_tokens(entry: SessionEntry) -> int:
+    """Conservatively estimate serialized Session entry tokens using chars/4."""
+    chars = len(entry.model_dump_json(by_alias=True, exclude_none=True))
+    return math.ceil(chars / 4)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -77,4 +84,9 @@ def choose_compaction_cutpoint(
     )
 
 
-__all__ = ["CompactionCutPoint", "TokenCounter", "choose_compaction_cutpoint"]
+__all__ = [
+    "CompactionCutPoint",
+    "TokenCounter",
+    "choose_compaction_cutpoint",
+    "estimate_entry_tokens",
+]
