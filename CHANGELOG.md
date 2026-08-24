@@ -4,6 +4,19 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+## 0.3.0 - 2026-08-24
+
+### Phase 7–8
+
+- Add layered settings loading, canonical Python configuration paths with legacy
+  environment compatibility, project trust gating, deterministic resource precedence,
+  read-only `.pi` compatibility mounts, context/system prompt assembly, and lazy
+  prompt/skill/theme resources.
+- Add AgentSession product event layering, bounded whole-turn retries with observable
+  attempt metadata, isolated context overflow recovery, safe compaction cutpoints,
+  incremental compaction summaries, divergent branch diffs, branch file operation
+  tracking, persisted branch summaries, and session state/tree view restoration.
+
 ## 0.2.0 - 2026-08-24
 
 ### Phase 4–6
