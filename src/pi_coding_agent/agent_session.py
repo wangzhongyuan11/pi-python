@@ -114,11 +114,12 @@ class AgentSession:
     async def prompt(self, prompt: str | AgentMessage | Sequence[AgentMessage]) -> None:
         self._ensure_open()
         baseline = self.agent.state.messages
+        next_prompt: str | AgentMessage | Sequence[AgentMessage] = prompt
         self._retry_cancel = asyncio.Event()
         attempt = 0
         overflow_attempted = False
         while True:
-            await self.agent.prompt(prompt)
+            await self.agent.prompt(next_prompt)
             last = self.agent.state.messages[-1] if self.agent.state.messages else None
             if (
                 isinstance(last, AssistantMessage)
@@ -160,8 +161,7 @@ class AgentSession:
                 ),
                 asyncio.Event(),
             )
-            await self._sleep(delay)
-            if self._retry_cancel.is_set():
+            if await self._wait_for_retry(delay):
                 await self._emit(
                     AutoRetryEndEvent(
                         success=False, attempt=attempt, final_error="retry cancelled"
@@ -169,7 +169,8 @@ class AgentSession:
                     asyncio.Event(),
                 )
                 return
-            self.agent.restore_messages(baseline)
+            self.agent.restore_messages(self.agent.state.messages[:-1])
+            next_prompt = ()
 
     def cancel_retry(self) -> None:
         self._retry_cancel.set()
@@ -231,6 +232,29 @@ class AgentSession:
         if not isinstance(message, AssistantMessage) or not is_retryable_assistant_error(message):
             return None
         return message.error_message or "provider turn failed"
+
+    async def _wait_for_retry(self, delay: float) -> bool:
+        async def sleep_once() -> None:
+            await self._sleep(delay)
+
+        async def wait_for_cancel() -> None:
+            await self._retry_cancel.wait()
+
+        sleep_task = asyncio.create_task(sleep_once())
+        cancel_task = asyncio.create_task(wait_for_cancel())
+        try:
+            done, _pending = await asyncio.wait(
+                (sleep_task, cancel_task), return_when=asyncio.FIRST_COMPLETED
+            )
+            if cancel_task in done:
+                return True
+            await sleep_task
+            return False
+        finally:
+            for task in (sleep_task, cancel_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(sleep_task, cancel_task, return_exceptions=True)
 
 
 __all__ = ["AgentSession", "AgentSessionClosedError"]

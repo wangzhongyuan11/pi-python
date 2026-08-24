@@ -3,13 +3,16 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from pi_agent import Agent
-from pi_ai import FakeProvider, fake_assistant_message, fake_model
+from pydantic import BaseModel
+
+from pi_agent import Agent, AgentTool, AgentToolResult, AgentToolUpdateCallback
+from pi_ai import FakeProvider, TextContent, ToolCall, fake_assistant_message, fake_model
 from pi_coding_agent.agent_session import AgentSession
 from pi_coding_agent.agent_session_events import AutoRetryEndEvent, AutoRetryStartEvent
 from pi_coding_agent.retry import RetryPolicy, Sleep
 from pi_coding_agent.services import create_product_services
 from pi_coding_agent.session.manager import SessionManager
+from pi_coding_agent.session.models import MessageEntry
 
 
 def _session(tmp_path: Path, provider: FakeProvider, *, sleep: Sleep) -> AgentSession:
@@ -52,6 +55,16 @@ def test_retry_succeeds_with_exponential_delays_and_one_user_message(tmp_path: P
     assert delays == [2.0, 4.0]
     assert provider.call_count == 3
     assert [message.role for message in session.messages] == ["user", "assistant"]
+    assert [
+        entry.message["role"]
+        for entry in session.session_manager.entries
+        if isinstance(entry, MessageEntry)
+    ] == [
+        "user",
+        "assistant",
+        "assistant",
+        "assistant",
+    ]
     assert [event.attempt for event in events if isinstance(event, AutoRetryStartEvent)] == [1, 2]
     assert any(isinstance(event, AutoRetryEndEvent) and event.success for event in events)
 
@@ -111,10 +124,80 @@ def test_retry_can_be_cancelled_during_backoff(tmp_path: Path) -> None:
         task = asyncio.create_task(session.prompt("hello"))
         await entered.wait()
         session.cancel_retry()
-        release.set()
-        await task
+        await asyncio.wait_for(task, timeout=0.5)
+        assert not release.is_set()
         return provider.call_count, endings[-1]
 
     calls, ending = asyncio.run(scenario())
     assert calls == 1
     assert not ending.success and ending.final_error == "retry cancelled"
+
+
+class _SideEffectArgs(BaseModel):
+    value: str
+
+
+def test_retry_after_tool_result_does_not_reexecute_completed_tool(tmp_path: Path) -> None:
+    async def scenario() -> tuple[list[str], int, list[str]]:
+        executed: list[str] = []
+
+        async def execute(
+            _tool_call_id: str,
+            params: _SideEffectArgs,
+            _abort_event: asyncio.Event | None,
+            _on_update: AgentToolUpdateCallback[dict[str, str]] | None,
+        ) -> AgentToolResult[dict[str, str]]:
+            executed.append(params.value)
+            return AgentToolResult(
+                content=(TextContent(text=params.value),),
+                details={"value": params.value},
+            )
+
+        tool = AgentTool(
+            name="side_effect",
+            label="Side effect",
+            description="Record one test side effect",
+            parameter_type=_SideEffectArgs,
+            execute=execute,
+        )
+        provider = FakeProvider(
+            [
+                fake_assistant_message(
+                    ToolCall(
+                        id="call-1",
+                        name="side_effect",
+                        arguments={"value": "once"},
+                    ),
+                    stop_reason="toolUse",
+                ),
+                fake_assistant_message(
+                    "fail", stop_reason="error", error_message="503 service unavailable"
+                ),
+                fake_assistant_message("ok"),
+            ]
+        )
+
+        async def no_sleep(_delay: float) -> None:
+            return None
+
+        session = AgentSession(
+            agent=Agent(model=fake_model(), stream_function=provider.stream, tools=(tool,)),
+            session_manager=SessionManager.in_memory(
+                cwd=tmp_path, session_id="tool-retry", timestamp="2026-08-24T00:00:00Z"
+            ),
+            services=create_product_services(tmp_path),
+            sleep=no_sleep,
+        )
+        await session.prompt("hello")
+        persisted_roles = [
+            str(entry.message["role"])
+            for entry in session.session_manager.entries
+            if isinstance(entry, MessageEntry)
+        ]
+        return executed, provider.call_count, persisted_roles
+
+    executed, calls, persisted_roles = asyncio.run(scenario())
+
+    assert executed == ["once"]
+    assert calls == 3
+    assert persisted_roles == ["user", "assistant", "toolResult", "assistant", "assistant"]
