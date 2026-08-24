@@ -127,12 +127,15 @@ def test_sdk_overflow_uses_compaction_without_replaying_user_prompt(tmp_path: Pa
 
     assert call_count == 2
     assert calls == [(("user",), None)]
-    assert len(
-        [
-            entry
-            for entry in manager.entries
-            if isinstance(entry, MessageEntry) and entry.message.get("role") == "user"
-        ]
-    ) == 1
+    assert (
+        len(
+            [
+                entry
+                for entry in manager.entries
+                if isinstance(entry, MessageEntry) and entry.message.get("role") == "user"
+            ]
+        )
+        == 1
+    )
     compaction = next(entry for entry in manager.entries if isinstance(entry, CompactionEntry))
     assert compaction.details == {"reason": "overflow", "incremental": False}

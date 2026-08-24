@@ -348,9 +348,7 @@ class AgentSession:
         if leaf_id is None:
             self.agent.restore_messages(())
             return
-        context = project_session_context(
-            SessionTree.build(self.session_manager.entries), leaf_id
-        )
+        context = project_session_context(SessionTree.build(self.session_manager.entries), leaf_id)
         self.agent.restore_messages(context.messages)
 
 
