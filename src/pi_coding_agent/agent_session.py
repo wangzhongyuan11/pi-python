@@ -150,6 +150,7 @@ class AgentSession:
                 and not overflow_attempted
             ):
                 overflow_attempted = True
+                self.agent.restore_messages(self.agent.state.messages[:-1])
                 recovered = (
                     await self._overflow_recovery()
                     if self._overflow_recovery is not None
@@ -157,7 +158,11 @@ class AgentSession:
                 )
                 if recovered:
                     messages = self.agent.state.messages
-                    if messages and isinstance(messages[-1], AssistantMessage):
+                    if (
+                        messages
+                        and isinstance(messages[-1], AssistantMessage)
+                        and is_context_overflow(messages[-1])
+                    ):
                         self.agent.restore_messages(messages[:-1])
                     next_prompt = ()
                     continue

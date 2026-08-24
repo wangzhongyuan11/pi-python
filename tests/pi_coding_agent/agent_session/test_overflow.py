@@ -27,16 +27,18 @@ class FakeSummarizer(CompactionSummarizer):
 
 
 def test_context_overflow_recovers_at_most_once(tmp_path: Path) -> None:
-    async def scenario() -> tuple[int, int]:
+    async def scenario() -> tuple[int, int, list[tuple[str, ...]]]:
         overflow = fake_assistant_message(
             "", stop_reason="error", error_message="maximum context length exceeded"
         )
         provider = FakeProvider([overflow, overflow])
         recoveries = 0
+        recovery_contexts: list[tuple[str, ...]] = []
 
         async def recover() -> bool:
             nonlocal recoveries
             recoveries += 1
+            recovery_contexts.append(tuple(message.role for message in session.messages))
             return True
 
         session = AgentSession(
@@ -48,9 +50,9 @@ def test_context_overflow_recovers_at_most_once(tmp_path: Path) -> None:
             overflow_recovery=recover,
         )
         await session.prompt("large prompt")
-        return provider.call_count, recoveries
+        return provider.call_count, recoveries, recovery_contexts
 
-    assert asyncio.run(scenario()) == (2, 1)
+    assert asyncio.run(scenario()) == (2, 1, [("user",)])
 
 
 def test_overflow_recovery_and_turn_retry_keep_separate_budgets(tmp_path: Path) -> None:
