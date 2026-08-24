@@ -11,6 +11,7 @@ license-files = ["THIRD_PARTY_NOTICES.md"]
 dependencies = [
     "openai==3.1.0",
     "pydantic==2.13.4",
+    "prompt-toolkit==3.0.53",
 ]
 
 [project.scripts]
