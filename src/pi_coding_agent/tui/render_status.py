@@ -18,7 +18,7 @@ class RetryStatusLine:
     delay_ms: int | None = None
     finished: bool = False
     success: bool = False
-    _fragments: list[str] = field(default_factory=list)
+    _fragments: list[str] = field(default_factory=list[str])
 
     def retry_started(
         self, *, attempt: int, max_attempts: int, delay_seconds: float
@@ -45,7 +45,7 @@ class RetryStatusLine:
 class SessionStatusLine:
     """Compaction and other session-level activity lines."""
 
-    _fragments: list[str] = field(default_factory=list)
+    _fragments: list[str] = field(default_factory=list[str])
 
     def compaction_started(self) -> SessionStatusLine:
         self._fragments.append("compacting context")
