@@ -4,6 +4,23 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+## 0.4.0 - 2026-08-25
+
+### Phase 9–10
+
+- Add the generic `pi_tui` package: prompt_toolkit terminal adapters, in-memory test
+  terminal, foundational Text/Stack/Box/Status components, a reusable editor with
+  unicode-safe cursor ops, undo, and input history, modal dialogs and overlay stacks,
+  clean streaming/resize rendering, display-width handling for CJK and ANSI, a frozen
+  action/keybinding registry with documentation, and bracketed paste plus word
+  completion with an empty `pi_*` import allowlist.
+- Add the extension and package foundation: trust-gated two-phase extension loading,
+  isolated hook execution, conflict-detecting capability registry, UI/auth bridge
+  ports with renderers and session actions, local/Git/PyPI package resolution with
+  ref-drift detection, managed environments with atomic lockfiles and rollback,
+  npm data ingestion without script execution, the default resource loader, and a
+  reload-safe lifecycle.
+
 ## 0.3.0 - 2026-08-24
 
 ### Phase 7–8
