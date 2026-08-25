@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from .layout import wrap_text
+from .width import visible_width
 
 
 class Component(Protocol):
@@ -13,7 +14,7 @@ class Component(Protocol):
 
 
 def _pad(line: str, width: int) -> str:
-    return line + " " * max(0, width - len(line))
+    return line + " " * max(0, width - visible_width(line))
 
 
 def _blank(width: int) -> str:

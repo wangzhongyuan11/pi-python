@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -20,7 +20,7 @@ class CommandOutcome:
 class CommandSpec:
     name: str
     source: str
-    handler: Callable[[str], CommandOutcome | None]
+    handler: Callable[[str], CommandOutcome | None | Awaitable[CommandOutcome | None]]
 
 
 def _error(text: str) -> CommandOutcome:

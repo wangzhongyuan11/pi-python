@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pi_tui.layout import wrap_text
+from pi_tui.width import visible_width
 
 
 class AssistantMessageView:
@@ -46,7 +47,7 @@ class AssistantMessageView:
 
 
 def _pad(line: str, width: int) -> str:
-    return line + " " * max(0, width - len(line))
+    return line + " " * max(0, width - visible_width(line))
 
 
 __all__ = ["AssistantMessageView"]
