@@ -30,7 +30,17 @@ type PrepareArguments = Callable[[object], object]
 
 
 class AgentTool[ParamsT, DetailsT](Tool[ParamsT]):
-    __slots__ = ("_execute", "_prepare_arguments", "execution_mode", "label")
+    __slots__ = (
+        "_execute",
+        "_prepare_arguments",
+        "execution_mode",
+        "label",
+        "parameter_type",
+    )
+
+    execution_mode: ToolExecutionMode | None
+    label: str
+    parameter_type: type[ParamsT]
 
     def __init__(
         self,
@@ -47,6 +57,7 @@ class AgentTool[ParamsT, DetailsT](Tool[ParamsT]):
         if not label:
             raise ValueError("tool label must not be empty")
         self.label = label
+        self.parameter_type = parameter_type
         self._execute = execute
         self._prepare_arguments = prepare_arguments
         self.execution_mode = execution_mode

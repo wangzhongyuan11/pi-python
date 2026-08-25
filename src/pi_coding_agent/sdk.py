@@ -18,6 +18,7 @@ from .agent_session import AgentSession
 from .agent_session_runtime import AgentSessionRuntime, RuntimeComponents, RuntimeTarget
 from .bootstrap import BootstrapConfig, ProductBootstrap, bootstrap
 from .branch_summary import BranchSummarizer, BranchSummaryService
+from .builtin_extensions.permission_gate import PermissionGate
 from .compaction.cutpoint import TokenCounter, estimate_entry_tokens
 from .compaction.service import CompactionService
 from .compaction.summarizer import CompactionSummarizer
@@ -60,6 +61,7 @@ class CreateAgentSessionOptions:
     system_prompt: str = ""
     thinking_level: ModelThinkingLevel = "high"
     tools: tuple[AgentTool[Any, Any], ...] = ()
+    permission_gate: PermissionGate | None = None
     agent_clock: Callable[[], int] | None = None
     entry_id_factory: Callable[[], str] = lambda: uuid4().hex
     timestamp_factory: Callable[[], str] = _timestamp
@@ -171,12 +173,17 @@ async def create_agent_session(
             )
         services.resources.discover(target.cwd)
         await services.extensions.start()
+        tools = (
+            selected.tools
+            if selected.permission_gate is None
+            else selected.permission_gate.wrap_tools(selected.tools)
+        )
         agent = Agent(
             model=agent_model,
             stream_function=model_runtime.stream,
             system_prompt=selected.system_prompt,
             thinking_level=thinking_level,
-            tools=selected.tools,
+            tools=tools,
             messages=messages,
             clock=selected.agent_clock,
         )
