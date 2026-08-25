@@ -3,6 +3,7 @@ from __future__ import annotations
 from pi_tui.application import Application
 from pi_tui.components import Status, Text, VStack
 from pi_tui.testing import MemoryTerminal
+from pi_tui.width import visible_width
 
 
 def _three_lines() -> VStack:
@@ -59,6 +60,20 @@ def test_partial_update_rewrites_only_the_dirty_line() -> None:
     assert "\x1b[K" in screen
 
 
+def test_partial_update_returns_to_column_zero_before_replacing_line() -> None:
+    root = Status("abc")
+    terminal = MemoryTerminal()
+    terminal.start(lambda _data: None, lambda: None)
+    app = Application(terminal, root)
+    app.render()
+    baseline = _output(terminal)
+
+    root.set_text("x")
+    app.render()
+
+    assert _output(terminal)[len(baseline) :] == "\r\x1b[Kx" + " " * 79
+
+
 def test_resize_invalidates_and_repaints_full_screen() -> None:
     terminal, app = _app(_three_lines())
     app.render()
@@ -85,3 +100,20 @@ def test_fullscreen_mode_clips_to_terminal_rows() -> None:
     screen = _output(terminal)
     assert "line2" in screen and "line3" in screen and "line4" in screen
     assert "line0" not in screen and "line1" not in screen
+
+
+def test_application_sanitizes_and_bounds_custom_component_output() -> None:
+    class UnsafeComponent:
+        def render(self, width: int) -> tuple[str, ...]:
+            del width
+            return ("中文中文\x1b[2J",)
+
+    terminal = MemoryTerminal(columns=4)
+    terminal.start(lambda _data: None, lambda: None)
+    app = Application(terminal, UnsafeComponent())
+
+    app.render()
+
+    rendered = _output(terminal).removeprefix("\x1b[2J\x1b[H")
+    assert rendered == "中文"
+    assert visible_width(rendered) == 4

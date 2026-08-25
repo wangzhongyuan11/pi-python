@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from .render import ScreenRenderer
+from .width import sanitize_terminal_text, truncate_to_width
 
 
 class Component(Protocol):
@@ -70,7 +71,14 @@ class Application:
     def render(self) -> None:
         if self._root is None:
             return
-        lines = list(self._root.render(self._terminal.columns))
+        width = self._terminal.columns
+        lines = [
+            truncate_to_width(
+                sanitize_terminal_text(line).replace("\n", " ").replace("\t", "   "),
+                width,
+            )
+            for line in self._root.render(width)
+        ]
         if self._fullscreen:
             rows = max(1, self._terminal.rows)
             lines = lines[-rows:]

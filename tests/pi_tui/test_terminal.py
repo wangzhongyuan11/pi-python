@@ -98,12 +98,21 @@ def test_prompt_toolkit_terminal_maps_operations_to_ansi_sequences() -> None:
         "\x1b[2A",
         "\x1b[?25l",
         "\x1b[?25h",
-        "\x1b[K",
+        "\r\x1b[K",
         "\x1b[J",
         "\x1b[2J\x1b[H",
         "\x1b]0;pi\x07",
     ]
     assert (terminal.columns, terminal.rows) == (100, 30)
+
+
+def test_terminal_title_removes_embedded_terminal_controls() -> None:
+    output = _FakeOutput(columns=80, rows=24)
+    terminal = PromptToolkitTerminal(tui_input=_FakeInput(), output=output)
+
+    terminal.set_title("safe\x1b]0;owned\x07\nnext")
+
+    assert output.raw == ["\x1b]0;safe next\x07"]
 
 
 def test_prompt_toolkit_terminal_reader_dispatches_until_stopped() -> None:

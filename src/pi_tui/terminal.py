@@ -7,6 +7,8 @@ import threading
 from collections.abc import Callable
 from typing import Protocol
 
+from .width import sanitize_terminal_text
+
 
 class TuiInput(Protocol):
     """Blocking byte-chunk source; ``read`` returns "" once closed."""
@@ -98,7 +100,7 @@ class PromptToolkitTerminal:
         self.write("\x1b[?25h")
 
     def clear_line(self) -> None:
-        self.write("\x1b[K")
+        self.write("\r\x1b[K")
 
     def clear_from_cursor(self) -> None:
         self.write("\x1b[J")
@@ -107,7 +109,8 @@ class PromptToolkitTerminal:
         self.write("\x1b[2J\x1b[H")
 
     def set_title(self, title: str) -> None:
-        self.write(f"\x1b]0;{title}\x07")
+        safe_title = sanitize_terminal_text(title).replace("\n", " ").replace("\t", " ")
+        self.write(f"\x1b]0;{safe_title}\x07")
 
     def _read_loop(self) -> None:
         while not self._stopping.is_set():

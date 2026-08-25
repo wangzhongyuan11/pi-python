@@ -80,7 +80,7 @@ class MemoryTerminal:
         self.cursor_visible = True
 
     def clear_line(self) -> None:
-        self.write("\x1b[K")
+        self.write("\r\x1b[K")
 
     def clear_from_cursor(self) -> None:
         self.write("\x1b[J")
