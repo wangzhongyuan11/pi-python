@@ -13,17 +13,24 @@ class LifecycleClosedError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class TeardownToken:
     generation: int
-    index: int
+    identifier: int
 
 
 class ExtensionLifecycle:
     """Teardown handlers fire exactly once per generation, newest first."""
 
-    __slots__ = ("_closed", "_generation", "_teardowns", "unregistered_count")
+    __slots__ = (
+        "_closed",
+        "_generation",
+        "_next_identifier",
+        "_teardowns",
+        "unregistered_count",
+    )
 
     def __init__(self) -> None:
         self._generation = 0
-        self._teardowns: list[Callable[[], object]] = []
+        self._teardowns: dict[int, Callable[[], object]] = {}
+        self._next_identifier = 0
         self._closed = False
         self.unregistered_count = 0
 
@@ -34,27 +41,37 @@ class ExtensionLifecycle:
     def register_teardown(self, handler: Callable[[], object]) -> TeardownToken:
         if self._closed:
             raise LifecycleClosedError("extension lifecycle is torn down")
-        self._teardowns.append(handler)
-        return TeardownToken(generation=self._generation, index=len(self._teardowns) - 1)
+        identifier = self._next_identifier
+        self._next_identifier += 1
+        self._teardowns[identifier] = handler
+        return TeardownToken(generation=self._generation, identifier=identifier)
 
     def unregister(self, token: TeardownToken) -> None:
         if token.generation != self._generation or self._closed:
             return
-        if 0 <= token.index < len(self._teardowns):
-            del self._teardowns[token.index]
+        if self._teardowns.pop(token.identifier, None) is not None:
             self.unregistered_count += 1
 
     def begin_generation(self) -> None:
         """Reopen registration for a reloaded set of extensions."""
+        if not self._closed:
+            raise LifecycleClosedError("active extension generation must be torn down first")
+        self._generation += 1
         self._closed = False
 
-    def teardown(self) -> None:
+    def teardown(self) -> tuple[BaseException, ...]:
         if self._closed:
-            return
-        while self._teardowns:
-            handler = self._teardowns.pop()
-            handler()
+            return ()
         self._closed = True
+        handlers = tuple(reversed(self._teardowns.values()))
+        self._teardowns.clear()
+        errors: list[BaseException] = []
+        for handler in handlers:
+            try:
+                handler()
+            except Exception as error:
+                errors.append(error)
+        return tuple(errors)
 
 
 __all__ = ["ExtensionLifecycle", "LifecycleClosedError", "TeardownToken"]

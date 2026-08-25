@@ -46,3 +46,50 @@ def test_registration_after_close_is_rejected_until_new_generation() -> None:
     lifecycle.teardown()
 
     assert late_calls == ["reloaded"]
+
+
+def test_old_token_cannot_unregister_handler_from_new_generation() -> None:
+    lifecycle = ExtensionLifecycle()
+    old = lifecycle.register_teardown(lambda: None)
+    lifecycle.teardown()
+    lifecycle.begin_generation()
+    calls: list[str] = []
+    lifecycle.register_teardown(lambda: calls.append("new"))
+
+    lifecycle.unregister(old)
+    lifecycle.teardown()
+
+    assert calls == ["new"]
+
+
+def test_unregister_tokens_remain_stable_after_earlier_removal() -> None:
+    lifecycle = ExtensionLifecycle()
+    first = lifecycle.register_teardown(lambda: None)
+    calls: list[str] = []
+    second = lifecycle.register_teardown(lambda: calls.append("second"))
+
+    lifecycle.unregister(first)
+    lifecycle.unregister(second)
+    lifecycle.teardown()
+
+    assert calls == []
+    assert lifecycle.unregistered_count == 2
+
+
+def test_teardown_isolates_handler_failures_and_continues() -> None:
+    lifecycle = ExtensionLifecycle()
+    calls: list[str] = []
+    lifecycle.register_teardown(lambda: calls.append("first"))
+
+    def fail() -> None:
+        calls.append("failing")
+        raise RuntimeError("extension cleanup failed")
+
+    lifecycle.register_teardown(fail)
+    lifecycle.register_teardown(lambda: calls.append("last"))
+
+    errors = lifecycle.teardown()
+
+    assert calls == ["last", "failing", "first"]
+    assert len(errors) == 1
+    assert isinstance(errors[0], RuntimeError)

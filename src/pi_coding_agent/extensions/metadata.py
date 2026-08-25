@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 MANIFEST_NAME = "pi-extension.json"
+MAX_MANIFEST_BYTES = 64 * 1024
 
 
 class ExtensionManifestError(ValueError):
@@ -23,8 +24,11 @@ class ExtensionMetadata:
 
 
 def read_manifest(extension_dir: Path) -> ExtensionMetadata:
-    manifest_path = extension_dir / MANIFEST_NAME
+    extension_path = extension_dir.resolve()
+    manifest_path = extension_path / MANIFEST_NAME
     try:
+        if manifest_path.stat().st_size > MAX_MANIFEST_BYTES:
+            raise ExtensionManifestError(f"manifest exceeds size limit: {manifest_path}")
         raw = manifest_path.read_text(encoding="utf-8")
     except OSError as error:
         raise ExtensionManifestError(f"missing manifest: {manifest_path}") from error
@@ -41,12 +45,21 @@ def read_manifest(extension_dir: Path) -> ExtensionMetadata:
         if not isinstance(value, str) or not value.strip():
             raise ExtensionManifestError(f"manifest field {field!r} must be a non-empty string")
         fields[field] = value
+    entry_path = (extension_path / fields["entry"]).resolve()
+    if not entry_path.is_relative_to(extension_path):
+        raise ExtensionManifestError(f"manifest entry escapes extension directory: {manifest_path}")
     return ExtensionMetadata(
         name=fields["name"],
         version=fields["version"],
         entry=fields["entry"],
-        path=extension_dir.resolve(),
+        path=extension_path,
     )
 
 
-__all__ = ["ExtensionManifestError", "ExtensionMetadata", "MANIFEST_NAME", "read_manifest"]
+__all__ = [
+    "ExtensionManifestError",
+    "ExtensionMetadata",
+    "MANIFEST_NAME",
+    "MAX_MANIFEST_BYTES",
+    "read_manifest",
+]
