@@ -5,13 +5,16 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
+from .width import pad_to_width, sanitize_terminal_text, truncate_to_width
+
 
 class Component(Protocol):
     def render(self, width: int) -> tuple[str, ...]: ...
 
 
 def _pad(line: str, width: int) -> str:
-    return line[:width].ljust(width)
+    clean = sanitize_terminal_text(line).replace("\n", " ").replace("\t", "   ")
+    return pad_to_width(truncate_to_width(clean, width), width)
 
 
 class SelectList:

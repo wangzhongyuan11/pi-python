@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from .layout import wrap_text
-from .width import visible_width
+from .width import sanitize_terminal_text, truncate_to_width, visible_width
 
 
 class Component(Protocol):
@@ -35,12 +35,13 @@ class Text:
         self._text = text
 
     def render(self, width: int) -> tuple[str, ...]:
-        if not self._text.strip():
+        text = sanitize_terminal_text(self._text)
+        if not text.strip():
             return ()
         content_width = max(1, width - self._padding_x * 2)
         margin = " " * self._padding_x
         body = tuple(
-            _pad(f"{margin}{line}{margin}", width) for line in wrap_text(self._text, content_width)
+            _pad(f"{margin}{line}{margin}", width) for line in wrap_text(text, content_width)
         )
         edge = (_blank(width),) * self._padding_y
         return (*edge, *body, *edge)
@@ -138,7 +139,8 @@ class Status:
         self._text = text
 
     def render(self, width: int) -> tuple[str, ...]:
-        return (_pad(self._text[:width], width),)
+        text = sanitize_terminal_text(self._text).replace("\n", " ").replace("\t", "   ")
+        return (_pad(truncate_to_width(text, width), width),)
 
 
 def render_lines(component: Component, width: int) -> Sequence[str]:

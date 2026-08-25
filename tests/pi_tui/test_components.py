@@ -10,6 +10,10 @@ def test_wrap_text_breaks_on_words_and_hard_wraps_long_words() -> None:
     assert wrap_text("", 8) == ()
 
 
+def test_wrap_text_uses_terminal_cells_for_wide_characters() -> None:
+    assert wrap_text("中文中文", 4) == ("中文", "中文")
+
+
 def test_text_renders_padded_lines_at_eighty_columns() -> None:
     text = Text("hello world", padding_x=1, padding_y=0)
     lines = text.render(80)
@@ -59,6 +63,13 @@ def test_box_wraps_children_in_padding() -> None:
 def test_status_renders_single_truncated_line() -> None:
     assert Status("ready").render(10) == ("ready     ",)
     assert Status("overflowing-status").render(5) == ("overf",)
+
+
+def test_components_truncate_wide_text_and_remove_terminal_controls() -> None:
+    assert Status("中文中文").render(4) == ("中文",)
+    assert Text("safe\x1b[2Jowned", padding_x=0, padding_y=0).render(20) == (
+        "safeowned" + " " * 11,
+    )
 
 
 def test_composed_view_snapshots_at_full_and_narrow_screens() -> None:
