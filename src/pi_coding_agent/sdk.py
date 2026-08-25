@@ -173,10 +173,14 @@ async def create_agent_session(
             )
         services.resources.discover(target.cwd)
         await services.extensions.start()
+        registered_tools = (*selected.tools, *services.extensions.tools)
+        tool_names = [tool.name for tool in registered_tools]
+        if len(set(tool_names)) != len(tool_names):
+            raise ValueError("duplicate tool names across configured and extension tools")
         tools = (
-            selected.tools
+            registered_tools
             if selected.permission_gate is None
-            else selected.permission_gate.wrap_tools(selected.tools)
+            else selected.permission_gate.wrap_tools(registered_tools)
         )
         agent = Agent(
             model=agent_model,

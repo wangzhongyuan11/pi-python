@@ -5,9 +5,15 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
-from pi_ai import FakeProvider, Model, fake_assistant_message, fake_model
+from pi_agent import AgentTool, AgentToolResult
+from pi_ai import FakeProvider, Model, TextContent, fake_assistant_message, fake_model
 from pi_coding_agent.branch_summary import BranchSummarizer
+from pi_coding_agent.builtin_extensions.permission_gate import (
+    PermissionDeniedError,
+    PermissionGate,
+)
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.ports import ResourceDescriptor
 from pi_coding_agent.sdk import CreateAgentSessionOptions, create_agent_session
@@ -96,6 +102,10 @@ def test_sdk_starts_resources_and_extensions_and_closes_extensions(tmp_path: Pat
             self.started = 0
             self.closed = 0
 
+        @property
+        def tools(self):
+            return ()
+
         async def start(self) -> tuple[ResourceDescriptor, ...]:
             self.started += 1
             return ()
@@ -125,6 +135,59 @@ def test_sdk_starts_resources_and_extensions_and_closes_extensions(tmp_path: Pat
     assert resources.calls == [tmp_path.resolve()]
     assert extensions.started == 1
     assert extensions.closed == 1
+
+
+def test_sdk_adds_extension_tools_before_applying_permission_gate(tmp_path: Path) -> None:
+    class Input(BaseModel):
+        value: str
+
+    async def execute(*_args: object) -> AgentToolResult[None]:
+        return AgentToolResult(content=(TextContent(text="ran"),), details=None)
+
+    tool = AgentTool(
+        name="extension-tool",
+        label="extension-tool",
+        description="extension tool",
+        parameter_type=Input,
+        execute=execute,
+    )
+
+    class Resources:
+        def discover(self, cwd: Path) -> tuple[ResourceDescriptor, ...]:
+            del cwd
+            return ()
+
+    class Extensions:
+        @property
+        def tools(self):
+            return (tool,)
+
+        async def start(self) -> tuple[ResourceDescriptor, ...]:
+            return ()
+
+        async def close(self) -> None:
+            return None
+
+    async def scenario() -> None:
+        provider = FakeProvider()
+        created = await create_agent_session(
+            CreateAgentSessionOptions(
+                cwd=tmp_path,
+                model_runtime=ModelRuntime(provider=provider, model=provider.models[0]),
+                session_manager=_manager(tmp_path),
+                permission_gate=PermissionGate(enabled=True, confirmer=lambda _name: False),
+                service_overrides=ServiceOverrides(
+                    resources=Resources(),
+                    extensions=Extensions(),
+                ),
+            )
+        )
+        wrapped = created.session.state.tools[0]
+        with pytest.raises(PermissionDeniedError):
+            await wrapped.execute("call", Input(value="x"))
+        await created.close()
+
+    asyncio.run(scenario())
 
 
 def test_factory_rejects_session_cwd_mismatch(tmp_path: Path) -> None:

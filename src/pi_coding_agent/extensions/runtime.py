@@ -5,6 +5,9 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
+
+from pi_agent import AgentTool
 
 from ..ports import ResourceDescriptor, ResourceSource
 from ..resources.default_loader import DefaultResourceLoader
@@ -46,6 +49,15 @@ class DefaultExtensionRuntime:
     @property
     def diagnostics(self) -> tuple[str, ...]:
         return tuple(self._diagnostics)
+
+    @property
+    def tools(self) -> tuple[AgentTool[Any, Any], ...]:
+        tools: list[AgentTool[Any, Any]] = []
+        for registration in self._registry.registrations("tool"):
+            payload: object | None = registration.payload
+            if isinstance(payload, AgentTool):
+                tools.append(cast("AgentTool[Any, Any]", payload))
+        return tuple(tools)
 
     def grant_trust(self, metadata: ExtensionMetadata) -> None:
         self._loader.grant_trust(metadata)

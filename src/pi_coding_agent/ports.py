@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
+from pi_agent import AgentTool
 from pi_ai import JsonValue
 
 from .session.importer import import_pi_session
@@ -60,12 +61,19 @@ class NoopResourceLoader:
 
 
 class ExtensionRuntime(Protocol):
+    @property
+    def tools(self) -> tuple[AgentTool[Any, Any], ...]: ...
+
     async def start(self) -> tuple[ResourceDescriptor, ...]: ...
 
     async def close(self) -> None: ...
 
 
 class NoopExtensionRuntime:
+    @property
+    def tools(self) -> tuple[AgentTool[Any, Any], ...]:
+        return ()
+
     async def start(self) -> tuple[ResourceDescriptor, ...]:
         return ()
 
