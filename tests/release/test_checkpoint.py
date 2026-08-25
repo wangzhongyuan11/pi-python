@@ -10,10 +10,10 @@ from scripts.verify_checkpoint import CheckpointError, project_version, verify_w
 ROOT = Path(__file__).parents[2]
 
 
-def test_phase_ten_checkpoint_version_and_changelog_are_aligned() -> None:
-    assert project_version(ROOT / "pyproject.toml") == "0.4.0"
+def test_phase_eleven_checkpoint_version_and_changelog_are_aligned() -> None:
+    assert project_version(ROOT / "pyproject.toml") == "0.5.0"
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "## 0.4.0" in changelog
+    assert "## 0.5.0" in changelog
 
 
 def test_checkpoint_rejects_wheel_source_that_differs_from_checkout(tmp_path: Path) -> None:
