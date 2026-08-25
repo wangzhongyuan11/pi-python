@@ -91,3 +91,17 @@ def test_missing_package_root_records_diagnostic_but_loads_rest(tmp_path: Path) 
 
     assert any(item.name == "kept" for item in result.descriptors)
     assert any("does-not-exist" in diagnostic for diagnostic in result.diagnostics)
+
+
+def test_default_loader_satisfies_product_discovery_port(tmp_path: Path) -> None:
+    cwd = tmp_path / "project"
+    agent_dir = tmp_path / "agent"
+    _make_skill(agent_dir, "", "global")
+    loader = DefaultResourceLoader(agent_dir=agent_dir)
+
+    descriptors = loader.discover(cwd)
+
+    assert [(item.kind, item.name, item.source) for item in descriptors] == [
+        ("skill", "global", "global")
+    ]
+    assert loader.last_result.descriptors == descriptors

@@ -9,7 +9,9 @@ import pytest
 from pi_ai import FakeProvider, Model, fake_assistant_message, fake_model
 from pi_coding_agent.branch_summary import BranchSummarizer
 from pi_coding_agent.model_runtime import ModelRuntime
+from pi_coding_agent.ports import ResourceDescriptor
 from pi_coding_agent.sdk import CreateAgentSessionOptions, create_agent_session
+from pi_coding_agent.services import ServiceOverrides
 from pi_coding_agent.session.manager import SessionManager
 from pi_coding_agent.session.models import (
     BranchSummaryEntry,
@@ -78,6 +80,51 @@ def test_async_context_cleanup_runs_when_caller_raises(tmp_path: Path) -> None:
         return owned_session.is_closed
 
     assert asyncio.run(scenario())
+
+
+def test_sdk_starts_resources_and_extensions_and_closes_extensions(tmp_path: Path) -> None:
+    class Resources:
+        def __init__(self) -> None:
+            self.calls: list[Path] = []
+
+        def discover(self, cwd: Path) -> tuple[ResourceDescriptor, ...]:
+            self.calls.append(cwd)
+            return ()
+
+    class Extensions:
+        def __init__(self) -> None:
+            self.started = 0
+            self.closed = 0
+
+        async def start(self) -> tuple[ResourceDescriptor, ...]:
+            self.started += 1
+            return ()
+
+        async def close(self) -> None:
+            self.closed += 1
+
+    async def scenario() -> tuple[Resources, Extensions]:
+        resources = Resources()
+        extensions = Extensions()
+        provider = FakeProvider()
+        created = await create_agent_session(
+            CreateAgentSessionOptions(
+                cwd=tmp_path,
+                model_runtime=ModelRuntime(provider=provider, model=provider.models[0]),
+                session_manager=_manager(tmp_path),
+                service_overrides=ServiceOverrides(
+                    resources=resources,
+                    extensions=extensions,
+                ),
+            )
+        )
+        await created.close()
+        return resources, extensions
+
+    resources, extensions = asyncio.run(scenario())
+    assert resources.calls == [tmp_path.resolve()]
+    assert extensions.started == 1
+    assert extensions.closed == 1
 
 
 def test_factory_rejects_session_cwd_mismatch(tmp_path: Path) -> None:

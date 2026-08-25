@@ -93,3 +93,19 @@ def test_teardown_isolates_handler_failures_and_continues() -> None:
     assert calls == ["last", "failing", "first"]
     assert len(errors) == 1
     assert isinstance(errors[0], RuntimeError)
+
+
+def test_async_teardown_handlers_are_awaited() -> None:
+    import asyncio
+
+    lifecycle = ExtensionLifecycle()
+    calls: list[str] = []
+
+    async def close() -> None:
+        await asyncio.sleep(0)
+        calls.append("closed")
+
+    lifecycle.register_teardown(close)
+
+    assert asyncio.run(lifecycle.teardown_async()) == ()
+    assert calls == ["closed"]

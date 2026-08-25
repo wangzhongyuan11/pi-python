@@ -85,7 +85,7 @@ class AgentSession:
         services: ProductServices,
         entry_id_factory: Callable[[], str] = _entry_id,
         timestamp_factory: Callable[[], str] = _timestamp,
-        on_close: Callable[[RuntimeReason], None] | None = None,
+        on_close: Callable[[RuntimeReason], object] | None = None,
         retry_policy: RetryPolicy | None = None,
         sleep: Sleep = asyncio.sleep,
         overflow_recovery: OverflowRecovery | None = None,
@@ -276,7 +276,9 @@ class AgentSession:
         await self.agent.wait_for_idle()
         self._unsubscribe_agent()
         if self._on_close is not None:
-            self._on_close(reason)
+            result = self._on_close(reason)
+            if inspect.isawaitable(result):
+                await result
 
     async def _handle_agent_event(self, event: AgentEvent, signal: asyncio.Event) -> None:
         entry: MessageEntry | None = None

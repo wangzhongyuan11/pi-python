@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,7 +12,7 @@ from ..extensions.metadata import ExtensionMetadata
 from ..ports import ResourceDescriptor, ResourceKind
 from .descriptors import ResourceSource  # re-exported type value guard
 from .discovery import DiscoveryInputs, discover_resources
-from .trust import TrustDecision, TrustStoreError
+from .trust import ProjectTrustStore, TrustDecision, TrustStoreError
 
 _PACKAGE_SOURCE: ResourceSource = "package"
 _GLOBAL_LAYERS: frozenset[ResourceSource] = frozenset({"global", "builtin"})
@@ -27,20 +28,42 @@ class ResourceLoadResult:
 class DefaultResourceLoader:
     """First-wins composition across explicit/project/compat/package/global layers."""
 
-    __slots__ = ("_extension_roots", "_package_roots", "_trust_store")
+    __slots__ = (
+        "_agent_dir",
+        "_extension_roots",
+        "_last_result",
+        "_package_roots",
+        "_trust_store",
+    )
 
     def __init__(
         self,
         *,
-        trust_store: object | None = None,
+        trust_store: ProjectTrustStore | None = None,
         package_roots: Mapping[ResourceKind, Sequence[Path]] | None = None,
         extension_roots: Sequence[Path] = (),
+        agent_dir: Path | None = None,
     ) -> None:
         self._trust_store = trust_store
         self._package_roots: dict[ResourceKind, tuple[Path, ...]] = {
             kind: tuple(roots) for kind, roots in (package_roots or {}).items()
         }
         self._extension_roots = tuple(extension_roots)
+        self._agent_dir = (agent_dir or _default_agent_dir()).expanduser().resolve()
+        self._last_result: ResourceLoadResult | None = None
+
+    @property
+    def agent_dir(self) -> Path:
+        return self._agent_dir
+
+    @property
+    def last_result(self) -> ResourceLoadResult:
+        if self._last_result is None:
+            raise RuntimeError("resources have not been discovered yet")
+        return self._last_result
+
+    def discover(self, cwd: Path) -> tuple[ResourceDescriptor, ...]:
+        return self.load(cwd=cwd, agent_dir=self._agent_dir).descriptors
 
     def load(self, *, cwd: Path, agent_dir: Path) -> ResourceLoadResult:
         diagnostics: list[str] = []
@@ -60,12 +83,17 @@ class DefaultResourceLoader:
             )
         )
         descriptors = _insert_package_layer(descriptors, self._collect_package_layer(diagnostics))
-        extensions = _collect_extensions(self._extension_roots, diagnostics)
-        return ResourceLoadResult(
+        extension_roots = [*self._extension_roots, agent_dir / "extensions"]
+        if project_trusted:
+            extension_roots.append(cwd / ".pi-python" / "extensions")
+        extensions = _collect_extensions(extension_roots, diagnostics)
+        result = ResourceLoadResult(
             descriptors=tuple(descriptors),
             extensions=extensions,
             diagnostics=tuple(diagnostics),
         )
+        self._last_result = result
+        return result
 
     def _collect_package_layer(self, diagnostics: list[str]) -> list[tuple[ResourceKind, Path]]:
         collected: list[tuple[ResourceKind, Path]] = []
@@ -120,17 +148,26 @@ def _collect_extensions(
     roots: Sequence[Path], diagnostics: list[str]
 ) -> tuple[ExtensionMetadata, ...]:
     discovered: list[ExtensionMetadata] = []
+    seen: set[Path] = set()
     for root in roots:
+        resolved = root.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
         if not root.is_dir():
-            diagnostics.append(f"extension root missing: {root}")
             continue
         discovered.extend(discover_extensions(root))
     return tuple(discovered)
 
 
-def _decision_of(trust_store: object, cwd: Path) -> TrustDecision:
+def _default_agent_dir() -> Path:
+    configured = os.environ.get("PI_PYTHON_AGENT_DIR")
+    return Path(configured) if configured else Path.home() / ".pi-python" / "agent"
+
+
+def _decision_of(trust_store: ProjectTrustStore, cwd: Path) -> TrustDecision:
     try:
-        return trust_store.get(cwd)  # type: ignore[attr-defined]
+        return trust_store.get(cwd)
     except TrustStoreError as error:
         raise RuntimeError(f"trust store failure: {error}") from error
 

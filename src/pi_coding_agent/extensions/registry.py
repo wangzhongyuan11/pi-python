@@ -97,6 +97,13 @@ class CapabilityRegistry:
         ]
         return tuple(items)
 
+    def remove_source(self, source: str) -> None:
+        self._items = {
+            key: registration
+            for key, registration in self._items.items()
+            if registration.source != source
+        }
+
 
 __all__ = [
     "REGISTRATION_KINDS",

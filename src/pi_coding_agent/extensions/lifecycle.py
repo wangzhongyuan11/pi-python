@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -69,6 +70,22 @@ class ExtensionLifecycle:
         for handler in handlers:
             try:
                 handler()
+            except Exception as error:
+                errors.append(error)
+        return tuple(errors)
+
+    async def teardown_async(self) -> tuple[BaseException, ...]:
+        if self._closed:
+            return ()
+        self._closed = True
+        handlers = tuple(reversed(self._teardowns.values()))
+        self._teardowns.clear()
+        errors: list[BaseException] = []
+        for handler in handlers:
+            try:
+                result = handler()
+                if inspect.isawaitable(result):
+                    await result
             except Exception as error:
                 errors.append(error)
         return tuple(errors)

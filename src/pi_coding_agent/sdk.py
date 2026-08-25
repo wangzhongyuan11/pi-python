@@ -169,6 +169,8 @@ async def create_agent_session(
             thinking_level = clamp_thinking_level(
                 agent_model, _restore_thinking_level(context.thinking_level)
             )
+        services.resources.discover(target.cwd)
+        await services.extensions.start()
         agent = Agent(
             model=agent_model,
             stream_function=model_runtime.stream,
@@ -198,6 +200,10 @@ async def create_agent_session(
             if selected.branch_summarizer is not None
             else None
         )
+
+        async def close_services(_reason: object) -> None:
+            await services.extensions.close()
+
         session = AgentSession(
             agent=agent,
             session_manager=target.session_manager,
@@ -208,6 +214,7 @@ async def create_agent_session(
             compaction_keep_recent_tokens=selected.compaction_keep_recent_tokens,
             compaction_token_count=selected.compaction_token_count,
             branch_summary_service=branch_summary_service,
+            on_close=close_services,
         )
         return RuntimeComponents(session=session, services=services)
 
