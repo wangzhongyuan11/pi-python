@@ -63,3 +63,32 @@ def test_shared_registry_detects_cross_extension_conflicts() -> None:
 
     with pytest.raises(RegistryConflictError):
         second.define_shortcut("ctrl+shift+t")
+
+
+def test_registered_capabilities_keep_their_executable_payloads() -> None:
+    api = ExtensionAPI("my-ext")
+
+    def command(args: str) -> str:
+        return args.upper()
+
+    tool = object()
+    provider = object()
+    api.define_tool("search", tool)
+    api.define_command("shout", command)
+    api.define_provider("custom", provider)
+
+    assert api.registry.lookup("tool", "search").payload is tool  # type: ignore[union-attr]
+    registered_command = api.registry.lookup("command", "shout")
+    assert registered_command is not None
+    assert registered_command.payload is command
+    assert registered_command.payload("hello") == "HELLO"  # type: ignore[operator]
+    assert api.registry.lookup("provider", "custom").payload is provider  # type: ignore[union-attr]
+
+
+def test_flag_values_are_dynamic_and_scoped_to_registering_extension() -> None:
+    api = ExtensionAPI("my-ext")
+    api.define_flag("--verbose", default=False)
+
+    assert api.get_flag("--verbose") is False
+    api.set_flag("--verbose", True)
+    assert api.get_flag("--verbose") is True

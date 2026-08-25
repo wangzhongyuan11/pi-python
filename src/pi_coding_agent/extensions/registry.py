@@ -32,6 +32,21 @@ class Registration:
     kind: RegistrationKind
     name: str
     source: str
+    payload: object | None = None
+
+
+@dataclass(slots=True)
+class FlagState:
+    value_type: Literal["boolean", "string"]
+    value: bool | str | None
+
+    def set(self, value: bool | str | None) -> None:
+        if value is not None and (
+            (self.value_type == "boolean" and not isinstance(value, bool))
+            or (self.value_type == "string" and not isinstance(value, str))
+        ):
+            raise TypeError(f"expected {self.value_type} flag value")
+        self.value = value
 
 
 def _validate_name(kind: RegistrationKind, name: str) -> str:
@@ -50,7 +65,13 @@ class CapabilityRegistry:
     def __init__(self) -> None:
         self._items: dict[tuple[RegistrationKind, str], Registration] = {}
 
-    def register(self, kind: RegistrationKind, name: str, source: str) -> Registration:
+    def register(
+        self,
+        kind: RegistrationKind,
+        name: str,
+        source: str,
+        payload: object | None = None,
+    ) -> Registration:
         validated = _validate_name(kind, name)
         key = (kind, validated)
         if key in self._items:
@@ -58,7 +79,7 @@ class CapabilityRegistry:
             raise RegistryConflictError(
                 f"{kind} {validated!r} already registered by {existing.source!r}"
             )
-        registration = Registration(kind=kind, name=validated, source=source)
+        registration = Registration(kind=kind, name=validated, source=source, payload=payload)
         self._items[key] = registration
         return registration
 
@@ -80,6 +101,7 @@ class CapabilityRegistry:
 __all__ = [
     "REGISTRATION_KINDS",
     "CapabilityRegistry",
+    "FlagState",
     "Registration",
     "RegistrationKind",
     "RegistryConflictError",
