@@ -39,21 +39,42 @@ def load_entries(path: Path) -> tuple[LockEntry, ...]:
     if not isinstance(payload, list):
         raise LockfileError(f"lockfile must contain a list: {path}")
     entries: list[LockEntry] = []
+    names: set[str] = set()
     for raw_item in cast("list[object]", payload):
         if not isinstance(raw_item, dict):
             raise LockfileError(f"lockfile entry must be an object: {path}")
         item = cast("dict[str, object]", raw_item)
+        name = _required_string(item, "name", path)
+        if name in names:
+            raise LockfileError(f"duplicate lockfile entry {name!r}: {path}")
+        names.add(name)
+        spec = _required_string(item, "spec", path)
+        location = _required_string(item, "location", path)
         entries.append(
             LockEntry(
-                name=str(item["name"]),
-                spec=str(item["spec"]),
-                location=str(item["location"]),
-                version=cast("str | None", item.get("version")),
-                commit=cast("str | None", item.get("commit")),
-                content_hash=cast("str | None", item.get("content_hash")),
+                name=name,
+                spec=spec,
+                location=location,
+                version=_optional_string(item, "version", path),
+                commit=_optional_string(item, "commit", path),
+                content_hash=_optional_string(item, "content_hash", path),
             )
         )
     return tuple(entries)
+
+
+def _required_string(item: dict[str, object], field: str, path: Path) -> str:
+    value = item.get(field)
+    if not isinstance(value, str) or not value:
+        raise LockfileError(f"lockfile entry field {field!r} must be a non-empty string: {path}")
+    return value
+
+
+def _optional_string(item: dict[str, object], field: str, path: Path) -> str | None:
+    value = item.get(field)
+    if value is not None and not isinstance(value, str):
+        raise LockfileError(f"lockfile entry field {field!r} must be a string or null: {path}")
+    return value
 
 
 def save_entries(path: Path, entries: Sequence[LockEntry]) -> None:

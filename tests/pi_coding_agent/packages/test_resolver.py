@@ -7,6 +7,7 @@ import pytest
 
 from pi_coding_agent.packages.resolver import (
     OfflineResolutionError,
+    PackageResolutionError,
     RefDriftError,
     resolve_source,
 )
@@ -73,6 +74,17 @@ def test_local_resolution_hashes_directory_content_deterministically(tmp_path: P
 
     assert changed.content_hash is not None
     assert changed.content_hash != first.content_hash
+
+
+def test_local_resolution_rejects_missing_or_non_directory_paths(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    file_path = tmp_path / "package.py"
+    file_path.write_text("x = 1\n", encoding="utf-8")
+
+    with pytest.raises(PackageResolutionError):
+        resolve_source(parse_package_spec(str(missing)))
+    with pytest.raises(PackageResolutionError):
+        resolve_source(parse_package_spec(str(file_path)))
 
 
 def test_git_resolution_reports_commit_and_detects_ref_drift() -> None:

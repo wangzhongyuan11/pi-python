@@ -70,6 +70,8 @@ def _resolve_local(spec: PackageSpec, root: Path | None) -> ResolvedSource:
     base = root if root is not None else Path.cwd()
     path = Path(spec.location)
     absolute = (path if path.is_absolute() else base / path).resolve()
+    if not absolute.is_dir():
+        raise PackageResolutionError(f"local package is not a directory: {absolute}")
     digest = hashlib.sha256()
     for file in sorted(absolute.rglob("*")):
         if not file.is_file():
