@@ -1,3 +1,13 @@
 """Bundled, default-off extensions for the coding agent."""
 
-__all__: list[str] = []
+from .permission_gate import PermissionDecision, PermissionDeniedError, PermissionGate
+from .powershell import PowerShellExtension, PowerShellInput, PowerShellToolError
+
+__all__ = [
+    "PermissionDecision",
+    "PermissionDeniedError",
+    "PermissionGate",
+    "PowerShellExtension",
+    "PowerShellInput",
+    "PowerShellToolError",
+]
