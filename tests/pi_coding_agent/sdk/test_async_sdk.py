@@ -106,6 +106,10 @@ def test_sdk_starts_resources_and_extensions_and_closes_extensions(tmp_path: Pat
         def tools(self):
             return ()
 
+        @property
+        def providers(self):
+            return ()
+
         async def start(self) -> tuple[ResourceDescriptor, ...]:
             self.started += 1
             return ()
@@ -162,6 +166,10 @@ def test_sdk_adds_extension_tools_before_applying_permission_gate(tmp_path: Path
         def tools(self):
             return (tool,)
 
+        @property
+        def providers(self):
+            return ()
+
         async def start(self) -> tuple[ResourceDescriptor, ...]:
             return ()
 
@@ -188,6 +196,79 @@ def test_sdk_adds_extension_tools_before_applying_permission_gate(tmp_path: Path
         await created.close()
 
     asyncio.run(scenario())
+
+
+def test_sdk_registers_extension_provider_before_restoring_session_model(tmp_path: Path) -> None:
+    class OtherProvider(FakeProvider):
+        @property
+        def id(self) -> str:
+            return "other"
+
+        @property
+        def models(self) -> tuple[Model, ...]:
+            return (replace(fake_model(), provider="other", id="other-model"),)
+
+    class Resources:
+        def discover(self, cwd: Path) -> tuple[ResourceDescriptor, ...]:
+            del cwd
+            return ()
+
+    class Extensions:
+        def __init__(self, provider: OtherProvider) -> None:
+            self._provider = provider
+
+        @property
+        def tools(self):
+            return ()
+
+        @property
+        def providers(self):
+            return (self._provider,)
+
+        async def start(self) -> tuple[ResourceDescriptor, ...]:
+            return ()
+
+        async def close(self) -> None:
+            return None
+
+    async def scenario() -> tuple[str, str]:
+        manager = _manager(tmp_path)
+        manager.append(
+            SessionInfoEntry(
+                type="session_info",
+                id="root",
+                parent_id=None,
+                timestamp="2026-08-24T00:00:01Z",
+            )
+        )
+        manager.append(
+            ModelChangeEntry(
+                type="model_change",
+                id="model",
+                parent_id="root",
+                timestamp="2026-08-24T00:00:02Z",
+                provider="other",
+                model_id="other-model",
+            )
+        )
+        primary = FakeProvider()
+        other = OtherProvider()
+        created = await create_agent_session(
+            CreateAgentSessionOptions(
+                cwd=tmp_path,
+                model_runtime=ModelRuntime(provider=primary, model=primary.models[0]),
+                session_manager=manager,
+                service_overrides=ServiceOverrides(
+                    resources=Resources(),
+                    extensions=Extensions(other),
+                ),
+            )
+        )
+        state = created.session.state
+        await created.close()
+        return state.model.provider, state.model.id
+
+    assert asyncio.run(scenario()) == ("other", "other-model")
 
 
 def test_factory_rejects_session_cwd_mismatch(tmp_path: Path) -> None:

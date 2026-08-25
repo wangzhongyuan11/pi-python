@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from pi_agent import AgentTool
+from pi_ai import Provider
 
 from ..ports import ResourceDescriptor, ResourceSource
 from ..resources.default_loader import DefaultResourceLoader
@@ -58,6 +59,15 @@ class DefaultExtensionRuntime:
             if isinstance(payload, AgentTool):
                 tools.append(cast("AgentTool[Any, Any]", payload))
         return tuple(tools)
+
+    @property
+    def providers(self) -> tuple[Provider, ...]:
+        providers: list[Provider] = []
+        for registration in self._registry.registrations("provider"):
+            payload: object | None = registration.payload
+            if isinstance(payload, Provider):
+                providers.append(payload)
+        return tuple(providers)
 
     def grant_trust(self, metadata: ExtensionMetadata) -> None:
         self._loader.grant_trust(metadata)

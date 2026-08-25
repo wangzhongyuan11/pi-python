@@ -23,7 +23,7 @@ from .compaction.cutpoint import TokenCounter, estimate_entry_tokens
 from .compaction.service import CompactionService
 from .compaction.summarizer import CompactionSummarizer
 from .deepseek_credentials import DeepSeekCredentialResolver
-from .model_runtime import ModelRuntime, UnknownModelError, create_model_runtime
+from .model_runtime import ModelRuntime, create_model_runtime
 from .services import ProductServices, ServiceOverrides, create_product_services
 from .session.context import project_session_context
 from .session.importer import import_pi_session as _import_pi_session
@@ -144,6 +144,9 @@ async def create_agent_session(
         credential_resolver=resolver,
         thinking_level=selected.thinking_level,
     )
+    base_provider_id = model_runtime.provider.id
+    base_model_id = model_runtime.model.id
+    extension_provider_ids: set[str] = set()
 
     async def factory(
         target: RuntimeTarget,
@@ -153,6 +156,17 @@ async def create_agent_session(
             if target.generation == 0
             else create_product_services(target.cwd, selected.service_overrides)
         )
+        if extension_provider_ids:
+            if model_runtime.provider.id in extension_provider_ids:
+                model_runtime.select_model(base_model_id, provider_id=base_provider_id)
+            for provider_id in tuple(extension_provider_ids):
+                model_runtime.unregister_provider(provider_id)
+            extension_provider_ids.clear()
+        services.resources.discover(target.cwd)
+        await services.extensions.start()
+        for provider in services.extensions.providers:
+            model_runtime.register_provider(provider)
+            extension_provider_ids.add(provider.id)
         messages = ()
         agent_model = model_runtime.model
         thinking_level = selected.thinking_level
@@ -161,18 +175,13 @@ async def create_agent_session(
             context = project_session_context(tree, target.session_manager.leaf_id)
             messages = context.messages
             if context.model is not None:
-                if context.model.provider != model_runtime.provider.id:
-                    raise UnknownModelError(
-                        "restored model provider "
-                        f'"{context.model.provider}" does not match runtime provider '
-                        f'"{model_runtime.provider.id}"'
-                    )
-                agent_model = model_runtime.select_model(context.model.model_id)
+                agent_model = model_runtime.select_model(
+                    context.model.model_id,
+                    provider_id=context.model.provider,
+                )
             thinking_level = clamp_thinking_level(
                 agent_model, _restore_thinking_level(context.thinking_level)
             )
-        services.resources.discover(target.cwd)
-        await services.extensions.start()
         registered_tools = (*selected.tools, *services.extensions.tools)
         tool_names = [tool.name for tool in registered_tools]
         if len(set(tool_names)) != len(tool_names):

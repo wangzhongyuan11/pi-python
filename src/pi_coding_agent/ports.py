@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from pi_agent import AgentTool
-from pi_ai import JsonValue
+from pi_ai import JsonValue, Provider
 
 from .session.importer import import_pi_session
 from .session.models import ImportResult
@@ -64,6 +64,9 @@ class ExtensionRuntime(Protocol):
     @property
     def tools(self) -> tuple[AgentTool[Any, Any], ...]: ...
 
+    @property
+    def providers(self) -> tuple[Provider, ...]: ...
+
     async def start(self) -> tuple[ResourceDescriptor, ...]: ...
 
     async def close(self) -> None: ...
@@ -72,6 +75,10 @@ class ExtensionRuntime(Protocol):
 class NoopExtensionRuntime:
     @property
     def tools(self) -> tuple[AgentTool[Any, Any], ...]:
+        return ()
+
+    @property
+    def providers(self) -> tuple[Provider, ...]:
         return ()
 
     async def start(self) -> tuple[ResourceDescriptor, ...]:
