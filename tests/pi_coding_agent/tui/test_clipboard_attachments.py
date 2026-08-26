@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -51,3 +52,20 @@ def test_image_attachment_requires_supported_format_and_size(tmp_path: Path) -> 
 def test_missing_files_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(AttachmentError):
         build_text_file_attachment(tmp_path / "missing.txt")
+
+
+def test_attachment_io_failures_use_the_public_error_contract() -> None:
+    class UnreadableImage:
+        suffix = ".png"
+        name = "shot.png"
+
+        def is_file(self) -> bool:
+            return True
+
+        def stat(self) -> object:
+            raise OSError("denied")
+
+    image = cast("Path", UnreadableImage())
+
+    with pytest.raises(AttachmentError, match="cannot inspect image"):
+        build_image_attachment(image, max_bytes=10)
