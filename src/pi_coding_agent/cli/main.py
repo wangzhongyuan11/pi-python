@@ -149,6 +149,10 @@ def main(
             stderr=errors,
         )
     messages = cast("list[str]", arguments.messages)
+    session_dir = None
+    if arguments.session_dir:
+        candidate = Path(arguments.session_dir)
+        session_dir = (candidate if candidate.is_absolute() else runtime_cwd / candidate).resolve()
     if not messages:
         if arguments.print_mode or arguments.mode == "json":
             parser.print_help(output)
@@ -166,10 +170,9 @@ def main(
                         no_session=arguments.no_session,
                         session=arguments.session,
                         resume=arguments.resume or arguments.continue_session,
-                        session_dir=(
-                            Path(arguments.session_dir).resolve() if arguments.session_dir else None
-                        ),
+                        session_dir=session_dir,
                         model_runtime=model_runtime,
+                        tui_mode=arguments.tui_mode,
                     ),
                     stdout=output,
                     stderr=errors,
@@ -177,10 +180,6 @@ def main(
             )
         except KeyboardInterrupt:
             return 130
-    session_dir = None
-    if arguments.session_dir:
-        candidate = Path(arguments.session_dir)
-        session_dir = (candidate if candidate.is_absolute() else runtime_cwd / candidate).resolve()
     resolver = _resolver(arguments, cwd=runtime_cwd, environ=runtime_environ)
     try:
         return asyncio.run(

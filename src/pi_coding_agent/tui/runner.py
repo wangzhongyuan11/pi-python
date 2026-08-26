@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, TextIO, runtime_checkable
+from typing import Literal, Protocol, TextIO, runtime_checkable
 from uuid import uuid4
 
 from pi_ai import CredentialResolver, ModelThinkingLevel, clamp_thinking_level
@@ -42,17 +42,23 @@ class InteractiveOptions:
     resume: bool = False
     session_dir: Path | None = None
     model_runtime: ModelRuntime | None = None
+    tui_mode: Literal["regular", "fullscreen"] = "regular"
 
 
 class _StreamTerminal:
-    __slots__ = ("_output",)
+    __slots__ = ("_fullscreen", "_output")
 
-    def __init__(self, output: TextIO) -> None:
+    def __init__(self, output: TextIO, *, fullscreen: bool) -> None:
         self._output = output
+        self._fullscreen = fullscreen
 
     @property
     def columns(self) -> int:
         return max(1, shutil.get_terminal_size(fallback=(80, 24)).columns)
+
+    @property
+    def rows(self) -> int:
+        return max(1, shutil.get_terminal_size(fallback=(80, 24)).lines)
 
     def write(self, data: str) -> None:
         self._output.write(data)
@@ -68,7 +74,16 @@ class _StreamTerminal:
         self.write("\r\x1b[K")
 
     def clear_screen(self) -> None:
-        self.write("\x1b[2J\x1b[H")
+        if self._fullscreen:
+            self.write("\x1b[2J\x1b[H")
+
+    def start(self) -> None:
+        if self._fullscreen:
+            self.write("\x1b[?1049h")
+
+    def stop(self) -> None:
+        if self._fullscreen:
+            self.write("\x1b[?1049l")
 
 
 async def _prompt_toolkit_readline(prompt: str) -> str | None:
@@ -167,30 +182,37 @@ async def run_interactive(
         extensions = created.services.extensions
         if isinstance(extensions, _HasRegistry):
             dispatcher.register_registry(extensions.registry)
-        terminal = _StreamTerminal(stdout)
+        fullscreen = options.tui_mode == "fullscreen"
+        terminal = _StreamTerminal(stdout, fullscreen=fullscreen)
         renderer = ScreenRenderer(terminal)
         app = InteractiveApp(
             session=created.session,
             dispatcher=dispatcher,
             width=terminal.columns,
-            screen_sink=lambda lines: renderer.render(list(lines)),
+            screen_sink=lambda lines: renderer.render(
+                list(lines[-terminal.rows :]) if fullscreen else list(lines)
+            ),
         )
         reader = read_line or _prompt_toolkit_readline
-        while True:
-            try:
-                line = await reader("› ")
-            except KeyboardInterrupt:
-                stdout.write("\n")
-                return 130
-            if line is None or line.strip() in {"/exit", "/quit"}:
-                return 0
-            if not line.strip():
-                continue
-            try:
-                await app.handle(line)
-            except Exception as error:
-                stderr.write(f"{error}\n")
-                stderr.flush()
+        terminal.start()
+        try:
+            while True:
+                try:
+                    line = await reader("› ")
+                except KeyboardInterrupt:
+                    stdout.write("\n")
+                    return 130
+                if line is None or line.strip() in {"/exit", "/quit"}:
+                    return 0
+                if not line.strip():
+                    continue
+                try:
+                    await app.handle(line)
+                except Exception as error:
+                    stderr.write(f"{error}\n")
+                    stderr.flush()
+        finally:
+            terminal.stop()
 
 
 __all__ = ["InteractiveOptions", "ReadLine", "run_interactive"]

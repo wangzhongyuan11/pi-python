@@ -240,3 +240,28 @@ def test_interactive_terminal_sanitizes_provider_control_sequences(tmp_path: Pat
     assert code == 0
     assert "\x1b]52" not in output.getvalue()
     assert "safe answer" in output.getvalue()
+
+
+def test_fullscreen_mode_enters_and_restores_the_alternate_screen(tmp_path: Path) -> None:
+    output = StringIO()
+
+    async def exit_immediately(_prompt: str) -> str | None:
+        return None
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=ModelRuntime(provider=FakeProvider(), model=fake_model()),
+                no_session=True,
+                tui_mode="fullscreen",
+            ),
+            stdout=output,
+            stderr=StringIO(),
+            read_line=exit_immediately,
+        )
+    )
+
+    assert code == 0
+    assert output.getvalue() == "\x1b[?1049h\x1b[?1049l"

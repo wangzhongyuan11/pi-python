@@ -88,7 +88,7 @@ def test_global_api_key_before_auth_command_is_not_treated_as_a_prompt(tmp_path:
 def test_no_prompt_enters_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import pi_coding_agent.cli.main as cli_main
 
-    calls: list[Path] = []
+    calls: list[tuple[Path, str]] = []
 
     async def interactive(
         options: InteractiveOptions,
@@ -97,10 +97,10 @@ def test_no_prompt_enters_interactive_mode(tmp_path: Path, monkeypatch: pytest.M
         stderr: TextIO,
     ) -> int:
         del stdout, stderr
-        calls.append(options.cwd)
+        calls.append((options.cwd, options.tui_mode))
         return 0
 
     monkeypatch.setattr(cli_main, "run_interactive", interactive)
 
-    assert _run([], cwd=tmp_path) == (0, "", "")
-    assert calls == [tmp_path.resolve()]
+    assert _run(["--tui-mode", "fullscreen"], cwd=tmp_path) == (0, "", "")
+    assert calls == [(tmp_path.resolve(), "fullscreen")]
