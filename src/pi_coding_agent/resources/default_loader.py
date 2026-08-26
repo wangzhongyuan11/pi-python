@@ -6,16 +6,21 @@ import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 from ..extensions.loader import discover_extensions
 from ..extensions.metadata import ExtensionMetadata
 from ..ports import ResourceDescriptor, ResourceKind
 from .descriptors import ResourceSource  # re-exported type value guard
 from .discovery import DiscoveryInputs, discover_resources
-from .trust import ProjectTrustStore, TrustDecision, TrustStoreError
+from .trust import TrustDecision, TrustStoreError
 
 _PACKAGE_SOURCE: ResourceSource = "package"
 _GLOBAL_LAYERS: frozenset[ResourceSource] = frozenset({"global", "builtin"})
+
+
+class _TrustReader(Protocol):
+    def get(self, cwd: Path) -> TrustDecision: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +44,7 @@ class DefaultResourceLoader:
     def __init__(
         self,
         *,
-        trust_store: ProjectTrustStore | None = None,
+        trust_store: _TrustReader | None = None,
         package_roots: Mapping[ResourceKind, Sequence[Path]] | None = None,
         extension_roots: Sequence[Path] = (),
         agent_dir: Path | None = None,
@@ -165,7 +170,7 @@ def _default_agent_dir() -> Path:
     return Path(configured) if configured else Path.home() / ".pi-python" / "agent"
 
 
-def _decision_of(trust_store: ProjectTrustStore, cwd: Path) -> TrustDecision:
+def _decision_of(trust_store: _TrustReader, cwd: Path) -> TrustDecision:
     try:
         return trust_store.get(cwd)
     except TrustStoreError as error:

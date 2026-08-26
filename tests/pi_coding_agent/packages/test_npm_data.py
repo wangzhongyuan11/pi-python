@@ -214,4 +214,4 @@ def test_npm_pack_uses_reported_tarball_not_stale_cache(
 
     monkeypatch.setattr(npm_data_module.subprocess, "run", fake_run)
 
-    assert npm_data_module._npm_pack("acme-data", cache) == produced
+    assert build_tarball("acme-data", cache_dir=cache) == produced.resolve()

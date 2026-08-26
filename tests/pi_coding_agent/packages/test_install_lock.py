@@ -135,16 +135,20 @@ def test_installer_receives_resolved_git_commit(
 ) -> None:
     installed: dict[str, str] = {}
     commit = "a" * 40
-    monkeypatch.setattr(
-        environment_module,
-        "resolve_source",
-        lambda _spec: ResolvedSource(
+
+    def resolve(_spec: object) -> ResolvedSource:
+        return ResolvedSource(
             kind="git",
             location="https://example.com/acme/ext.git",
             version=None,
             commit=commit,
             content_hash="hash",
-        ),
+        )
+
+    monkeypatch.setattr(
+        environment_module,
+        "resolve_source",
+        resolve,
     )
     environment = ManagedEnvironment(
         root=tmp_path / "managed", installer=_fake_installer(installed)
