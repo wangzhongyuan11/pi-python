@@ -101,4 +101,5 @@ def test_switch_and_fork_drive_the_runtime_with_opened_manager(tmp_path: Path) -
 
     opened = open_session(summary.path)
     assert runtime.switched == [opened.header.id]
-    assert runtime.forked == [opened.header.id]
+    assert len(runtime.forked) == 1
+    assert runtime.forked[0] != opened.header.id

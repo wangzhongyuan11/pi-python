@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 from ..session.catalog import open_session
+from ..session.fork import fork_session
 from ..session.manager import SessionManager
 
 
@@ -75,7 +78,19 @@ async def switch_to(runtime: RuntimeLike, summary: _Summary) -> None:
 
 
 async def fork_from(runtime: RuntimeLike, summary: _Summary) -> None:
-    manager = await asyncio.to_thread(open_session, summary.path)
+    source = await asyncio.to_thread(open_session, summary.path)
+    if source.leaf_id is None:
+        raise ValueError("cannot fork an empty session")
+    timestamp = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    manager = await asyncio.to_thread(
+        fork_session,
+        summary.path,
+        leaf_id=source.leaf_id,
+        target_cwd=source.header.cwd,
+        session_dir=summary.path.parent,
+        session_id=uuid4().hex,
+        timestamp=timestamp,
+    )
     await runtime.fork(manager)
 
 

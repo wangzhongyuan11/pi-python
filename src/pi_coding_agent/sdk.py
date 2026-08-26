@@ -102,6 +102,12 @@ class CreatedAgentSession:
     def product_bootstrap(self) -> ProductBootstrap:
         return self._bootstrap
 
+    async def switch(self, manager: SessionManager) -> None:
+        await self._runtime.switch(manager)
+
+    async def fork(self, manager: SessionManager) -> None:
+        await self._runtime.fork(manager)
+
     async def close(self) -> None:
         if self._closed:
             return
