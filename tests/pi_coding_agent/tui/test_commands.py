@@ -86,6 +86,28 @@ def test_dispatcher_imports_executable_extension_commands() -> None:
     assert outcome == CommandOutcome(kind="message", text="HELLO")
 
 
+def test_registry_import_skips_conflicting_commands_and_keeps_builtin_routing() -> None:
+    dispatcher = CommandDispatcher()
+    dispatcher.register(
+        CommandSpec(
+            name="model",
+            source="builtin",
+            handler=lambda _args: CommandOutcome(kind="message", text="builtin model"),
+        )
+    )
+    api = ExtensionAPI("sample")
+    api.define_command("model", lambda _args: "extension model")
+    api.define_command("extra", lambda _args: "extension extra")
+
+    skipped = dispatcher.register_registry(api.registry)
+
+    assert skipped == ("model",)
+    outcome = asyncio.run(dispatcher.dispatch("/model"))
+    assert outcome is not None and outcome.text == "builtin model"
+    extra = asyncio.run(dispatcher.dispatch("/extra"))
+    assert extra is not None and extra.text == "extension extra"
+
+
 def test_dialog_exposes_prompt_and_targets_response_by_request_id() -> None:
     from pi_coding_agent.tui.extension_ui import DialogBridge
 

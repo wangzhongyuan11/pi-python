@@ -189,7 +189,13 @@ async def run_interactive(
         dispatcher.register(CommandSpec(name="thinking", source="builtin", handler=select_thinking))
         extensions = created.services.extensions
         if isinstance(extensions, _HasRegistry):
-            dispatcher.register_registry(extensions.registry)
+            skipped = dispatcher.register_registry(extensions.registry)
+            if skipped:
+                names = ", ".join(f"/{name}" for name in skipped)
+                stderr.write(
+                    f"skipped extension commands already provided by the product: {names}\n"
+                )
+                stderr.flush()
         fullscreen = options.tui_mode == "fullscreen"
         terminal = _StreamTerminal(stdout, fullscreen=fullscreen)
         renderer = ScreenRenderer(terminal)

@@ -43,9 +43,14 @@ class CommandDispatcher:
         dispatcher.register_registry(registry)
         return dispatcher
 
-    def register_registry(self, registry: CapabilityRegistry) -> None:
+    def register_registry(self, registry: CapabilityRegistry) -> tuple[str, ...]:
+        """Import extension commands; conflicting names are skipped and reported."""
+
+        skipped: list[str] = []
         for registration in registry.registrations("command"):
-            if callable(registration.payload):
+            if not callable(registration.payload):
+                continue
+            try:
                 self.register(
                     CommandSpec(
                         name=registration.name,
@@ -56,6 +61,9 @@ class CommandDispatcher:
                         ),
                     )
                 )
+            except RegistryConflictError:
+                skipped.append(registration.name)
+        return tuple(skipped)
 
     def register(self, spec: CommandSpec) -> None:
         if spec.name in self._commands:

@@ -305,6 +305,66 @@ def test_fullscreen_mode_enters_and_restores_the_alternate_screen(tmp_path: Path
     assert output.getvalue() == "\x1b[?1049h\x1b[?1049l"
 
 
+def test_conflicting_extension_commands_degrade_to_warning_instead_of_crashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dataclasses
+
+    import pi_coding_agent.tui.runner as runner_module
+    from pi_coding_agent.extensions.api import ExtensionAPI
+    from pi_coding_agent.services import create_product_services as _create
+
+    api = ExtensionAPI("shadow")
+    api.define_command("model", lambda _args: "extension model")
+
+    class _Extensions:
+        registry = api.registry
+
+    base_session = _session(tmp_path, FakeProvider([fake_assistant_message("still works")]))
+    product_services = dataclasses.replace(_create(tmp_path), extensions=_Extensions())
+
+    class _Created:
+        session = base_session
+        services = product_services
+        model_runtime = ModelRuntime(provider=FakeProvider(), model=fake_model())
+
+        async def __aenter__(self) -> _Created:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    async def fake_create(_options: object) -> _Created:
+        return _Created()
+
+    monkeypatch.setattr(runner_module, "create_agent_session", fake_create)
+    output = StringIO()
+    errors = StringIO()
+    replies = iter(("hello", "/exit"))
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(replies, None)
+
+    code = asyncio.run(
+        runner_module.run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=ModelRuntime(provider=FakeProvider(), model=fake_model()),
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=errors,
+            read_line=read_line,
+        )
+    )
+
+    assert code == 0
+    assert "/model" in errors.getvalue()
+    assert "skipped" in errors.getvalue()
+    assert "still works" in output.getvalue()
+
+
 def test_interactive_mode_clearly_rejects_macos(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
