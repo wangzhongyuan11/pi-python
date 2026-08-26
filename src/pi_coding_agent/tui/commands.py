@@ -5,9 +5,11 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
-from ..extensions.registry import RegistryConflictError
+from ..extensions.registry import CapabilityRegistry, RegistryConflictError
+
+type CommandResult = CommandOutcome | str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,7 +22,7 @@ class CommandOutcome:
 class CommandSpec:
     name: str
     source: str
-    handler: Callable[[str], CommandOutcome | None | Awaitable[CommandOutcome | None]]
+    handler: Callable[[str], CommandResult | Awaitable[CommandResult]]
 
 
 def _error(text: str) -> CommandOutcome:
@@ -34,6 +36,23 @@ class CommandDispatcher:
 
     def __init__(self) -> None:
         self._commands: dict[str, CommandSpec] = {}
+
+    @classmethod
+    def from_registry(cls, registry: CapabilityRegistry) -> CommandDispatcher:
+        dispatcher = cls()
+        for registration in registry.registrations("command"):
+            if callable(registration.payload):
+                dispatcher.register(
+                    CommandSpec(
+                        name=registration.name,
+                        source=registration.source,
+                        handler=cast(
+                            "Callable[[str], CommandResult | Awaitable[CommandResult]]",
+                            registration.payload,
+                        ),
+                    )
+                )
+        return dispatcher
 
     def register(self, spec: CommandSpec) -> None:
         if spec.name in self._commands:
@@ -57,6 +76,8 @@ class CommandDispatcher:
                 result = await result
         except Exception as error:
             return _error(f"/{name} failed: {error}")
+        if isinstance(result, str):
+            return CommandOutcome(kind="message", text=result)
         return result or CommandOutcome(kind="none")
 
 

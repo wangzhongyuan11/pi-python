@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from pi_coding_agent.extensions.api import ExtensionAPI
 from pi_coding_agent.extensions.registry import RegistryConflictError
 from pi_coding_agent.tui.commands import CommandDispatcher, CommandOutcome, CommandSpec
 
@@ -69,3 +70,33 @@ def test_extension_dialog_can_be_cancelled_while_awaiting_input() -> None:
         return await task if not cancelled else await task
 
     assert asyncio.run(scenario()) is None
+
+
+def test_dispatcher_imports_executable_extension_commands() -> None:
+    api = ExtensionAPI("sample")
+
+    def shout(args: str) -> str:
+        return args.upper()
+
+    api.define_command("shout", shout)
+
+    dispatcher = CommandDispatcher.from_registry(api.registry)
+    outcome = asyncio.run(dispatcher.dispatch("/shout hello"))
+
+    assert outcome == CommandOutcome(kind="message", text="HELLO")
+
+
+def test_dialog_exposes_prompt_and_targets_response_by_request_id() -> None:
+    from pi_coding_agent.tui.extension_ui import DialogBridge
+
+    async def scenario() -> str | None:
+        bridge = DialogBridge()
+        task = asyncio.create_task(bridge.show_dialog("approve this operation?"))
+        await asyncio.sleep(0)
+        pending = bridge.pending
+        assert len(pending) == 1
+        assert pending[0].text == "approve this operation?"
+        assert bridge.respond("yes", request_id=pending[0].id)
+        return await task
+
+    assert asyncio.run(scenario()) == "yes"
