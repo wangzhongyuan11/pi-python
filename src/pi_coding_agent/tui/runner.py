@@ -7,13 +7,14 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TextIO
+from typing import Protocol, TextIO, runtime_checkable
 from uuid import uuid4
 
 from pi_ai import CredentialResolver, ModelThinkingLevel, clamp_thinking_level
 from pi_tui.render import ScreenRenderer
 
 from ..cli.run import HeadlessOptions, resolve_session_manager
+from ..extensions.registry import CapabilityRegistry
 from ..model_runtime import ModelRuntime, create_model_runtime
 from ..sdk import CreateAgentSessionOptions, create_agent_session
 from .commands import CommandDispatcher, CommandOutcome, CommandSpec
@@ -21,6 +22,12 @@ from .config_ui import ModelSettingsController
 from .main import InteractiveApp
 
 type ReadLine = Callable[[str], Awaitable[str | None]]
+
+
+@runtime_checkable
+class _HasRegistry(Protocol):
+    @property
+    def registry(self) -> CapabilityRegistry: ...
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -157,7 +164,9 @@ async def run_interactive(
         )
         dispatcher.register(CommandSpec(name="model", source="builtin", handler=select_model))
         dispatcher.register(CommandSpec(name="thinking", source="builtin", handler=select_thinking))
-        dispatcher.register_registry(created.services.extensions.registry)
+        extensions = created.services.extensions
+        if isinstance(extensions, _HasRegistry):
+            dispatcher.register_registry(extensions.registry)
         terminal = _StreamTerminal(stdout)
         renderer = ScreenRenderer(terminal)
         app = InteractiveApp(
