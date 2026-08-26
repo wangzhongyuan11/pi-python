@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from io import StringIO
 from pathlib import Path
+from typing import TextIO
+
+import pytest
 
 from pi_coding_agent import __version__
 from pi_coding_agent.cli.main import main
+from pi_coding_agent.tui.runner import InteractiveOptions
 
 
 def _run(
@@ -79,3 +83,24 @@ def test_global_api_key_before_auth_command_is_not_treated_as_a_prompt(tmp_path:
 
     assert result == (0, '{"provider":"deepseek","ready":true}\n', "")
     assert secret not in result[1] + result[2]
+
+
+def test_no_prompt_enters_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import pi_coding_agent.cli.main as cli_main
+
+    calls: list[Path] = []
+
+    async def interactive(
+        options: InteractiveOptions,
+        *,
+        stdout: TextIO,
+        stderr: TextIO,
+    ) -> int:
+        del stdout, stderr
+        calls.append(options.cwd)
+        return 0
+
+    monkeypatch.setattr(cli_main, "run_interactive", interactive)
+
+    assert _run([], cwd=tmp_path) == (0, "", "")
+    assert calls == [tmp_path.resolve()]

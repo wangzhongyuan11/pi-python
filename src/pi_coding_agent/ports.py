@@ -10,6 +10,7 @@ from typing import Any, Literal, Protocol
 from pi_agent import AgentTool
 from pi_ai import JsonValue, Provider
 
+from .extensions.registry import CapabilityRegistry
 from .session.importer import import_pi_session
 from .session.models import ImportResult
 
@@ -62,6 +63,9 @@ class NoopResourceLoader:
 
 class ExtensionRuntime(Protocol):
     @property
+    def registry(self) -> CapabilityRegistry: ...
+
+    @property
     def tools(self) -> tuple[AgentTool[Any, Any], ...]: ...
 
     @property
@@ -73,6 +77,13 @@ class ExtensionRuntime(Protocol):
 
 
 class NoopExtensionRuntime:
+    def __init__(self) -> None:
+        self._registry = CapabilityRegistry()
+
+    @property
+    def registry(self) -> CapabilityRegistry:
+        return self._registry
+
     @property
     def tools(self) -> tuple[AgentTool[Any, Any], ...]:
         return ()

@@ -40,6 +40,7 @@ class InteractiveApp:
         "_dispatcher",
         "_retry",
         "_session",
+        "_screen_sink",
         "_sink",
         "_tools",
         "_width",
@@ -52,6 +53,7 @@ class InteractiveApp:
         session: AgentSession,
         dispatcher: CommandDispatcher | None = None,
         sink: Callable[[str], None] | None = None,
+        screen_sink: Callable[[tuple[str, ...]], None] | None = None,
         width: int = 80,
     ) -> None:
         self._session = session
@@ -64,6 +66,7 @@ class InteractiveApp:
         self._active_message: str | None = None
         self.lines: list[str] = []
         self._sink: Callable[[str], None] = sink or (lambda _line: None)
+        self._screen_sink = screen_sink
         session.subscribe(self._on_event)
 
     async def handle(self, line: str) -> None:
@@ -87,6 +90,8 @@ class InteractiveApp:
     def _set_block(self, key: str, lines: tuple[str, ...]) -> None:
         self._blocks[key] = lines
         self.lines[:] = [line for block in self._blocks.values() for line in block]
+        if self._screen_sink is not None:
+            self._screen_sink(tuple(self.lines))
         for line in lines:
             self._sink(line)
 

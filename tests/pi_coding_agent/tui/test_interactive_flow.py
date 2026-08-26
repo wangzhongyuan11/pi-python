@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from io import StringIO
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -8,11 +9,14 @@ from pydantic import BaseModel
 from pi_agent import Agent, AgentTool, AgentToolResult, AgentToolUpdateCallback
 from pi_ai import FakeProvider, TextContent, ToolCall, fake_assistant_message, fake_model
 from pi_coding_agent.agent_session import AgentSession
+from pi_coding_agent.deepseek_credentials import DeepSeekCredentialResolver
+from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.services import create_product_services
 from pi_coding_agent.session.manager import SessionManager
 from pi_coding_agent.tui.commands import CommandDispatcher, CommandOutcome, CommandSpec
 from pi_coding_agent.tui.extension_ui import DialogBridge
 from pi_coding_agent.tui.main import InteractiveApp
+from pi_coding_agent.tui.runner import InteractiveOptions, run_interactive
 
 
 def _session(tmp_path: Path, provider: FakeProvider) -> AgentSession:
@@ -177,3 +181,32 @@ def test_extension_dialog_cancel_yields_none_answer(tmp_path: Path) -> None:
         return "".join(app.lines)
 
     assert "answer=None" in asyncio.run(scenario())
+
+
+def test_real_interactive_loop_reads_multiple_prompts_and_exits(tmp_path: Path) -> None:
+    provider = FakeProvider([fake_assistant_message("streamed answer")])
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    replies = iter(("hello", "/exit"))
+    output = StringIO()
+    errors = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(replies, None)
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=errors,
+            read_line=read_line,
+        )
+    )
+
+    assert code == 0
+    assert "streamed answer" in output.getvalue()
+    assert errors.getvalue() == ""

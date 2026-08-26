@@ -38,7 +38,7 @@ class HeadlessOptions:
     model_runtime: ModelRuntime | None = None
 
 
-def _session_manager(options: HeadlessOptions) -> SessionManager | None:
+def resolve_session_manager(options: HeadlessOptions) -> SessionManager | None:
     if options.no_session:
         return SessionManager.in_memory(
             cwd=options.cwd,
@@ -79,7 +79,7 @@ async def run_headless(options: HeadlessOptions, *, stdout: TextIO, stderr: Text
         CreateAgentSessionOptions(
             cwd=options.cwd,
             model_runtime=runtime,
-            session_manager=_session_manager(options),
+            session_manager=resolve_session_manager(options),
             thinking_level=thinking,
         )
     )
@@ -104,4 +104,4 @@ async def run_headless(options: HeadlessOptions, *, stdout: TextIO, stderr: Text
     return 0
 
 
-__all__ = ["HeadlessOptions", "run_headless"]
+__all__ = ["HeadlessOptions", "resolve_session_manager", "run_headless"]

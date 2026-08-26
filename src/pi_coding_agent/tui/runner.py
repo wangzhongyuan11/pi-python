@@ -1,0 +1,153 @@
+"""Real interactive process loop built on the shared SDK and product TUI."""
+
+from __future__ import annotations
+
+import shutil
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TextIO
+
+from pi_ai import CredentialResolver, ModelThinkingLevel, clamp_thinking_level
+from pi_tui.render import ScreenRenderer
+
+from ..cli.run import HeadlessOptions, resolve_session_manager
+from ..model_runtime import ModelRuntime, create_model_runtime
+from ..sdk import CreateAgentSessionOptions, create_agent_session
+from .commands import CommandDispatcher, CommandOutcome, CommandSpec
+from .main import InteractiveApp
+
+type ReadLine = Callable[[str], Awaitable[str | None]]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InteractiveOptions:
+    cwd: Path
+    credential_resolver: CredentialResolver
+    provider_id: str = "deepseek"
+    model_id: str | None = None
+    thinking_level: ModelThinkingLevel = "high"
+    no_session: bool = False
+    session: str | None = None
+    resume: bool = False
+    session_dir: Path | None = None
+    model_runtime: ModelRuntime | None = None
+
+
+class _StreamTerminal:
+    __slots__ = ("_output",)
+
+    def __init__(self, output: TextIO) -> None:
+        self._output = output
+
+    @property
+    def columns(self) -> int:
+        return max(1, shutil.get_terminal_size(fallback=(80, 24)).columns)
+
+    def write(self, data: str) -> None:
+        self._output.write(data)
+        self._output.flush()
+
+    def move_by(self, lines: int) -> None:
+        if lines < 0:
+            self.write(f"\x1b[{-lines}A")
+        elif lines > 0:
+            self.write(f"\x1b[{lines}B")
+
+    def clear_line(self) -> None:
+        self.write("\r\x1b[K")
+
+    def clear_screen(self) -> None:
+        self.write("\x1b[2J\x1b[H")
+
+
+async def _prompt_toolkit_readline(prompt: str) -> str | None:
+    from prompt_toolkit import PromptSession
+
+    session: PromptSession[str] = PromptSession()
+    try:
+        return await session.prompt_async(prompt)
+    except EOFError:
+        return None
+
+
+async def run_interactive(
+    options: InteractiveOptions,
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+    read_line: ReadLine | None = None,
+) -> int:
+    runtime = options.model_runtime
+    if runtime is None:
+        runtime = create_model_runtime(
+            credential_resolver=options.credential_resolver,
+            provider_id=options.provider_id,
+            model_id=options.model_id,
+        )
+    elif options.model_id is not None:
+        runtime.select_model(options.model_id, provider_id=options.provider_id)
+    thinking = clamp_thinking_level(runtime.model, options.thinking_level)
+    manager = resolve_session_manager(
+        HeadlessOptions(
+            cwd=options.cwd,
+            prompt="",
+            mode="text",
+            credential_resolver=options.credential_resolver,
+            provider_id=options.provider_id,
+            model_id=options.model_id,
+            thinking_level=thinking,
+            no_session=options.no_session,
+            session=options.session,
+            resume=options.resume,
+            session_dir=options.session_dir,
+            model_runtime=runtime,
+        )
+    )
+    created = await create_agent_session(
+        CreateAgentSessionOptions(
+            cwd=options.cwd,
+            credential_resolver=options.credential_resolver,
+            model_runtime=runtime,
+            session_manager=manager,
+            thinking_level=thinking,
+        )
+    )
+    async with created:
+        dispatcher = CommandDispatcher.from_registry(created.services.extensions.registry)
+        dispatcher.register(
+            CommandSpec(
+                name="help",
+                source="builtin",
+                handler=lambda _args: CommandOutcome(
+                    kind="message", text="/help  show commands\n/exit  leave the session"
+                ),
+            )
+        )
+        terminal = _StreamTerminal(stdout)
+        renderer = ScreenRenderer(terminal)
+        app = InteractiveApp(
+            session=created.session,
+            dispatcher=dispatcher,
+            width=terminal.columns,
+            screen_sink=lambda lines: renderer.render(list(lines)),
+        )
+        reader = read_line or _prompt_toolkit_readline
+        while True:
+            try:
+                line = await reader("› ")
+            except KeyboardInterrupt:
+                stdout.write("\n")
+                return 130
+            if line is None or line.strip() in {"/exit", "/quit"}:
+                return 0
+            if not line.strip():
+                continue
+            try:
+                await app.handle(line)
+            except Exception as error:
+                stderr.write(f"{error}\n")
+                stderr.flush()
+
+
+__all__ = ["InteractiveOptions", "ReadLine", "run_interactive"]
