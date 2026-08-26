@@ -620,6 +620,35 @@ def test_sessions_selector_cancel_keeps_the_current_session(tmp_path: Path) -> N
     assert len(list(session_dir.glob("*.jsonl"))) == 1
 
 
+def test_sessions_selector_defaults_to_the_per_project_session_directory(
+    tmp_path: Path,
+) -> None:
+    _drive(tmp_path, ("seed", "/exit"), FakeProvider([fake_assistant_message("s")]))
+    default_root = (
+        Path.home() / ".pi-python" / "agent" / "sessions"
+    )
+    project_dirs = [path for path in default_root.glob("*") if path.is_dir()]
+    assert project_dirs, "expected the first turn to create the per-project session directory"
+
+    code, output, errors = _drive(
+        tmp_path,
+        ("/sessions", "1", "hello", "/exit"),
+        FakeProvider([fake_assistant_message("switched answer")]),
+    )
+
+    assert code == 0
+    assert errors == ""
+    match = re.search(r"switched to ([0-9a-f]{32})", output)
+    assert match is not None
+    target = next(
+        path
+        for path in sorted(default_root.rglob("*.jsonl"))
+        if path.name.endswith(f"{match.group(1)}.jsonl")
+    )
+    content = target.read_text(encoding="utf-8")
+    assert '"hello"' in content
+
+
 def test_fork_creates_a_child_session_and_switches_to_it(tmp_path: Path) -> None:
     session_dir = tmp_path / "sessions"
     _drive(

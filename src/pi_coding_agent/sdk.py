@@ -36,7 +36,8 @@ def _timestamp() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _default_session_dir(cwd: Path) -> Path:
+def default_session_dir(cwd: Path) -> Path:
+    """Per-project default session directory under the agent home."""
     encoded = str(cwd).lstrip("/\\").replace("/", "-").replace("\\", "-").replace(":", "-")
     configured = os.environ.get("PI_PYTHON_AGENT_DIR")
     agent_dir = (
@@ -134,7 +135,7 @@ async def create_agent_session(
     cwd = selected.cwd.resolve()
     manager = selected.session_manager or SessionManager.create(
         cwd=cwd,
-        session_dir=_default_session_dir(cwd),
+        session_dir=default_session_dir(cwd),
         session_id=uuid4().hex,
         timestamp=selected.timestamp_factory(),
     )
@@ -268,5 +269,6 @@ __all__ = [
     "CreateAgentSessionOptions",
     "CreatedAgentSession",
     "create_agent_session",
+    "default_session_dir",
     "import_pi_session",
 ]

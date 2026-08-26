@@ -33,10 +33,9 @@ from ..attachments import (
     supports_image_input,
 )
 from ..cli.run import HeadlessOptions, resolve_session_manager
-from ..config.paths import ConfigPaths
 from ..extensions.registry import CapabilityRegistry
 from ..model_runtime import ModelRuntime, create_model_runtime
-from ..sdk import CreateAgentSessionOptions, create_agent_session
+from ..sdk import CreateAgentSessionOptions, create_agent_session, default_session_dir
 from ..session.catalog import SessionSummary, list_sessions
 from .commands import CommandDispatcher, CommandOutcome, CommandSpec
 from .config_ui import ModelSettingsController
@@ -305,7 +304,7 @@ async def run_interactive(
         def _selector_directory() -> Path:
             if options.session_dir is not None:
                 return options.session_dir
-            return ConfigPaths.create(home=Path.home(), cwd=options.cwd).session_dir
+            return default_session_dir(options.cwd)
 
         async def open_session_selector(_args: str) -> CommandOutcome:
             directory = _selector_directory()
