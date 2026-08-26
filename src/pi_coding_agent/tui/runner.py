@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import shutil
 import sys
@@ -32,16 +33,26 @@ from ..attachments import (
     supports_image_input,
 )
 from ..cli.run import HeadlessOptions, resolve_session_manager
+from ..config.paths import ConfigPaths
 from ..extensions.registry import CapabilityRegistry
 from ..model_runtime import ModelRuntime, create_model_runtime
 from ..sdk import CreateAgentSessionOptions, create_agent_session
+from ..session.catalog import SessionSummary, list_sessions
 from .commands import CommandDispatcher, CommandOutcome, CommandSpec
 from .config_ui import ModelSettingsController
 from .main import InteractiveApp
+from .session_ui import fork_from, switch_to
 
 type ReadLine = Callable[[str], Awaitable[str | None]]
 
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class _PathRef:
+    """Minimal session reference for selector actions."""
+
+    path: Path
 
 
 def _message_timestamp() -> int:
@@ -171,14 +182,36 @@ async def run_interactive(
     )
     async with created:
         dispatcher = CommandDispatcher()
-        controller = ModelSettingsController(
-            session=created.session,
-            model_runtime=runtime,
-            entry_id_factory=lambda: uuid4().hex,
-            timestamp_factory=lambda: datetime.now(UTC)
-            .isoformat(timespec="milliseconds")
-            .replace("+00:00", "Z"),
-        )
+        reader_fn = read_line or _prompt_toolkit_reader()
+        app_holder: list[InteractiveApp] = []
+        controller_holder: list[ModelSettingsController] = []
+
+        def rebuild() -> None:
+            previous_lines = tuple(app_holder[0].lines) if app_holder else ()
+            controller_holder[:] = [
+                ModelSettingsController(
+                    session=created.session,
+                    model_runtime=runtime,
+                    entry_id_factory=lambda: uuid4().hex,
+                    timestamp_factory=lambda: datetime.now(UTC)
+                    .isoformat(timespec="milliseconds")
+                    .replace("+00:00", "Z"),
+                )
+            ]
+            fullscreen = options.tui_mode == "fullscreen"
+            app_holder[:] = [
+                InteractiveApp(
+                    session=created.session,
+                    dispatcher=dispatcher,
+                    width=terminal.columns,
+                    screen_sink=lambda lines: renderer.render(
+                        list(lines[-terminal.rows :]) if fullscreen else list(lines)
+                    ),
+                    raw_sink=terminal.write,
+                    compose_prompt=compose,
+                    initial_lines=previous_lines,
+                )
+            ]
 
         def select_model(args: str) -> CommandOutcome:
             model_id = args.strip()
@@ -186,7 +219,7 @@ async def run_interactive(
                 return CommandOutcome(
                     kind="message", text=f"current model: {created.session.state.model.id}"
                 )
-            controller.apply(model_id, created.session.state.thinking_level)
+            controller_holder[0].apply(model_id, created.session.state.thinking_level)
             return CommandOutcome(kind="message", text=f"model: {model_id}")
 
         def select_thinking(args: str) -> CommandOutcome:
@@ -196,7 +229,7 @@ async def run_interactive(
                     kind="message",
                     text=f"current thinking: {created.session.state.thinking_level}",
                 )
-            controller.apply(created.session.state.model.id, level)
+            controller_holder[0].apply(created.session.state.model.id, level)
             return CommandOutcome(kind="message", text=f"thinking: {level}")
 
         def copy_last_reply(_args: str) -> CommandOutcome:
@@ -232,6 +265,8 @@ async def run_interactive(
                         "/thinking [level]  show or set thinking level\n"
                         "/attach <path>  attach a file or image to the next prompt\n"
                         "/copy  copy the last reply to the terminal clipboard (OSC-52)\n"
+                        "/sessions  list saved sessions and switch by number\n"
+                        "/fork  fork the current session and switch to the copy\n"
                         "/exit  leave the session"
                     ),
                 ),
@@ -267,6 +302,51 @@ async def run_interactive(
 
         dispatcher.register(CommandSpec(name="attach", source="builtin", handler=attach_file))
 
+        def _selector_directory() -> Path:
+            if options.session_dir is not None:
+                return options.session_dir
+            return ConfigPaths.create(home=Path.home(), cwd=options.cwd).session_dir
+
+        async def open_session_selector(_args: str) -> CommandOutcome:
+            directory = _selector_directory()
+            catalog = await asyncio.to_thread(list_sessions, cwd=options.cwd, session_dir=directory)
+            items: tuple[SessionSummary, ...] = catalog.sessions
+            if not items:
+                return CommandOutcome(kind="message", text=f"no saved sessions in {directory}")
+            current_id = created.session.session_manager.header.id
+            listing: list[str] = []
+            for index, summary in enumerate(items, 1):
+                marker = " (current)" if summary.id == current_id else ""
+                label = summary.name or summary.id
+                listing.append(f"{index}. {label} [{summary.id[:8]}]{marker}")
+            app_holder[0].note("\n".join(listing))
+            answer = await reader_fn("select › ")
+            if answer is None or not answer.strip():
+                return CommandOutcome(kind="message", text="session switch cancelled")
+            try:
+                chosen = int(answer.strip())
+            except ValueError:
+                return CommandOutcome(kind="error", text=f"not a number: {answer.strip()}")
+            if not 1 <= chosen <= len(items):
+                return CommandOutcome(kind="error", text=f"out of range 1..{len(items)}")
+            summary = items[chosen - 1]
+            await switch_to(created, summary)
+            rebuild()
+            app_holder[0].note(f"switched to {summary.id}")
+            return CommandOutcome(kind="none")
+
+        async def fork_current_session(_args: str) -> CommandOutcome:
+            manager = created.session.session_manager
+            if manager.path is None or manager.leaf_id is None:
+                return CommandOutcome(
+                    kind="error", text="cannot fork: the current session has no persisted turns"
+                )
+            summary = _PathRef(path=manager.path)
+            await fork_from(created, summary)
+            rebuild()
+            app_holder[0].note(f"forked to {created.session.session_manager.header.id}")
+            return CommandOutcome(kind="none")
+
         def compose(line: str) -> AgentMessage | str:
             if not pending_attachments:
                 return line
@@ -289,6 +369,12 @@ async def run_interactive(
                     )
             return UserMessage(content=tuple(blocks), timestamp=_message_timestamp())
 
+        dispatcher.register(
+            CommandSpec(name="sessions", source="builtin", handler=open_session_selector)
+        )
+        dispatcher.register(
+            CommandSpec(name="fork", source="builtin", handler=fork_current_session)
+        )
         extensions = created.services.extensions
         if isinstance(extensions, _HasRegistry):
             skipped = dispatcher.register_registry(extensions.registry)
@@ -301,22 +387,12 @@ async def run_interactive(
         fullscreen = options.tui_mode == "fullscreen"
         terminal = _StreamTerminal(stdout, fullscreen=fullscreen)
         renderer = ScreenRenderer(terminal)
-        app = InteractiveApp(
-            session=created.session,
-            dispatcher=dispatcher,
-            width=terminal.columns,
-            screen_sink=lambda lines: renderer.render(
-                list(lines[-terminal.rows :]) if fullscreen else list(lines)
-            ),
-            raw_sink=terminal.write,
-            compose_prompt=compose,
-        )
-        reader = read_line or _prompt_toolkit_reader()
+        rebuild()
         terminal.start()
         try:
             while True:
                 try:
-                    line = await reader("› ")
+                    line = await reader_fn("› ")
                 except KeyboardInterrupt:
                     stdout.write("\n")
                     return 130
@@ -325,7 +401,7 @@ async def run_interactive(
                 if not line.strip():
                     continue
                 try:
-                    await app.handle(line)
+                    await app_holder[0].handle(line)
                 except Exception as error:
                     stderr.write(f"{error}\n")
                     stderr.flush()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 from dataclasses import replace
 from io import StringIO
 from pathlib import Path
@@ -443,6 +444,13 @@ def test_copy_without_a_prior_reply_reports_nothing_to_copy(tmp_path: Path) -> N
     assert "\x1b]52" not in output.getvalue()
 
 
+def _file_for_session(session_dir: Path, session_id: str) -> Path | None:
+    return next(
+        (path for path in session_dir.glob("*.jsonl") if path.name.endswith(f"{session_id}.jsonl")),
+        None,
+    )
+
+
 def _persisted_user_texts(session_dir: Path) -> list[str]:
     entries: list[str] = []
     for path in sorted(session_dir.glob("*.jsonl")):
@@ -519,6 +527,124 @@ def test_attach_rejects_images_for_text_only_models(tmp_path: Path) -> None:
 
     assert code == 0
     assert "does not support image input" in output.getvalue()
+
+
+def _drive(
+    tmp_path: Path,
+    replies: tuple[str, ...],
+    provider: FakeProvider,
+    *,
+    session_dir: Path | None = None,
+) -> tuple[int, str, str]:
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    lines = iter(replies)
+    output = StringIO()
+    errors = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(lines, None)
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                session_dir=session_dir,
+            ),
+            stdout=output,
+            stderr=errors,
+            read_line=read_line,
+        )
+    )
+    return code, output.getvalue(), errors.getvalue()
+
+
+def test_sessions_selector_switches_the_runtime_to_the_chosen_session(tmp_path: Path) -> None:
+    session_dir = tmp_path / "sessions"
+
+    first_code, _, _ = _drive(
+        tmp_path,
+        ("seed", "/exit"),
+        FakeProvider([fake_assistant_message("seed answer")]),
+        session_dir=session_dir,
+    )
+    assert first_code == 0
+    saved = list(session_dir.glob("*.jsonl"))
+    assert len(saved) == 1
+
+    second_provider = FakeProvider([fake_assistant_message("switched answer")])
+    code, output, errors = _drive(
+        tmp_path,
+        ("/sessions", "1", "hello", "/exit"),
+        second_provider,
+        session_dir=session_dir,
+    )
+
+    assert code == 0
+    assert errors == ""
+    match = re.search(r"switched to ([0-9a-f]{32})", output)
+    assert match is not None
+    switched_id = match.group(1)
+    assert "1. " in output
+    target = _file_for_session(session_dir, switched_id)
+    assert target is not None
+    content = target.read_text(encoding="utf-8")
+    assert '"hello"' in content
+    assert "switched answer" in content
+
+
+def test_sessions_selector_cancel_keeps_the_current_session(tmp_path: Path) -> None:
+    session_dir = tmp_path / "sessions"
+    _drive(
+        tmp_path,
+        ("seed", "/exit"),
+        FakeProvider([fake_assistant_message("seed answer")]),
+        session_dir=session_dir,
+    )
+
+    code, output, _ = _drive(
+        tmp_path,
+        ("/sessions", "", "/exit"),
+        FakeProvider([]),
+        session_dir=session_dir,
+    )
+
+    assert code == 0
+    assert "cancelled" in output
+    assert "switched to" not in output
+    assert len(list(session_dir.glob("*.jsonl"))) == 1
+
+
+def test_fork_creates_a_child_session_and_switches_to_it(tmp_path: Path) -> None:
+    session_dir = tmp_path / "sessions"
+    _drive(
+        tmp_path,
+        ("seed", "/exit"),
+        FakeProvider([fake_assistant_message("seed answer")]),
+        session_dir=session_dir,
+    )
+
+    code, output, errors = _drive(
+        tmp_path,
+        ("second", "/fork", "/exit"),
+        FakeProvider([fake_assistant_message("second answer")]),
+        session_dir=session_dir,
+    )
+
+    assert code == 0
+    assert errors == ""
+    files = sorted(session_dir.glob("*.jsonl"))
+    assert len(files) == 3
+    fork_match = re.search(r"forked to ([0-9a-f]{32})", output)
+    assert fork_match is not None
+    child = _file_for_session(session_dir, fork_match.group(1))
+    assert child is not None
+    parent_candidates = [path for path in files if path != child]
+    parents = [path for path in parent_candidates if "second" in path.read_text(encoding="utf-8")]
+    assert len(parents) == 1
+    header = json.loads(child.read_text(encoding="utf-8").splitlines()[0])
+    assert header["parentSession"] == str(parents[0].resolve())
 
 
 def test_interactive_mode_clearly_rejects_macos(

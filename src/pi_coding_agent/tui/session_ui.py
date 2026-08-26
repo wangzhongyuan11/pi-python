@@ -16,7 +16,8 @@ from ..session.manager import SessionManager
 
 
 class _Summary(Protocol):
-    path: Path
+    @property
+    def path(self) -> Path: ...
 
 
 class RuntimeLike(Protocol):
@@ -32,7 +33,8 @@ class Selection:
 
 
 class _SummaryLike(Protocol):
-    path: Path
+    @property
+    def path(self) -> Path: ...
 
 
 class _NamedItem(Protocol):

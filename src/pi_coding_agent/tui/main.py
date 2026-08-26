@@ -65,6 +65,7 @@ class InteractiveApp:
         screen_sink: Callable[[tuple[str, ...]], None] | None = None,
         raw_sink: Callable[[str], None] | None = None,
         compose_prompt: Callable[[str], AgentMessage | str] | None = None,
+        initial_lines: tuple[str, ...] = (),
         width: int = 80,
     ) -> None:
         self._session = session
@@ -74,14 +75,21 @@ class InteractiveApp:
         self._retry = RetryStatusLine()
         self._session_status = SessionStatusLine()
         self._blocks: OrderedDict[str, tuple[str, ...]] = OrderedDict()
+        if initial_lines:
+            self._blocks["history"] = tuple(initial_lines)
         self._tools: dict[str, ToolExecutionView] = {}
         self._counter = 0
         self._active_message: str | None = None
-        self.lines: list[str] = []
+        self.lines: list[str] = list(initial_lines)
         self._sink: Callable[[str], None] = sink or (lambda _line: None)
         self._screen_sink = screen_sink
         self._raw_sink: Callable[[str], None] | None = raw_sink
         session.subscribe(self._on_event)
+
+    def note(self, text: str) -> None:
+        """Append a plain transcript block for out-of-band product messages."""
+
+        self._append_text(text)
 
     async def handle(self, line: str) -> None:
         if self._dispatcher is not None:
