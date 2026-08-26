@@ -4,15 +4,16 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
-## 0.5.0 - 2026-08-25
+## 0.5.0 - 2026-08-26
 
 ### Phase 11
 
 - Add the interactive coding agent TUI on `pi_tui`: assistant message stream rendering,
   in-place tool lifecycle rows, retry and compaction status lines, session selector with
-  runtime switch/fork actions, model and thinking selectors with capability clamping,
-  slash command dispatch with isolated extension dialogs, clipboard/attachment message
-  contracts, and width-aware rendering verified by an in-process Windows smoke test.
+  real runtime switch/fork actions, persisted provider-qualified model and thinking
+  selection, slash command dispatch backed by extension registrations, isolated extension
+  dialogs, regular/fullscreen terminal modes, paste and attachment contracts, the frozen
+  product action registry, and width-safe rendering verified by a Windows smoke test.
 
 ## 0.4.0 - 2026-08-25
 
