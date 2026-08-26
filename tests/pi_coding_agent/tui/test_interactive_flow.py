@@ -58,6 +58,8 @@ def test_each_completed_turn_is_rendered_once_without_replaying_history(tmp_path
 
     assert screen.count("first answer") == 1
     assert screen.count("second answer") == 1
+    assert screen.count("> first") == 1
+    assert screen.count("> second") == 1
 
 
 class _Args(BaseModel):
@@ -210,3 +212,31 @@ def test_real_interactive_loop_reads_multiple_prompts_and_exits(tmp_path: Path) 
     assert code == 0
     assert "streamed answer" in output.getvalue()
     assert errors.getvalue() == ""
+
+
+def test_interactive_terminal_sanitizes_provider_control_sequences(tmp_path: Path) -> None:
+    provider = FakeProvider([fake_assistant_message("\x1b]52;c;stolen\x07safe answer")])
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    replies = iter(("hello", "/exit"))
+    output = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(replies, None)
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=StringIO(),
+            read_line=read_line,
+        )
+    )
+
+    assert code == 0
+    assert "\x1b]52" not in output.getvalue()
+    assert "safe answer" in output.getvalue()

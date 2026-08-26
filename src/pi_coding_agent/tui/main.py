@@ -14,7 +14,7 @@ from pi_agent import (
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
 )
-from pi_ai import AssistantMessage, TextContent, ThinkingContent
+from pi_ai import AssistantMessage, TextContent, ThinkingContent, UserMessage
 from pi_tui.layout import wrap_text
 from pi_tui.width import visible_width
 
@@ -105,6 +105,8 @@ class InteractiveApp:
         elif isinstance(event, MessageEndEvent) and isinstance(event.message, AssistantMessage):
             self._render_assistant(event.message)
             self._active_message = None
+        elif isinstance(event, MessageEndEvent) and isinstance(event.message, UserMessage):
+            self._render_user(event.message)
         elif isinstance(event, ToolExecutionStartEvent):
             view = ToolExecutionView(event.tool_name)
             self._tools[event.tool_call_id] = view
@@ -145,6 +147,19 @@ class InteractiveApp:
         if message.stop_reason in ("error", "aborted"):
             view.fail(message.error_message or "provider error")
         self._set_block(key, view.render(self._width))
+
+    def _render_user(self, message: UserMessage) -> None:
+        content = message.content
+        if isinstance(content, str):
+            text = content
+        else:
+            fragments = [block.text for block in content if isinstance(block, TextContent)]
+            image_count = len(content) - len(fragments)
+            text = "".join(fragments)
+            if image_count:
+                label = "image" if image_count == 1 else f"{image_count} images"
+                text = f"{text} [{label}]".strip()
+        self._append_text(f"> {text}")
 
 
 def _result_detail(result: object) -> str | None:
