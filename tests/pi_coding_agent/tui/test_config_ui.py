@@ -111,3 +111,35 @@ def test_controller_applies_and_persists_model_and_thinking_selection(tmp_path: 
     assert session.state.thinking_level == "low"
     assert isinstance(manager.entries[0], ModelChangeEntry)
     assert isinstance(manager.entries[1], ThinkingLevelChangeEntry)
+
+
+def test_rejected_thinking_does_not_change_selected_runtime_model(tmp_path: Path) -> None:
+    class MixedProvider(FakeProvider):
+        @property
+        def models(self):  # type: ignore[no-untyped-def,override]
+            first = fake_model()
+            return (first, replace(first, id="text-only", name="Text Only", reasoning=False))
+
+    provider = MixedProvider()
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    manager = SessionManager.in_memory(
+        cwd=tmp_path, session_id="rejected", timestamp="2026-08-26T00:00:00Z"
+    )
+    session = AgentSession(
+        agent=Agent(model=provider.models[0], stream_function=provider.stream),
+        session_manager=manager,
+        services=create_product_services(tmp_path),
+    )
+    controller = ModelSettingsController(
+        session=session,
+        model_runtime=runtime,
+        entry_id_factory=lambda: "unused",
+        timestamp_factory=lambda: "2026-08-26T00:00:01Z",
+    )
+
+    with pytest.raises(ValueError, match="exceeds capability"):
+        controller.apply("text-only", "high")
+
+    assert runtime.model.id == "fake-1"
+    assert session.state.model.id == "fake-1"
+    assert manager.entries == ()

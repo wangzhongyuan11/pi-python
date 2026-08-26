@@ -118,24 +118,34 @@ class ModelSettingsController:
         if thinking_level not in THINKING_LEVELS:
             raise ValueError(f"unknown thinking level: {thinking_level}")
         current = self._session.state
+        if current.is_streaming:
+            raise RuntimeError("cannot change model settings while Agent is streaming")
+        previous_provider = self._model_runtime.provider.id
+        previous_model = self._model_runtime.model.id
         selected = self._model_runtime.select_model(model_id)
         requested = cast("ModelThinkingLevel", thinking_level)
         if clamp_thinking_level(selected, requested) != requested:
+            self._model_runtime.select_model(previous_model, provider_id=previous_provider)
             raise ValueError(
                 f"thinking level {thinking_level!r} exceeds capability of {selected.id!r}"
             )
         manager = self._session.session_manager
         if current.model != selected:
-            manager.append(
-                ModelChangeEntry(
-                    type="model_change",
-                    id=self._entry_id_factory(),
-                    parent_id=manager.leaf_id,
-                    timestamp=self._timestamp_factory(),
-                    provider=selected.provider,
-                    model_id=selected.id,
+            try:
+                manager.append(
+                    ModelChangeEntry(
+                        type="model_change",
+                        id=self._entry_id_factory(),
+                        parent_id=manager.leaf_id,
+                        timestamp=self._timestamp_factory(),
+                        provider=selected.provider,
+                        model_id=selected.id,
+                    )
                 )
-            )
+            except BaseException:
+                self._model_runtime.select_model(previous_model, provider_id=previous_provider)
+                raise
+            self._session.agent.set_model(selected)
         if current.thinking_level != requested:
             manager.append(
                 ThinkingLevelChangeEntry(
@@ -146,8 +156,7 @@ class ModelSettingsController:
                     thinking_level=requested,
                 )
             )
-        self._session.agent.set_model(selected)
-        self._session.agent.set_thinking_level(requested)
+            self._session.agent.set_thinking_level(requested)
 
 
 __all__ = [
