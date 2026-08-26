@@ -16,10 +16,10 @@ def test_text_file_attachment_embeds_name_and_content(tmp_path: Path) -> None:
     source = tmp_path / "notes.txt"
     source.write_text("hello world", encoding="utf-8")
 
-    attachment = build_text_file_attachment(source, source.read_text(encoding="utf-8"))
+    attachment = build_text_file_attachment(source)
 
     assert attachment["type"] == "text"
-    assert attachment["name"] == str(source)
+    assert attachment["name"] == "notes.txt"
     assert attachment["content"] == "hello world"
 
 
@@ -39,6 +39,9 @@ def test_image_attachment_requires_supported_format_and_size(tmp_path: Path) -> 
     with pytest.raises(AttachmentError):
         build_image_attachment(big, max_bytes=1024)
 
+    with pytest.raises(AttachmentError, match="does not support image"):
+        build_image_attachment(image, max_bytes=1024, image_supported=False)
+
     unsupported = tmp_path / "logo.bmp"
     unsupported.write_bytes(b"bm")
     with pytest.raises(AttachmentError):
@@ -47,4 +50,4 @@ def test_image_attachment_requires_supported_format_and_size(tmp_path: Path) -> 
 
 def test_missing_files_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(AttachmentError):
-        build_text_file_attachment(tmp_path / "missing.txt", "")
+        build_text_file_attachment(tmp_path / "missing.txt")
