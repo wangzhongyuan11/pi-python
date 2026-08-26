@@ -122,7 +122,11 @@ class ModelSettingsController:
             raise RuntimeError("cannot change model settings while Agent is streaming")
         previous_provider = self._model_runtime.provider.id
         previous_model = self._model_runtime.model.id
-        selected = self._model_runtime.select_model(model_id)
+        provider_id, separator, selected_id = model_id.partition("/")
+        selected = self._model_runtime.select_model(
+            selected_id if separator else model_id,
+            provider_id=provider_id if separator else None,
+        )
         requested = cast("ModelThinkingLevel", thinking_level)
         if clamp_thinking_level(selected, requested) != requested:
             self._model_runtime.select_model(previous_model, provider_id=previous_provider)

@@ -143,3 +143,41 @@ def test_rejected_thinking_does_not_change_selected_runtime_model(tmp_path: Path
     assert runtime.model.id == "fake-1"
     assert session.state.model.id == "fake-1"
     assert manager.entries == ()
+
+
+def test_controller_accepts_provider_qualified_extension_model(tmp_path: Path) -> None:
+    class ExtensionProvider(FakeProvider):
+        @property
+        def id(self) -> str:
+            return "extension"
+
+        @property
+        def models(self):  # type: ignore[no-untyped-def,override]
+            return (replace(fake_model(), id="ext-1", provider="extension"),)
+
+    base = FakeProvider()
+    extension = ExtensionProvider()
+    runtime = ModelRuntime(provider=base, model=base.models[0])
+    runtime.register_provider(extension)
+    manager = SessionManager.in_memory(
+        cwd=tmp_path, session_id="provider", timestamp="2026-08-26T00:00:00Z"
+    )
+    session = AgentSession(
+        agent=Agent(model=base.models[0], stream_function=runtime.stream),
+        session_manager=manager,
+        services=create_product_services(tmp_path),
+    )
+    controller = ModelSettingsController(
+        session=session,
+        model_runtime=runtime,
+        entry_id_factory=iter(("model", "thinking")).__next__,
+        timestamp_factory=lambda: "2026-08-26T00:00:01Z",
+    )
+
+    controller.apply("extension/ext-1", "low")
+
+    assert runtime.provider.id == "extension"
+    assert session.state.model.provider == "extension"
+    entry = manager.entries[0]
+    assert isinstance(entry, ModelChangeEntry)
+    assert (entry.provider, entry.model_id) == ("extension", "ext-1")
