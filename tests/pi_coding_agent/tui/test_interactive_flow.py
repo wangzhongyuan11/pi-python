@@ -39,6 +39,23 @@ def test_cjk_reply_streams_into_output_lines(tmp_path: Path) -> None:
     assert "你好，世界！" in screen
 
 
+def test_each_completed_turn_is_rendered_once_without_replaying_history(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [fake_assistant_message("first answer"), fake_assistant_message("second answer")]
+    )
+    app = _app(_session(tmp_path, provider))
+
+    async def scenario() -> None:
+        await app.handle("first")
+        await app.handle("second")
+
+    asyncio.run(scenario())
+    screen = "\n".join(app.lines)
+
+    assert screen.count("first answer") == 1
+    assert screen.count("second answer") == 1
+
+
 class _Args(BaseModel):
     value: str
 
@@ -82,6 +99,48 @@ def test_tool_turn_renders_done_row(tmp_path: Path) -> None:
 
     assert "side_effect: done" in screen
     assert "finished" in screen
+
+
+def test_tool_lifecycle_emits_running_before_done(tmp_path: Path) -> None:
+    observed: list[str] = []
+
+    async def execute(
+        _tool_call_id: str,
+        params: _Args,
+        _abort_event: object,
+        _on_update: AgentToolUpdateCallback[dict[str, str]] | None,
+    ) -> AgentToolResult[dict[str, str]]:
+        assert any("side_effect: running" in line for line in observed)
+        return AgentToolResult(content=(TextContent(text=params.value),), details={})
+
+    tool = AgentTool(
+        name="side_effect",
+        label="Side effect",
+        description="records",
+        parameter_type=_Args,
+        execute=execute,
+    )
+    provider = FakeProvider(
+        [
+            fake_assistant_message(
+                ToolCall(id="call-1", name="side_effect", arguments={"value": "x"}),
+                stop_reason="toolUse",
+            ),
+            fake_assistant_message("finished"),
+        ]
+    )
+    session = AgentSession(
+        agent=Agent(model=fake_model(), stream_function=provider.stream, tools=(tool,)),
+        session_manager=SessionManager.in_memory(
+            cwd=tmp_path, session_id="tool-stream", timestamp="2026-08-24T00:00:00Z"
+        ),
+        services=create_product_services(tmp_path),
+    )
+    app = InteractiveApp(session=session, sink=observed.append)
+
+    asyncio.run(app.handle("run it"))
+
+    assert any("side_effect: done" in line for line in app.lines)
 
 
 def test_retry_recovery_is_reported_in_status_lines(tmp_path: Path) -> None:

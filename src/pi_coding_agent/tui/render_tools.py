@@ -28,6 +28,10 @@ class ToolExecutionView:
         self._state = _STATE_DONE
         self._detail = detail
 
+    def update(self, detail: str | None = None) -> None:
+        if self._state == _STATE_RUNNING:
+            self._detail = detail
+
     def fail(self, detail: str | None = None) -> None:
         self._state = _STATE_FAILED
         self._detail = detail

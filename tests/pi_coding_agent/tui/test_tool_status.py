@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pi_coding_agent.tui.render_status import RetryStatusLine, SessionStatusLine
 from pi_coding_agent.tui.render_tools import ToolExecutionView
+from pi_tui.width import visible_width
 
 
 def test_tool_view_transitions_in_place_through_lifecycle() -> None:
@@ -50,3 +51,12 @@ def test_compaction_status_line_reports_progress_and_done() -> None:
         "compacted" in line and "1200" in line
         for line in status.compaction_finished(tokens_before=1200).render(40)
     )
+
+
+def test_status_lines_respect_terminal_cell_width_for_cjk() -> None:
+    status = SessionStatusLine().activity("处理中：中文状态")
+
+    lines = status.render(10)
+
+    assert lines
+    assert all(visible_width(line) <= 10 for line in lines)

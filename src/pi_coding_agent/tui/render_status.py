@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from pi_tui.layout import wrap_text
+from pi_tui.width import visible_width
+
 
 def _pad(line: str, width: int) -> str:
-    return line + " " * max(0, width - len(line))
+    return line + " " * max(0, width - visible_width(line))
 
 
 @dataclass(slots=True)
@@ -38,7 +41,7 @@ class RetryStatusLine:
 
     def render(self, width: int) -> tuple[str, ...]:
         text = "; ".join(self._fragments)
-        return (_pad(text[:width], width),)
+        return tuple(_pad(line, width) for line in wrap_text(text, width))
 
 
 @dataclass(slots=True)
@@ -46,6 +49,10 @@ class SessionStatusLine:
     """Compaction and other session-level activity lines."""
 
     _fragments: list[str] = field(default_factory=list[str])
+
+    def activity(self, text: str) -> SessionStatusLine:
+        self._fragments.append(text)
+        return self
 
     def compaction_started(self) -> SessionStatusLine:
         self._fragments.append("compacting context")
@@ -56,7 +63,10 @@ class SessionStatusLine:
         return self
 
     def render(self, width: int) -> tuple[str, ...]:
-        return tuple(_pad(fragment[:width], width) for fragment in self._fragments)
+        lines = (
+            _pad(line, width) for fragment in self._fragments for line in wrap_text(fragment, width)
+        )
+        return tuple(lines)
 
 
 __all__ = ["RetryStatusLine", "SessionStatusLine"]
