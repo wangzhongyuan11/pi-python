@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pi_tui.application import Application
 from pi_tui.components import Status, Text, VStack
+from pi_tui.render import ScreenRenderer
 from pi_tui.testing import MemoryTerminal
 from pi_tui.width import visible_width
 
@@ -117,3 +118,15 @@ def test_application_sanitizes_and_bounds_custom_component_output() -> None:
     rendered = _output(terminal).removeprefix("\x1b[2J\x1b[H")
     assert rendered == "中文"
     assert visible_width(rendered) == 4
+
+
+def test_renderer_commit_freezes_lines_and_starts_fresh_below() -> None:
+    terminal = MemoryTerminal(columns=20, rows=10)
+    terminal.start(lambda _data: None, lambda: None)
+    renderer = ScreenRenderer(terminal)
+
+    renderer.render(("a",))
+    renderer.commit()
+    renderer.render(("b",))
+
+    assert _output(terminal) == "\x1b[2J\x1b[Ha\x1b[1B\x1b[1B\r\x1b[Kb"

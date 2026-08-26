@@ -36,6 +36,13 @@ class ScreenRenderer:
     def invalidate(self) -> None:
         self._columns = None
 
+    def commit(self) -> None:
+        """Freeze the rendered region; the next render starts on a fresh line below."""
+
+        if self._lines:
+            self._terminal.move_by(1)
+        self._lines = []
+
     def render(self, lines: Sequence[str]) -> None:
         width = self._terminal.columns
         if self._columns != width:

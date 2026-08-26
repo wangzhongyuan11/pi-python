@@ -197,20 +197,32 @@ async def run_interactive(
                     .replace("+00:00", "Z"),
                 )
             ]
-            fullscreen = options.tui_mode == "fullscreen"
-            app_holder[:] = [
-                InteractiveApp(
+            if options.tui_mode == "fullscreen":
+                # Alt-screen viewport: repaint the clipped transcript every frame.
+                app = InteractiveApp(
                     session=created.session,
                     dispatcher=dispatcher,
                     width=terminal.columns,
-                    screen_sink=lambda lines: renderer.render(
-                        list(lines[-terminal.rows :]) if fullscreen else list(lines)
-                    ),
+                    screen_sink=lambda lines: renderer.render(list(lines[-terminal.rows :])),
                     raw_sink=terminal.write,
                     compose_prompt=compose,
                     initial_lines=previous_lines,
                 )
-            ]
+            else:
+                # Inline mode: only the active block may repaint; settled blocks commit
+                # so their lines are never rewritten (real terminals clamp cursor moves
+                # once a region outgrows the screen, which duplicated output).
+                app = InteractiveApp(
+                    session=created.session,
+                    dispatcher=dispatcher,
+                    width=terminal.columns,
+                    block_sink=lambda lines: renderer.render(list(lines[-terminal.rows :])),
+                    commit_sink=renderer.commit,
+                    raw_sink=terminal.write,
+                    compose_prompt=compose,
+                    initial_lines=previous_lines,
+                )
+            app_holder[:] = [app]
 
         def select_model(args: str) -> CommandOutcome:
             model_id = args.strip()

@@ -41,7 +41,9 @@ class InteractiveApp:
 
     __slots__ = (
         "_active_message",
+        "_block_sink",
         "_blocks",
+        "_commit_sink",
         "_compose_prompt",
         "_counter",
         "_dispatcher",
@@ -63,6 +65,8 @@ class InteractiveApp:
         dispatcher: CommandDispatcher | None = None,
         sink: Callable[[str], None] | None = None,
         screen_sink: Callable[[tuple[str, ...]], None] | None = None,
+        block_sink: Callable[[tuple[str, ...]], None] | None = None,
+        commit_sink: Callable[[], None] | None = None,
         raw_sink: Callable[[str], None] | None = None,
         compose_prompt: Callable[[str], AgentMessage | str] | None = None,
         initial_lines: tuple[str, ...] = (),
@@ -83,6 +87,8 @@ class InteractiveApp:
         self.lines: list[str] = list(initial_lines)
         self._sink: Callable[[str], None] = sink or (lambda _line: None)
         self._screen_sink = screen_sink
+        self._block_sink: Callable[[tuple[str, ...]], None] | None = block_sink
+        self._commit_sink: Callable[[], None] | None = commit_sink
         self._raw_sink: Callable[[str], None] | None = raw_sink
         session.subscribe(self._on_event)
 
@@ -120,35 +126,45 @@ class InteractiveApp:
         lines = tuple(_pad(chunk, self._width) for chunk in wrap_text(text, self._width))
         self._set_block(self._next_key("text"), lines)
 
-    def _set_block(self, key: str, lines: tuple[str, ...]) -> None:
+    def _set_block(self, key: str, lines: tuple[str, ...], *, live: bool = False) -> None:
+        """Update one block; ``live`` blocks keep repainting, settled blocks commit."""
+
         self._blocks[key] = lines
         self.lines[:] = [line for block in self._blocks.values() for line in block]
-        if self._screen_sink is not None:
+        if self._block_sink is not None:
+            self._block_sink(lines)
+            if not live:
+                self._commit()
+        elif self._screen_sink is not None:
             self._screen_sink(tuple(self.lines))
         for line in lines:
             self._sink(line)
+
+    def _commit(self) -> None:
+        if self._commit_sink is not None:
+            self._commit_sink()
 
     def _on_event(self, event: object, signal: asyncio.Event) -> None:
         del signal
         if isinstance(event, MessageStartEvent) and isinstance(event.message, AssistantMessage):
             self._active_message = self._next_key("assistant")
-            self._blocks[self._active_message] = ()
+            self._set_block(self._active_message, (), live=True)
         elif isinstance(event, MessageUpdateEvent):
-            self._render_assistant(event.message)
+            self._render_assistant(event.message, live=True)
         elif isinstance(event, MessageEndEvent) and isinstance(event.message, AssistantMessage):
-            self._render_assistant(event.message)
+            self._render_assistant(event.message, live=False)
             self._active_message = None
         elif isinstance(event, MessageEndEvent) and isinstance(event.message, UserMessage):
             self._render_user(event.message)
         elif isinstance(event, ToolExecutionStartEvent):
             view = ToolExecutionView(event.tool_name)
             self._tools[event.tool_call_id] = view
-            self._set_block(f"tool:{event.tool_call_id}", view.render(self._width))
+            self._set_block(f"tool:{event.tool_call_id}", view.render(self._width), live=True)
         elif isinstance(event, ToolExecutionUpdateEvent):
             view = self._tools.get(event.tool_call_id)
             if view is not None:
                 view.update(_result_detail(event.partial_result))
-                self._set_block(f"tool:{event.tool_call_id}", view.render(self._width))
+                self._set_block(f"tool:{event.tool_call_id}", view.render(self._width), live=True)
         elif isinstance(event, ToolExecutionEndEvent):
             view = self._tools.get(event.tool_call_id)
             if view is not None:
@@ -161,13 +177,15 @@ class InteractiveApp:
                 max_attempts=event.max_attempts,
                 delay_seconds=event.delay_seconds,
             )
-            self._set_block("retry", self._retry.render(self._width))
+            self._set_block("retry", self._retry.render(self._width), live=True)
         elif isinstance(event, AutoRetryEndEvent):
             self._retry.retry_finished(success=event.success)
             self._set_block("retry", self._retry.render(self._width))
         elif isinstance(event, CompactionStartEvent):
             self._set_block(
-                "session-status", self._session_status.compaction_started().render(self._width)
+                "session-status",
+                self._session_status.compaction_started().render(self._width),
+                live=True,
             )
         elif isinstance(event, CompactionEndEvent):
             self._set_block(
@@ -177,7 +195,7 @@ class InteractiveApp:
                 ),
             )
 
-    def _render_assistant(self, message: AssistantMessage) -> None:
+    def _render_assistant(self, message: AssistantMessage, *, live: bool) -> None:
         key = self._active_message
         if key is None:
             key = self._next_key("assistant")
@@ -190,7 +208,7 @@ class InteractiveApp:
                 view.add_thinking_delta(block.thinking)
         if message.stop_reason in ("error", "aborted"):
             view.fail(message.error_message or "provider error")
-        self._set_block(key, view.render(self._width))
+        self._set_block(key, view.render(self._width), live=live)
 
     def _render_user(self, message: UserMessage) -> None:
         content = message.content

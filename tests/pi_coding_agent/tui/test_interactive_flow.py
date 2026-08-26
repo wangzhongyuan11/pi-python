@@ -624,9 +624,7 @@ def test_sessions_selector_defaults_to_the_per_project_session_directory(
     tmp_path: Path,
 ) -> None:
     _drive(tmp_path, ("seed", "/exit"), FakeProvider([fake_assistant_message("s")]))
-    default_root = (
-        Path.home() / ".pi-python" / "agent" / "sessions"
-    )
+    default_root = Path.home() / ".pi-python" / "agent" / "sessions"
     project_dirs = [path for path in default_root.glob("*") if path.is_dir()]
     assert project_dirs, "expected the first turn to create the per-project session directory"
 
@@ -678,6 +676,59 @@ def test_fork_creates_a_child_session_and_switches_to_it(tmp_path: Path) -> None
     assert len(parents) == 1
     header = json.loads(child.read_text(encoding="utf-8").splitlines()[0])
     assert header["parentSession"] == str(parents[0].resolve())
+
+
+def test_regular_mode_renders_each_transcript_line_exactly_once(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [fake_assistant_message("first answer"), fake_assistant_message("second answer")]
+    )
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    replies = iter(("first", "second", "/exit"))
+    output = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(replies, None)
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=StringIO(),
+            read_line=read_line,
+        )
+    )
+
+    assert code == 0
+    screen = output.getvalue()
+    assert screen.count("> first") == 1
+    assert screen.count("> second") == 1
+    assert screen.count("first answer") == 1
+    assert screen.count("second answer") == 1
+
+
+def test_streaming_updates_render_only_the_active_block_then_commit(tmp_path: Path) -> None:
+    provider = FakeProvider([fake_assistant_message("流式回答内容")], chunk_size=2)
+    blocks: list[tuple[str, ...]] = []
+    commits: list[int] = []
+    app = InteractiveApp(
+        session=_session(tmp_path, provider),
+        block_sink=blocks.append,
+        commit_sink=lambda: commits.append(1),
+    )
+
+    asyncio.run(app.handle("你好"))
+
+    assert all("> 你好" not in "".join(block) or block == blocks[0] for block in blocks)
+    joined_blocks = {"".join(block) for block in blocks}
+    assert any("流式回答" in text for text in joined_blocks)
+    assert not any("> 你好" in text and "流式回答" in text for text in joined_blocks)
+    assert len(commits) >= 2
+    assert "流式回答内容" in "".join(app.lines)
 
 
 def test_interactive_mode_clearly_rejects_macos(
