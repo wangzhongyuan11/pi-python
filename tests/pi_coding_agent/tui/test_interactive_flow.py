@@ -10,10 +10,13 @@ from pydantic import BaseModel
 from pi_agent import Agent, AgentTool, AgentToolResult, AgentToolUpdateCallback
 from pi_ai import FakeProvider, TextContent, ToolCall, fake_assistant_message, fake_model
 from pi_coding_agent.agent_session import AgentSession
+from pi_coding_agent.compaction.service import CompactionService
+from pi_coding_agent.compaction.summarizer import CompactionSummarizer
 from pi_coding_agent.deepseek_credentials import DeepSeekCredentialResolver
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.services import create_product_services
 from pi_coding_agent.session.manager import SessionManager
+from pi_coding_agent.session.models import SessionEntry
 from pi_coding_agent.tui.commands import CommandDispatcher, CommandOutcome, CommandSpec
 from pi_coding_agent.tui.extension_ui import DialogBridge
 from pi_coding_agent.tui.main import InteractiveApp
@@ -163,6 +166,40 @@ def test_retry_recovery_is_reported_in_status_lines(tmp_path: Path) -> None:
     screen = "".join(app.lines)
 
     assert "recovered" in screen
+
+
+def test_manual_compaction_reports_activity_in_status_lines(tmp_path: Path) -> None:
+    class _FixedSummarizer(CompactionSummarizer):
+        async def summarize(
+            self, entries: tuple[SessionEntry, ...], *, previous_summary: str | None
+        ) -> str:
+            return "compacted summary"
+
+    manager = SessionManager.in_memory(
+        cwd=tmp_path, session_id="compact-tui", timestamp="2026-08-24T00:00:00Z"
+    )
+    session = AgentSession(
+        agent=Agent(model=fake_model(), stream_function=FakeProvider([]).stream),
+        session_manager=manager,
+        services=create_product_services(tmp_path),
+        compaction_service=CompactionService(
+            session_manager=manager,
+            summarizer=_FixedSummarizer(),
+            entry_id_factory=lambda: "compaction-1",
+            timestamp_factory=lambda: "2026-08-24T00:00:01Z",
+        ),
+    )
+    app = InteractiveApp(session=session)
+
+    async def scenario() -> None:
+        await session.prompt("hello")
+        await session.compact()
+
+    asyncio.run(scenario())
+    screen = "".join(app.lines)
+
+    assert "compacting context" in screen
+    assert "compacted (was " in screen and " tokens)" in screen
 
 
 def test_extension_dialog_cancel_yields_none_answer(tmp_path: Path) -> None:

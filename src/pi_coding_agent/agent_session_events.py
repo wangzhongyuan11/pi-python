@@ -9,6 +9,7 @@ from typing import Literal
 
 from pi_agent import AgentEvent
 
+from .compaction.service import CompactionReason
 from .session.models import MessageEntry
 
 
@@ -35,7 +36,27 @@ class AutoRetryEndEvent:
     type: Literal["auto_retry_end"] = field(default="auto_retry_end", init=False)
 
 
-type AgentSessionEvent = AgentEvent | EntryAppendedEvent | AutoRetryStartEvent | AutoRetryEndEvent
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CompactionStartEvent:
+    reason: CompactionReason
+    type: Literal["compaction_start"] = field(default="compaction_start", init=False)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CompactionEndEvent:
+    reason: CompactionReason
+    tokens_before: int
+    type: Literal["compaction_end"] = field(default="compaction_end", init=False)
+
+
+type AgentSessionEvent = (
+    AgentEvent
+    | EntryAppendedEvent
+    | AutoRetryStartEvent
+    | AutoRetryEndEvent
+    | CompactionStartEvent
+    | CompactionEndEvent
+)
 type AgentSessionEventListener = Callable[
     [AgentSessionEvent, asyncio.Event], None | Awaitable[None]
 ]
@@ -46,5 +67,7 @@ __all__ = [
     "AgentSessionEventListener",
     "AutoRetryEndEvent",
     "AutoRetryStartEvent",
+    "CompactionEndEvent",
+    "CompactionStartEvent",
     "EntryAppendedEvent",
 ]

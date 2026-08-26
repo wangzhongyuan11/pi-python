@@ -15,6 +15,8 @@ from .agent_session_events import (
     AgentSessionEvent,
     AutoRetryEndEvent,
     AutoRetryStartEvent,
+    CompactionEndEvent,
+    CompactionStartEvent,
     EntryAppendedEvent,
 )
 from .session.codec import dump_record
@@ -45,6 +47,10 @@ class JsonEventPresenter:
                 payload["finalError"] = event.final_error
         elif isinstance(event, EntryAppendedEvent):
             payload["entry"] = dump_record(event.entry)
+        elif isinstance(event, CompactionStartEvent):
+            payload["reason"] = event.reason
+        elif isinstance(event, CompactionEndEvent):
+            payload.update(reason=event.reason, tokensBefore=event.tokens_before)
         elif isinstance(event, MessageStartEvent | MessageEndEvent):
             message = event.message
             payload["message"] = (

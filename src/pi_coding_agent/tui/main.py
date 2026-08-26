@@ -19,10 +19,15 @@ from pi_tui.layout import wrap_text
 from pi_tui.width import visible_width
 
 from ..agent_session import AgentSession
-from ..agent_session_events import AutoRetryEndEvent, AutoRetryStartEvent
+from ..agent_session_events import (
+    AutoRetryEndEvent,
+    AutoRetryStartEvent,
+    CompactionEndEvent,
+    CompactionStartEvent,
+)
 from .commands import CommandDispatcher
 from .render_messages import AssistantMessageView
-from .render_status import RetryStatusLine
+from .render_status import RetryStatusLine, SessionStatusLine
 from .render_tools import ToolExecutionView
 
 
@@ -39,8 +44,9 @@ class InteractiveApp:
         "_counter",
         "_dispatcher",
         "_retry",
-        "_session",
         "_screen_sink",
+        "_session",
+        "_session_status",
         "_sink",
         "_tools",
         "_width",
@@ -60,6 +66,7 @@ class InteractiveApp:
         self._dispatcher = dispatcher
         self._width = width
         self._retry = RetryStatusLine()
+        self._session_status = SessionStatusLine()
         self._blocks: OrderedDict[str, tuple[str, ...]] = OrderedDict()
         self._tools: dict[str, ToolExecutionView] = {}
         self._counter = 0
@@ -132,6 +139,17 @@ class InteractiveApp:
         elif isinstance(event, AutoRetryEndEvent):
             self._retry.retry_finished(success=event.success)
             self._set_block("retry", self._retry.render(self._width))
+        elif isinstance(event, CompactionStartEvent):
+            self._set_block(
+                "session-status", self._session_status.compaction_started().render(self._width)
+            )
+        elif isinstance(event, CompactionEndEvent):
+            self._set_block(
+                "session-status",
+                self._session_status.compaction_finished(tokens_before=event.tokens_before).render(
+                    self._width
+                ),
+            )
 
     def _render_assistant(self, message: AssistantMessage) -> None:
         key = self._active_message

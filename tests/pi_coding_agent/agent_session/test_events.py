@@ -11,8 +11,12 @@ from pi_coding_agent.agent_session import AgentSession
 from pi_coding_agent.agent_session_events import (
     AutoRetryEndEvent,
     AutoRetryStartEvent,
+    CompactionEndEvent,
+    CompactionStartEvent,
     EntryAppendedEvent,
 )
+from pi_coding_agent.compaction.service import CompactionService
+from pi_coding_agent.compaction.summarizer import CompactionSummarizer
 from pi_coding_agent.presenters import JsonEventPresenter
 from pi_coding_agent.services import create_product_services
 from pi_coding_agent.session.manager import SessionManager
@@ -50,6 +54,67 @@ def test_core_events_are_forwarded_and_each_message_is_persisted_once(tmp_path: 
 
     assert observed == ["core:user", "entry:user", "core:assistant", "entry:assistant"]
     assert entry_count == 2
+
+
+class _FixedSummarizer(CompactionSummarizer):
+    async def summarize(self, entries: tuple[object, ...], *, previous_summary: str | None) -> str:
+        return "event summary"
+
+
+def test_compaction_emits_start_and_end_product_events(tmp_path: Path) -> None:
+    async def scenario() -> list[tuple[str, str] | tuple[str, str, int]]:
+        agent = Agent(
+            model=fake_model(),
+            stream_function=FakeProvider([fake_assistant_message("done")]).stream,
+        )
+        timestamp = "2026-08-24T00:00:00.000Z"
+        manager = SessionManager.in_memory(cwd=tmp_path, session_id="compact", timestamp=timestamp)
+        session = AgentSession(
+            agent=agent,
+            session_manager=manager,
+            services=create_product_services(tmp_path),
+            compaction_service=CompactionService(
+                session_manager=manager,
+                summarizer=_FixedSummarizer(),
+                entry_id_factory=lambda: "compaction-1",
+                timestamp_factory=lambda: timestamp,
+            ),
+        )
+        observed: list[tuple[str, str] | tuple[str, str, int]] = []
+
+        def listener(event: object, _signal: asyncio.Event) -> None:
+            if isinstance(event, CompactionStartEvent):
+                observed.append(("start", event.reason))
+            elif isinstance(event, CompactionEndEvent):
+                observed.append(("end", event.reason, event.tokens_before))
+
+        session.subscribe(listener)
+        await session.prompt("hello")
+        entry = await session.compact()
+        observed.append(("entry-tokens", "", entry.tokens_before))
+        return observed
+
+    observed = asyncio.run(scenario())
+
+    end = observed[1]
+    assert observed[0] == ("start", "manual")
+    assert isinstance(end, tuple) and end[0] == "end" and end[1] == "manual"
+    assert end[2] > 0
+    assert end[2] == observed[2][2]
+
+
+def test_compaction_events_are_presented_with_camel_case_metadata() -> None:
+    stdout = StringIO()
+    presenter = JsonEventPresenter(stdout)
+    signal = asyncio.Event()
+
+    presenter(CompactionStartEvent(reason="manual"), signal)
+    presenter(CompactionEndEvent(reason="overflow", tokens_before=1234), signal)
+
+    assert [json.loads(line) for line in stdout.getvalue().splitlines()] == [
+        {"type": "compaction_start", "reason": "manual"},
+        {"type": "compaction_end", "reason": "overflow", "tokensBefore": 1234},
+    ]
 
 
 def test_json_presenter_preserves_product_retry_event_metadata() -> None:

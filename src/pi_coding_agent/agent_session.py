@@ -23,6 +23,8 @@ from .agent_session_events import (
     AgentSessionEventListener,
     AutoRetryEndEvent,
     AutoRetryStartEvent,
+    CompactionEndEvent,
+    CompactionStartEvent,
     EntryAppendedEvent,
 )
 from .agent_session_runtime import RuntimeReason
@@ -225,6 +227,7 @@ class AgentSession:
             keep_recent_tokens=self._compaction_keep_recent_tokens,
             token_count=self._compaction_token_count,
         )
+        await self._emit(CompactionStartEvent(reason=reason), asyncio.Event())
         entry = await self._compaction_service.compact(
             entries,
             cutpoint,
@@ -233,6 +236,10 @@ class AgentSession:
             previous_summary=previous_summary,
         )
         self._restore_active_context()
+        await self._emit(
+            CompactionEndEvent(reason=reason, tokens_before=entry.tokens_before),
+            asyncio.Event(),
+        )
         return entry
 
     async def branch(
