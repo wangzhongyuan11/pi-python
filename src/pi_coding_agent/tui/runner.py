@@ -12,15 +12,25 @@ from pathlib import Path
 from typing import Literal, Protocol, TextIO, runtime_checkable
 from uuid import uuid4
 
+from pi_agent import AgentMessage
 from pi_ai import (
     AssistantMessage,
     CredentialResolver,
+    ImageContent,
+    JsonValue,
     ModelThinkingLevel,
     TextContent,
+    UserMessage,
     clamp_thinking_level,
 )
 from pi_tui.render import ScreenRenderer
 
+from ..attachments import (
+    build_image_attachment,
+    build_text_file_attachment,
+    classify_attachment,
+    supports_image_input,
+)
 from ..cli.run import HeadlessOptions, resolve_session_manager
 from ..extensions.registry import CapabilityRegistry
 from ..model_runtime import ModelRuntime, create_model_runtime
@@ -30,6 +40,12 @@ from .config_ui import ModelSettingsController
 from .main import InteractiveApp
 
 type ReadLine = Callable[[str], Awaitable[str | None]]
+
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+
+def _message_timestamp() -> int:
+    return int(datetime.now(UTC).timestamp() * 1000)
 
 
 @runtime_checkable
@@ -214,6 +230,7 @@ async def run_interactive(
                         "/help  show commands\n"
                         "/model [provider/model]  show or switch model\n"
                         "/thinking [level]  show or set thinking level\n"
+                        "/attach <path>  attach a file or image to the next prompt\n"
                         "/copy  copy the last reply to the terminal clipboard (OSC-52)\n"
                         "/exit  leave the session"
                     ),
@@ -223,6 +240,55 @@ async def run_interactive(
         dispatcher.register(CommandSpec(name="model", source="builtin", handler=select_model))
         dispatcher.register(CommandSpec(name="thinking", source="builtin", handler=select_thinking))
         dispatcher.register(CommandSpec(name="copy", source="builtin", handler=copy_last_reply))
+
+        pending_attachments: list[dict[str, JsonValue]] = []
+
+        def attach_file(args: str) -> CommandOutcome:
+            raw = args.strip().strip('"')
+            if not raw:
+                return CommandOutcome(kind="message", text="usage: /attach <path>")
+            path = Path(raw)
+            if not path.is_absolute():
+                path = options.cwd / path
+            model = created.model_runtime.model
+            if classify_attachment(path) == "image":
+                attachment = build_image_attachment(
+                    path,
+                    max_bytes=_MAX_IMAGE_BYTES,
+                    image_supported=supports_image_input(model),
+                )
+            else:
+                attachment = build_text_file_attachment(path)
+            pending_attachments.append(attachment)
+            name = str(attachment["name"])
+            return CommandOutcome(
+                kind="message", text=f"attached {name} ({len(pending_attachments)} pending)"
+            )
+
+        dispatcher.register(CommandSpec(name="attach", source="builtin", handler=attach_file))
+
+        def compose(line: str) -> AgentMessage | str:
+            if not pending_attachments:
+                return line
+            attachments = tuple(pending_attachments)
+            pending_attachments.clear()
+            blocks: list[TextContent | ImageContent] = [TextContent(text=line)]
+            for attachment in attachments:
+                if attachment.get("type") == "image":
+                    blocks.append(
+                        ImageContent(
+                            data=str(attachment["data"]),
+                            mime_type=str(attachment["mimeType"]),
+                        )
+                    )
+                else:
+                    blocks.append(
+                        TextContent(
+                            text=f"[attached file {attachment['name']}]\n{attachment['content']}"
+                        )
+                    )
+            return UserMessage(content=tuple(blocks), timestamp=_message_timestamp())
+
         extensions = created.services.extensions
         if isinstance(extensions, _HasRegistry):
             skipped = dispatcher.register_registry(extensions.registry)
@@ -243,6 +309,7 @@ async def run_interactive(
                 list(lines[-terminal.rows :]) if fullscreen else list(lines)
             ),
             raw_sink=terminal.write,
+            compose_prompt=compose,
         )
         reader = read_line or _prompt_toolkit_reader()
         terminal.start()

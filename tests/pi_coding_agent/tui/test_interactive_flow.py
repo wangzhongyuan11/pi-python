@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 
@@ -439,6 +441,84 @@ def test_copy_without_a_prior_reply_reports_nothing_to_copy(tmp_path: Path) -> N
     assert code == 0
     assert "nothing to copy" in output.getvalue()
     assert "\x1b]52" not in output.getvalue()
+
+
+def _persisted_user_texts(session_dir: Path) -> list[str]:
+    entries: list[str] = []
+    for path in sorted(session_dir.glob("*.jsonl")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            record = json.loads(line)
+            if record.get("type") == "message" and record.get("message", {}).get("role") == "user":
+                entries.append(json.dumps(record["message"]["content"], ensure_ascii=False))
+    return entries
+
+
+def test_attach_sends_file_content_with_the_next_prompt_only(tmp_path: Path) -> None:
+    note = tmp_path / "note.txt"
+    note.write_text("file body", encoding="utf-8")
+    session_dir = tmp_path / "sessions"
+    provider = FakeProvider([fake_assistant_message("got it"), fake_assistant_message("again ok")])
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    replies = iter((f"/attach {note}", "use it", "plain follow up", "/exit"))
+    output = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(replies, None)
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                session_dir=session_dir,
+            ),
+            stdout=output,
+            stderr=StringIO(),
+            read_line=read_line,
+        )
+    )
+
+    assert code == 0
+    assert "attached note.txt" in output.getvalue()
+    user_texts = _persisted_user_texts(session_dir)
+    assert any("file body" in text and "note.txt" in text for text in user_texts)
+    assert not any("file body" in text for text in user_texts[1:])
+    assert any("plain follow up" in text for text in user_texts)
+
+
+def test_attach_rejects_images_for_text_only_models(tmp_path: Path) -> None:
+    class _TextOnlyProvider(FakeProvider):
+        @property
+        def models(self):  # type: ignore[override]
+            return (replace(fake_model(), input=("text",)),)
+
+    image = tmp_path / "shot.png"
+    image.write_bytes(b"\x89PNG fake")
+    provider = _TextOnlyProvider()
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    replies = iter((f"/attach {image}", "/exit"))
+    output = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(replies, None)
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=StringIO(),
+            read_line=read_line,
+        )
+    )
+
+    assert code == 0
+    assert "does not support image input" in output.getvalue()
 
 
 def test_interactive_mode_clearly_rejects_macos(

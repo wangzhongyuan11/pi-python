@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 import pytest
 
+from pi_ai import fake_model
 from pi_coding_agent.attachments import (
     AttachmentError,
     build_image_attachment,
     build_text_file_attachment,
+    classify_attachment,
+    supports_image_input,
 )
 
 
@@ -52,6 +56,18 @@ def test_image_attachment_requires_supported_format_and_size(tmp_path: Path) -> 
 def test_missing_files_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(AttachmentError):
         build_text_file_attachment(tmp_path / "missing.txt")
+
+
+def test_image_support_is_derived_from_model_input_capabilities() -> None:
+    assert supports_image_input(fake_model()) is True
+    assert supports_image_input(replace(fake_model(), input=("text",))) is False
+
+
+def test_attachment_kind_classifies_by_suffix() -> None:
+    assert classify_attachment(Path("shot.png")) == "image"
+    assert classify_attachment(Path("shot.jpeg")) == "image"
+    assert classify_attachment(Path("notes.txt")) == "text"
+    assert classify_attachment(Path("archive.zip")) == "text"
 
 
 def test_attachment_io_failures_use_the_public_error_contract() -> None:

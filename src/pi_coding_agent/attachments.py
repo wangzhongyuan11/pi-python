@@ -6,7 +6,7 @@ import base64
 from pathlib import Path
 from typing import cast
 
-from pi_ai import JsonValue
+from pi_ai import JsonValue, Model
 
 _IMAGE_MIME_TYPES = {
     ".png": "image/png",
@@ -18,6 +18,18 @@ _IMAGE_MIME_TYPES = {
 
 class AttachmentError(ValueError):
     """An attachment is missing, unsupported, or exceeds its size limit."""
+
+
+def supports_image_input(model: Model) -> bool:
+    """Derive image support from the model's declared input capabilities."""
+
+    return "image" in model.input
+
+
+def classify_attachment(path: Path) -> str:
+    """Classify an attachment candidate as ``image`` or ``text`` by suffix."""
+
+    return "image" if path.suffix.lower() in _IMAGE_MIME_TYPES else "text"
 
 
 def build_text_file_attachment(path: Path) -> dict[str, JsonValue]:
@@ -68,4 +80,10 @@ def build_image_attachment(
     )
 
 
-__all__ = ["AttachmentError", "build_image_attachment", "build_text_file_attachment"]
+__all__ = [
+    "AttachmentError",
+    "build_image_attachment",
+    "build_text_file_attachment",
+    "classify_attachment",
+    "supports_image_input",
+]

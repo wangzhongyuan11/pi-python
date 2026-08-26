@@ -7,6 +7,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 
 from pi_agent import (
+    AgentMessage,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
@@ -41,6 +42,7 @@ class InteractiveApp:
     __slots__ = (
         "_active_message",
         "_blocks",
+        "_compose_prompt",
         "_counter",
         "_dispatcher",
         "_raw_sink",
@@ -62,10 +64,12 @@ class InteractiveApp:
         sink: Callable[[str], None] | None = None,
         screen_sink: Callable[[tuple[str, ...]], None] | None = None,
         raw_sink: Callable[[str], None] | None = None,
+        compose_prompt: Callable[[str], AgentMessage | str] | None = None,
         width: int = 80,
     ) -> None:
         self._session = session
         self._dispatcher = dispatcher
+        self._compose_prompt = compose_prompt
         self._width = width
         self._retry = RetryStatusLine()
         self._session_status = SessionStatusLine()
@@ -88,7 +92,10 @@ class InteractiveApp:
                 elif outcome.text:
                     self._append_text(outcome.text)
                 return
-        await self._session.prompt(line)
+        payload: AgentMessage | str = line
+        if self._compose_prompt is not None:
+            payload = self._compose_prompt(line)
+        await self._session.prompt(payload)
         await self._session.wait_for_idle()
 
     def _write_raw(self, payload: str) -> None:
