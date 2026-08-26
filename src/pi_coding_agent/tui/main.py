@@ -43,6 +43,7 @@ class InteractiveApp:
         "_blocks",
         "_counter",
         "_dispatcher",
+        "_raw_sink",
         "_retry",
         "_screen_sink",
         "_session",
@@ -60,6 +61,7 @@ class InteractiveApp:
         dispatcher: CommandDispatcher | None = None,
         sink: Callable[[str], None] | None = None,
         screen_sink: Callable[[tuple[str, ...]], None] | None = None,
+        raw_sink: Callable[[str], None] | None = None,
         width: int = 80,
     ) -> None:
         self._session = session
@@ -74,17 +76,26 @@ class InteractiveApp:
         self.lines: list[str] = []
         self._sink: Callable[[str], None] = sink or (lambda _line: None)
         self._screen_sink = screen_sink
+        self._raw_sink: Callable[[str], None] | None = raw_sink
         session.subscribe(self._on_event)
 
     async def handle(self, line: str) -> None:
         if self._dispatcher is not None:
             outcome = await self._dispatcher.dispatch(line)
             if outcome is not None:
-                if outcome.text:
+                if outcome.kind == "raw":
+                    self._write_raw(outcome.text)
+                elif outcome.text:
                     self._append_text(outcome.text)
                 return
         await self._session.prompt(line)
         await self._session.wait_for_idle()
+
+    def _write_raw(self, payload: str) -> None:
+        """Send a trusted terminal control payload outside the wrapped transcript."""
+
+        if self._raw_sink is not None and payload:
+            self._raw_sink(payload)
 
     def _next_key(self, prefix: str) -> str:
         self._counter += 1

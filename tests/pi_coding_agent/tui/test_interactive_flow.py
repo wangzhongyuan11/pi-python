@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from io import StringIO
 from pathlib import Path
 
@@ -363,6 +364,81 @@ def test_conflicting_extension_commands_degrade_to_warning_instead_of_crashing(
     assert "/model" in errors.getvalue()
     assert "skipped" in errors.getvalue()
     assert "still works" in output.getvalue()
+
+
+def test_raw_command_outcomes_bypass_screen_blocks_and_reach_the_terminal(tmp_path: Path) -> None:
+    dispatcher = CommandDispatcher()
+    dispatcher.register(
+        CommandSpec(
+            name="rawcmd",
+            source="builtin",
+            handler=lambda _args: CommandOutcome(kind="raw", text="\x1b[5n"),
+        )
+    )
+    raw: list[str] = []
+    app = InteractiveApp(
+        session=_session(tmp_path, FakeProvider([])), dispatcher=dispatcher, raw_sink=raw.append
+    )
+
+    asyncio.run(app.handle("/rawcmd"))
+
+    assert raw == ["\x1b[5n"]
+    assert "".join(app.lines) == ""
+
+
+def test_copy_sends_last_reply_to_clipboard_over_osc52(tmp_path: Path) -> None:
+    provider = FakeProvider([fake_assistant_message("copied answer")])
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    replies = iter(("hello", "/copy", "/exit"))
+    output = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(replies, None)
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=StringIO(),
+            read_line=read_line,
+        )
+    )
+
+    expected = base64.b64encode(b"copied answer").decode("ascii")
+    assert code == 0
+    assert f"\x1b]52;c;{expected}\x07" in output.getvalue()
+
+
+def test_copy_without_a_prior_reply_reports_nothing_to_copy(tmp_path: Path) -> None:
+    runtime = ModelRuntime(provider=FakeProvider(), model=fake_model())
+    replies = iter(("/copy", "/exit"))
+    output = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(replies, None)
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=StringIO(),
+            read_line=read_line,
+        )
+    )
+
+    assert code == 0
+    assert "nothing to copy" in output.getvalue()
+    assert "\x1b]52" not in output.getvalue()
 
 
 def test_interactive_mode_clearly_rejects_macos(

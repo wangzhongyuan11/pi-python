@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import shutil
 import sys
 from collections.abc import Awaitable, Callable
@@ -11,7 +12,13 @@ from pathlib import Path
 from typing import Literal, Protocol, TextIO, runtime_checkable
 from uuid import uuid4
 
-from pi_ai import CredentialResolver, ModelThinkingLevel, clamp_thinking_level
+from pi_ai import (
+    AssistantMessage,
+    CredentialResolver,
+    ModelThinkingLevel,
+    TextContent,
+    clamp_thinking_level,
+)
 from pi_tui.render import ScreenRenderer
 
 from ..cli.run import HeadlessOptions, resolve_session_manager
@@ -176,17 +183,46 @@ async def run_interactive(
             controller.apply(created.session.state.model.id, level)
             return CommandOutcome(kind="message", text=f"thinking: {level}")
 
+        def copy_last_reply(_args: str) -> CommandOutcome:
+            last = next(
+                (
+                    message
+                    for message in reversed(created.session.state.messages)
+                    if isinstance(message, AssistantMessage)
+                ),
+                None,
+            )
+            text = (
+                "".join(
+                    block.text for block in last.content if isinstance(block, TextContent)
+                ).strip()
+                if last is not None
+                else ""
+            )
+            if not text:
+                return CommandOutcome(kind="message", text="nothing to copy yet")
+            payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
+            return CommandOutcome(kind="raw", text=f"\x1b]52;c;{payload}\x07")
+
         dispatcher.register(
             CommandSpec(
                 name="help",
                 source="builtin",
                 handler=lambda _args: CommandOutcome(
-                    kind="message", text="/help  show commands\n/exit  leave the session"
+                    kind="message",
+                    text=(
+                        "/help  show commands\n"
+                        "/model [provider/model]  show or switch model\n"
+                        "/thinking [level]  show or set thinking level\n"
+                        "/copy  copy the last reply to the terminal clipboard (OSC-52)\n"
+                        "/exit  leave the session"
+                    ),
                 ),
             )
         )
         dispatcher.register(CommandSpec(name="model", source="builtin", handler=select_model))
         dispatcher.register(CommandSpec(name="thinking", source="builtin", handler=select_thinking))
+        dispatcher.register(CommandSpec(name="copy", source="builtin", handler=copy_last_reply))
         extensions = created.services.extensions
         if isinstance(extensions, _HasRegistry):
             skipped = dispatcher.register_registry(extensions.registry)
@@ -206,6 +242,7 @@ async def run_interactive(
             screen_sink=lambda lines: renderer.render(
                 list(lines[-terminal.rows :]) if fullscreen else list(lines)
             ),
+            raw_sink=terminal.write,
         )
         reader = read_line or _prompt_toolkit_reader()
         terminal.start()

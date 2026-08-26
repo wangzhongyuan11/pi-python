@@ -14,7 +14,7 @@ type CommandResult = CommandOutcome | str | None
 
 @dataclass(frozen=True, slots=True)
 class CommandOutcome:
-    kind: Literal["message", "error", "none"]
+    kind: Literal["message", "error", "none", "raw"]
     text: str = ""
 
 
