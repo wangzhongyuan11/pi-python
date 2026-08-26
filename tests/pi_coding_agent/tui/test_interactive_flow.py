@@ -319,7 +319,11 @@ def test_conflicting_extension_commands_degrade_to_warning_instead_of_crashing(
     from pi_coding_agent.services import create_product_services as _create
 
     api = ExtensionAPI("shadow")
-    api.define_command("model", lambda _args: "extension model")
+
+    def shadow_model(_args: str) -> str:
+        return "extension model"
+
+    api.define_command("model", shadow_model)
 
     class _Extensions:
         registry = api.registry

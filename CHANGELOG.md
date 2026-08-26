@@ -4,6 +4,24 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Phase 11 gap closure
+
+- Surface compaction activity as product events: `compaction_start` and `compaction_end`
+  now flow through the `AgentSessionEvent` stream, the JSON presenter, and the interactive
+  status line.
+- Skip extension slash commands that conflict with product commands at startup, reporting
+  the skipped names on stderr instead of failing to launch.
+- Add `/copy` to copy the last reply to the terminal clipboard over OSC-52, with a raw
+  command outcome channel that bypasses the sanitized transcript.
+- Add `/attach <path>` for file and image attachments on the next prompt; image support
+  is derived from the selected model's input capabilities instead of a manual flag.
+- Bind session navigation into the interactive loop: `/sessions` lists saved sessions and
+  switches by number, `/fork` forks the current session into a new child file; both
+  rebuild the renderer around the runtime's replacement session while preserving the
+  transcript.
+- Drive the Windows smoke through a real OS subprocess running the product loop, and make
+  the platform-specific checks skip cleanly outside Windows.
+
 ## 0.5.0 - 2026-08-26
 
 ### Phase 11

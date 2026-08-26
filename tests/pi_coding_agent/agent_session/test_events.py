@@ -62,7 +62,7 @@ class _FixedSummarizer(CompactionSummarizer):
 
 
 def test_compaction_emits_start_and_end_product_events(tmp_path: Path) -> None:
-    async def scenario() -> list[tuple[str, str] | tuple[str, str, int]]:
+    async def scenario() -> tuple[list[CompactionStartEvent], list[CompactionEndEvent], int]:
         agent = Agent(
             model=fake_model(),
             stream_function=FakeProvider([fake_assistant_message("done")]).stream,
@@ -80,27 +80,26 @@ def test_compaction_emits_start_and_end_product_events(tmp_path: Path) -> None:
                 timestamp_factory=lambda: timestamp,
             ),
         )
-        observed: list[tuple[str, str] | tuple[str, str, int]] = []
+        starts: list[CompactionStartEvent] = []
+        ends: list[CompactionEndEvent] = []
 
         def listener(event: object, _signal: asyncio.Event) -> None:
             if isinstance(event, CompactionStartEvent):
-                observed.append(("start", event.reason))
+                starts.append(event)
             elif isinstance(event, CompactionEndEvent):
-                observed.append(("end", event.reason, event.tokens_before))
+                ends.append(event)
 
         session.subscribe(listener)
         await session.prompt("hello")
         entry = await session.compact()
-        observed.append(("entry-tokens", "", entry.tokens_before))
-        return observed
+        return starts, ends, entry.tokens_before
 
-    observed = asyncio.run(scenario())
+    starts, ends, tokens_before = asyncio.run(scenario())
 
-    end = observed[1]
-    assert observed[0] == ("start", "manual")
-    assert isinstance(end, tuple) and end[0] == "end" and end[1] == "manual"
-    assert end[2] > 0
-    assert end[2] == observed[2][2]
+    assert len(starts) == 1 and starts[0].reason == "manual"
+    assert len(ends) == 1 and ends[0].reason == "manual"
+    assert ends[0].tokens_before > 0
+    assert ends[0].tokens_before == tokens_before
 
 
 def test_compaction_events_are_presented_with_camel_case_metadata() -> None:

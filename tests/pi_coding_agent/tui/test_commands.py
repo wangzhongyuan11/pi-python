@@ -96,8 +96,15 @@ def test_registry_import_skips_conflicting_commands_and_keeps_builtin_routing() 
         )
     )
     api = ExtensionAPI("sample")
-    api.define_command("model", lambda _args: "extension model")
-    api.define_command("extra", lambda _args: "extension extra")
+
+    def extension_model(_args: str) -> str:
+        return "extension model"
+
+    def extension_extra(_args: str) -> str:
+        return "extension extra"
+
+    api.define_command("model", extension_model)
+    api.define_command("extra", extension_extra)
 
     skipped = dispatcher.register_registry(api.registry)
 
