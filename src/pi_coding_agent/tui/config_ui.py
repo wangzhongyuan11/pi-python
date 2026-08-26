@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import cast
+
+from pi_ai import ModelThinkingLevel, clamp_thinking_level
+
+from ..agent_session import AgentSession
+from ..model_runtime import ModelRuntime
+from ..session.models import ModelChangeEntry, ThinkingLevelChangeEntry
 
 THINKING_LEVELS: tuple[str, ...] = (
     "off",
@@ -89,4 +96,63 @@ class ModelSettingsSelector:
             self._on_change(self.current_model_id, self.current_thinking)
 
 
-__all__ = ["ModelOption", "ModelSettingsSelector", "THINKING_LEVELS"]
+class ModelSettingsController:
+    """Applies a validated selection to the live Agent and append-only Session."""
+
+    __slots__ = ("_entry_id_factory", "_model_runtime", "_session", "_timestamp_factory")
+
+    def __init__(
+        self,
+        *,
+        session: AgentSession,
+        model_runtime: ModelRuntime,
+        entry_id_factory: Callable[[], str],
+        timestamp_factory: Callable[[], str],
+    ) -> None:
+        self._session = session
+        self._model_runtime = model_runtime
+        self._entry_id_factory = entry_id_factory
+        self._timestamp_factory = timestamp_factory
+
+    def apply(self, model_id: str, thinking_level: str) -> None:
+        if thinking_level not in THINKING_LEVELS:
+            raise ValueError(f"unknown thinking level: {thinking_level}")
+        current = self._session.state
+        selected = self._model_runtime.select_model(model_id)
+        requested = cast("ModelThinkingLevel", thinking_level)
+        if clamp_thinking_level(selected, requested) != requested:
+            raise ValueError(
+                f"thinking level {thinking_level!r} exceeds capability of {selected.id!r}"
+            )
+        manager = self._session.session_manager
+        if current.model != selected:
+            manager.append(
+                ModelChangeEntry(
+                    type="model_change",
+                    id=self._entry_id_factory(),
+                    parent_id=manager.leaf_id,
+                    timestamp=self._timestamp_factory(),
+                    provider=selected.provider,
+                    model_id=selected.id,
+                )
+            )
+        if current.thinking_level != requested:
+            manager.append(
+                ThinkingLevelChangeEntry(
+                    type="thinking_level_change",
+                    id=self._entry_id_factory(),
+                    parent_id=manager.leaf_id,
+                    timestamp=self._timestamp_factory(),
+                    thinking_level=requested,
+                )
+            )
+        self._session.agent.set_model(selected)
+        self._session.agent.set_thinking_level(requested)
+
+
+__all__ = [
+    "ModelOption",
+    "ModelSettingsController",
+    "ModelSettingsSelector",
+    "THINKING_LEVELS",
+]

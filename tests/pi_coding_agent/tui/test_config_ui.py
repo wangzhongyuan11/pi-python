@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
+
 import pytest
 
-from pi_coding_agent.tui.config_ui import ModelOption, ModelSettingsSelector
+from pi_agent import Agent
+from pi_ai import FakeProvider, fake_model
+from pi_coding_agent.agent_session import AgentSession
+from pi_coding_agent.model_runtime import ModelRuntime
+from pi_coding_agent.services import create_product_services
+from pi_coding_agent.session.manager import SessionManager
+from pi_coding_agent.session.models import ModelChangeEntry, ThinkingLevelChangeEntry
+from pi_coding_agent.tui.config_ui import (
+    ModelOption,
+    ModelSettingsController,
+    ModelSettingsSelector,
+)
 
 
 def _models() -> tuple[ModelOption, ...]:
@@ -65,3 +79,35 @@ def test_direct_set_updates_selection() -> None:
     selector.set_thinking("low")
 
     assert selector.current_thinking == "low"
+
+
+def test_controller_applies_and_persists_model_and_thinking_selection(tmp_path: Path) -> None:
+    class MultiModelProvider(FakeProvider):
+        @property
+        def models(self):  # type: ignore[no-untyped-def,override]
+            first = fake_model()
+            return (first, replace(first, id="fake-2", name="Fake Two"))
+
+    provider = MultiModelProvider()
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    manager = SessionManager.in_memory(
+        cwd=tmp_path, session_id="settings", timestamp="2026-08-26T00:00:00Z"
+    )
+    session = AgentSession(
+        agent=Agent(model=provider.models[0], stream_function=provider.stream),
+        session_manager=manager,
+        services=create_product_services(tmp_path),
+    )
+    controller = ModelSettingsController(
+        session=session,
+        model_runtime=runtime,
+        entry_id_factory=iter(("model-change", "thinking-change")).__next__,
+        timestamp_factory=lambda: "2026-08-26T00:00:01Z",
+    )
+
+    controller.apply("fake-2", "low")
+
+    assert session.state.model.id == "fake-2"
+    assert session.state.thinking_level == "low"
+    assert isinstance(manager.entries[0], ModelChangeEntry)
+    assert isinstance(manager.entries[1], ThinkingLevelChangeEntry)

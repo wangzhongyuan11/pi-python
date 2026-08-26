@@ -5,8 +5,10 @@ from __future__ import annotations
 import shutil
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO
+from uuid import uuid4
 
 from pi_ai import CredentialResolver, ModelThinkingLevel, clamp_thinking_level
 from pi_tui.render import ScreenRenderer
@@ -15,6 +17,7 @@ from ..cli.run import HeadlessOptions, resolve_session_manager
 from ..model_runtime import ModelRuntime, create_model_runtime
 from ..sdk import CreateAgentSessionOptions, create_agent_session
 from .commands import CommandDispatcher, CommandOutcome, CommandSpec
+from .config_ui import ModelSettingsController
 from .main import InteractiveApp
 
 type ReadLine = Callable[[str], Awaitable[str | None]]
@@ -114,7 +117,35 @@ async def run_interactive(
         )
     )
     async with created:
-        dispatcher = CommandDispatcher.from_registry(created.services.extensions.registry)
+        dispatcher = CommandDispatcher()
+        controller = ModelSettingsController(
+            session=created.session,
+            model_runtime=runtime,
+            entry_id_factory=lambda: uuid4().hex,
+            timestamp_factory=lambda: datetime.now(UTC)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"),
+        )
+
+        def select_model(args: str) -> CommandOutcome:
+            model_id = args.strip()
+            if not model_id:
+                return CommandOutcome(
+                    kind="message", text=f"current model: {created.session.state.model.id}"
+                )
+            controller.apply(model_id, created.session.state.thinking_level)
+            return CommandOutcome(kind="message", text=f"model: {model_id}")
+
+        def select_thinking(args: str) -> CommandOutcome:
+            level = args.strip()
+            if not level:
+                return CommandOutcome(
+                    kind="message",
+                    text=f"current thinking: {created.session.state.thinking_level}",
+                )
+            controller.apply(created.session.state.model.id, level)
+            return CommandOutcome(kind="message", text=f"thinking: {level}")
+
         dispatcher.register(
             CommandSpec(
                 name="help",
@@ -124,6 +155,9 @@ async def run_interactive(
                 ),
             )
         )
+        dispatcher.register(CommandSpec(name="model", source="builtin", handler=select_model))
+        dispatcher.register(CommandSpec(name="thinking", source="builtin", handler=select_thinking))
+        dispatcher.register_registry(created.services.extensions.registry)
         terminal = _StreamTerminal(stdout)
         renderer = ScreenRenderer(terminal)
         app = InteractiveApp(

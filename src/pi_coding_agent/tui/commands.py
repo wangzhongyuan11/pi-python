@@ -40,9 +40,13 @@ class CommandDispatcher:
     @classmethod
     def from_registry(cls, registry: CapabilityRegistry) -> CommandDispatcher:
         dispatcher = cls()
+        dispatcher.register_registry(registry)
+        return dispatcher
+
+    def register_registry(self, registry: CapabilityRegistry) -> None:
         for registration in registry.registrations("command"):
             if callable(registration.payload):
-                dispatcher.register(
+                self.register(
                     CommandSpec(
                         name=registration.name,
                         source=registration.source,
@@ -52,7 +56,6 @@ class CommandDispatcher:
                         ),
                     )
                 )
-        return dispatcher
 
     def register(self, spec: CommandSpec) -> None:
         if spec.name in self._commands:
