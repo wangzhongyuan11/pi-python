@@ -4,6 +4,7 @@ import asyncio
 from io import StringIO
 from pathlib import Path
 
+import pytest
 from pydantic import BaseModel
 
 from pi_agent import Agent, AgentTool, AgentToolResult, AgentToolUpdateCallback
@@ -265,3 +266,29 @@ def test_fullscreen_mode_enters_and_restores_the_alternate_screen(tmp_path: Path
 
     assert code == 0
     assert output.getvalue() == "\x1b[?1049h\x1b[?1049l"
+
+
+def test_interactive_mode_clearly_rejects_macos(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pi_coding_agent.tui.runner as runner
+
+    monkeypatch.setattr(runner.sys, "platform", "darwin")
+    errors = StringIO()
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=ModelRuntime(provider=FakeProvider(), model=fake_model()),
+                no_session=True,
+            ),
+            stdout=StringIO(),
+            stderr=errors,
+            read_line=lambda _prompt: asyncio.sleep(0, result=None),
+        )
+    )
+
+    assert code == 2
+    assert "macOS" in errors.getvalue()

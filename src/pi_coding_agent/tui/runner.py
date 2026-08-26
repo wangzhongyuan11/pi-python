@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -86,14 +87,18 @@ class _StreamTerminal:
             self.write("\x1b[?1049l")
 
 
-async def _prompt_toolkit_readline(prompt: str) -> str | None:
+def _prompt_toolkit_reader() -> ReadLine:
     from prompt_toolkit import PromptSession
 
     session: PromptSession[str] = PromptSession()
-    try:
-        return await session.prompt_async(prompt)
-    except EOFError:
-        return None
+
+    async def read_line(prompt: str) -> str | None:
+        try:
+            return await session.prompt_async(prompt)
+        except EOFError:
+            return None
+
+    return read_line
 
 
 async def run_interactive(
@@ -103,6 +108,9 @@ async def run_interactive(
     stderr: TextIO,
     read_line: ReadLine | None = None,
 ) -> int:
+    if sys.platform == "darwin":
+        stderr.write("interactive mode is not supported on macOS\n")
+        return 2
     runtime = options.model_runtime
     if runtime is None:
         runtime = create_model_runtime(
@@ -193,7 +201,7 @@ async def run_interactive(
                 list(lines[-terminal.rows :]) if fullscreen else list(lines)
             ),
         )
-        reader = read_line or _prompt_toolkit_readline
+        reader = read_line or _prompt_toolkit_reader()
         terminal.start()
         try:
             while True:
