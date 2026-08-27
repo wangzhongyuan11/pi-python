@@ -760,6 +760,45 @@ def test_regular_mode_scrolls_long_stream_once_and_leaves_a_fresh_line(
     assert screen.endswith("\r\n")
 
 
+def test_regular_mode_reserves_the_autowrap_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pi_coding_agent.tui.runner as runner
+
+    def terminal_size(fallback: tuple[int, int]) -> os.terminal_size:
+        del fallback
+        return os.terminal_size((20, 3))
+
+    monkeypatch.setattr(runner.shutil, "get_terminal_size", terminal_size)
+    provider = FakeProvider(
+        [fake_assistant_message("12345678901234567890X")],
+        chunk_size=64,
+    )
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    replies = iter(("explain", "/exit"))
+    output = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(replies, None)
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=StringIO(),
+            read_line=read_line,
+        )
+    )
+
+    assert code == 0
+    assert "1234567890123456789\r\n0X" in output.getvalue()
+
+
 def test_streaming_updates_render_only_the_active_block_then_commit(tmp_path: Path) -> None:
     provider = FakeProvider([fake_assistant_message("流式回答内容")], chunk_size=2)
     blocks: list[tuple[str, ...]] = []

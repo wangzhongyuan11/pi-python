@@ -214,7 +214,10 @@ async def run_interactive(
                 app = InteractiveApp(
                     session=created.session,
                     dispatcher=dispatcher,
-                    width=terminal.columns,
+                    # Keep the cursor off the right margin. Windows terminals
+                    # auto-wrap there, so the next live-tail clear would target
+                    # the following row and leave the previous partial behind.
+                    width=max(1, terminal.columns - 1),
                     block_sink=renderer.render,
                     commit_sink=renderer.commit,
                     raw_sink=terminal.write,
