@@ -799,6 +799,62 @@ def test_regular_mode_reserves_the_autowrap_column(
     assert "1234567890123456789\r\n0X" in output.getvalue()
 
 
+def test_stream_terminal_writes_ansi_through_the_prompt_toolkit_output_port() -> None:
+    import pi_coding_agent.tui.runner as runner
+
+    class RecordingOutput:
+        def __init__(self) -> None:
+            self.raw: list[str] = []
+            self.flushes = 0
+
+        def write_raw(self, data: str) -> None:
+            self.raw.append(data)
+
+        def flush(self) -> None:
+            self.flushes += 1
+
+    stdout = StringIO()
+    output_port = RecordingOutput()
+    terminal = runner._StreamTerminal(  # pyright: ignore[reportPrivateUsage]
+        stdout,
+        fullscreen=False,
+        output_port=output_port,
+    )
+
+    terminal.clear_line()
+
+    assert output_port.raw == ["\r\x1b[K"]
+    assert output_port.flushes == 1
+    assert stdout.getvalue() == ""
+
+
+def test_stream_terminal_forces_the_windows_vt_output_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pi_coding_agent.tui.runner as runner
+
+    class TtyStream(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    expected = object()
+
+    def create_windows_output(_output: object) -> object:
+        return expected
+
+    monkeypatch.setattr(runner.sys, "platform", "win32")
+    monkeypatch.setattr(
+        runner,
+        "_create_windows_output",
+        create_windows_output,
+        raising=False,
+    )
+
+    output_port = runner._create_output_port(TtyStream())  # pyright: ignore[reportPrivateUsage]
+
+    assert output_port is expected
+
+
 def test_streaming_updates_render_only_the_active_block_then_commit(tmp_path: Path) -> None:
     provider = FakeProvider([fake_assistant_message("流式回答内容")], chunk_size=2)
     blocks: list[tuple[str, ...]] = []

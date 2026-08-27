@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Protocol, TextIO, runtime_checkable
+from typing import Literal, Protocol, TextIO, cast, runtime_checkable
 from uuid import uuid4
 
 from pi_agent import AgentMessage
@@ -64,6 +64,31 @@ class _HasRegistry(Protocol):
     def registry(self) -> CapabilityRegistry: ...
 
 
+class _RawOutput(Protocol):
+    def write_raw(self, data: str) -> None: ...
+
+    def flush(self) -> None: ...
+
+
+def _create_windows_output(output: TextIO) -> _RawOutput:
+    from prompt_toolkit.output.windows10 import Windows10_Output
+
+    # Windows10_Output delegates write_raw through __getattr__ to its VT100 port.
+    return cast("_RawOutput", Windows10_Output(output))
+
+
+def _create_output_port(output: TextIO) -> _RawOutput:
+    if not output.isatty():
+        from prompt_toolkit.output.plain_text import PlainTextOutput
+
+        return cast("_RawOutput", PlainTextOutput(output))
+    if sys.platform == "win32":
+        return _create_windows_output(output)
+    from prompt_toolkit.output.defaults import create_output
+
+    return create_output(stdout=output)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class InteractiveOptions:
     cwd: Path
@@ -82,8 +107,16 @@ class InteractiveOptions:
 class _StreamTerminal:
     __slots__ = ("_fullscreen", "_output")
 
-    def __init__(self, output: TextIO, *, fullscreen: bool) -> None:
-        self._output = output
+    def __init__(
+        self,
+        output: TextIO,
+        *,
+        fullscreen: bool,
+        output_port: _RawOutput | None = None,
+    ) -> None:
+        if output_port is None:
+            output_port = _create_output_port(output)
+        self._output = output_port
         self._fullscreen = fullscreen
 
     @property
@@ -95,7 +128,7 @@ class _StreamTerminal:
         return max(1, shutil.get_terminal_size(fallback=(80, 24)).lines)
 
     def write(self, data: str) -> None:
-        self._output.write(data)
+        self._output.write_raw(data)
         self._output.flush()
 
     def move_by(self, lines: int) -> None:
