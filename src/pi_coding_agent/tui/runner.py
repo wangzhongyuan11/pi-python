@@ -107,6 +107,9 @@ class _StreamTerminal:
     def clear_line(self) -> None:
         self.write("\r\x1b[K")
 
+    def clear_from_cursor(self) -> None:
+        self.write("\x1b[J")
+
     def clear_screen(self) -> None:
         if self._fullscreen:
             self.write("\x1b[2J\x1b[H")

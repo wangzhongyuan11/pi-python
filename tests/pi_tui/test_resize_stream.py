@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pi_tui.application import Application
 from pi_tui.components import Status, Text, VStack
-from pi_tui.render import ScreenRenderer
+from pi_tui.render import InlineRenderer, ScreenRenderer
 from pi_tui.testing import MemoryTerminal
 from pi_tui.width import visible_width
 
@@ -130,3 +130,32 @@ def test_renderer_commit_freezes_lines_and_starts_fresh_below() -> None:
     renderer.render(("b",))
 
     assert _output(terminal) == "\x1b[2J\x1b[Ha\x1b[1B\x1b[1B\r\x1b[Kb"
+
+
+def test_inline_renderer_repaints_a_revised_suffix_without_replaying_its_prefix() -> None:
+    terminal = MemoryTerminal(columns=20, rows=10)
+    terminal.start(lambda _data: None, lambda: None)
+    renderer = InlineRenderer(terminal)
+    renderer.render(("stable", "old middle", "old tail"))
+    baseline = _output(terminal)
+
+    renderer.render(("stable", "new middle", "new tail"))
+
+    update = _output(terminal)[len(baseline) :]
+    assert "stable" not in update
+    assert update == "\x1b[1A\r\x1b[Jnew middle\r\nnew tail"
+
+
+def test_inline_renderer_does_not_move_above_the_visible_window() -> None:
+    terminal = MemoryTerminal(columns=20, rows=2)
+    terminal.start(lambda _data: None, lambda: None)
+    renderer = InlineRenderer(terminal)
+    renderer.render(("stable", "old middle", "old tail", "old bottom"))
+    baseline = _output(terminal)
+
+    renderer.render(("stable", "new middle", "new tail", "new bottom"))
+
+    update = _output(terminal)[len(baseline) :]
+    assert "stable" not in update
+    assert "\x1b[2A" not in update
+    assert update == "\r\nnew middle\r\nnew tail\r\nnew bottom"

@@ -13,10 +13,15 @@ class _RendererTerminal(Protocol):
 
     def clear_line(self) -> None: ...
 
+    def clear_from_cursor(self) -> None: ...
+
     def clear_screen(self) -> None: ...
 
     @property
     def columns(self) -> int: ...
+
+    @property
+    def rows(self) -> int: ...
 
 
 class ScreenRenderer:
@@ -105,9 +110,14 @@ class InlineRenderer:
 
         tail = len(self._lines) - 1
         if shared < tail:
-            self.commit()
-            if current:
-                self._write_lines(current)
+            distance = tail - shared
+            if distance < self._terminal.rows:
+                self._terminal.move_by(-distance)
+                self._terminal.write("\r")
+                self._terminal.clear_from_cursor()
+            else:
+                self._terminal.write("\r\n")
+            self._write_lines(current[shared:])
         elif shared == len(self._lines):
             self._terminal.write("\r\n")
             self._write_lines(current[shared:])
