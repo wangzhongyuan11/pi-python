@@ -24,7 +24,7 @@ from pi_ai import (
     UserMessage,
     clamp_thinking_level,
 )
-from pi_tui.render import ScreenRenderer
+from pi_tui.render import InlineRenderer, ScreenRenderer
 
 from ..attachments import (
     build_image_attachment,
@@ -210,13 +210,12 @@ async def run_interactive(
                 )
             else:
                 # Inline mode: only the active block may repaint; settled blocks commit
-                # so their lines are never rewritten (real terminals clamp cursor moves
-                # once a region outgrows the screen, which duplicated output).
+                # so completed lines remain in terminal scrollback.
                 app = InteractiveApp(
                     session=created.session,
                     dispatcher=dispatcher,
                     width=terminal.columns,
-                    block_sink=lambda lines: renderer.render(list(lines[-terminal.rows :])),
+                    block_sink=renderer.render,
                     commit_sink=renderer.commit,
                     raw_sink=terminal.write,
                     compose_prompt=compose,
@@ -397,7 +396,7 @@ async def run_interactive(
                 stderr.flush()
         fullscreen = options.tui_mode == "fullscreen"
         terminal = _StreamTerminal(stdout, fullscreen=fullscreen)
-        renderer = ScreenRenderer(terminal)
+        renderer = ScreenRenderer(terminal) if fullscreen else InlineRenderer(terminal)
         rebuild()
         terminal.start()
         try:

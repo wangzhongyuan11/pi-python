@@ -78,4 +78,53 @@ class ScreenRenderer:
         self._lines = list(lines)
 
 
-__all__ = ["ScreenRenderer"]
+class InlineRenderer:
+    """Append growing blocks to terminal scrollback while revising only the live tail."""
+
+    __slots__ = ("_lines", "_terminal")
+
+    def __init__(self, terminal: _RendererTerminal) -> None:
+        self._terminal = terminal
+        self._lines: list[str] = []
+
+    def render(self, lines: Sequence[str]) -> None:
+        current = list(lines)
+        if current == self._lines:
+            return
+        if not self._lines:
+            if current:
+                self._write_lines(current)
+            self._lines = current
+            return
+
+        shared = 0
+        for old_line, new_line in zip(self._lines, current, strict=False):
+            if old_line != new_line:
+                break
+            shared += 1
+
+        tail = len(self._lines) - 1
+        if shared < tail:
+            self.commit()
+            if current:
+                self._write_lines(current)
+        elif shared == len(self._lines):
+            self._terminal.write("\r\n")
+            self._write_lines(current[shared:])
+        else:
+            self._terminal.clear_line()
+            self._write_lines(current[tail:])
+        self._lines = current
+
+    def _write_lines(self, lines: Sequence[str]) -> None:
+        self._terminal.write("\r\n".join(line.rstrip(" ") for line in lines))
+
+    def commit(self) -> None:
+        """Finish the block with a real newline so the terminal can scroll naturally."""
+
+        if self._lines:
+            self._terminal.write("\r\n")
+        self._lines = []
+
+
+__all__ = ["InlineRenderer", "ScreenRenderer"]

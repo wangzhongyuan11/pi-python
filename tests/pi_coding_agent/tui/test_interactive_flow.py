@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import re
 from dataclasses import replace
 from io import StringIO
@@ -709,6 +710,54 @@ def test_regular_mode_renders_each_transcript_line_exactly_once(tmp_path: Path) 
     assert screen.count("> second") == 1
     assert screen.count("first answer") == 1
     assert screen.count("second answer") == 1
+
+
+def test_regular_mode_scrolls_long_stream_once_and_leaves_a_fresh_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pi_coding_agent.tui.runner as runner
+
+    def terminal_size(fallback: tuple[int, int]) -> os.terminal_size:
+        del fallback
+        return os.terminal_size((20, 3))
+
+    monkeypatch.setattr(
+        runner.shutil,
+        "get_terminal_size",
+        terminal_size,
+    )
+    rows = tuple(f"row-{index:02}" for index in range(6))
+    provider = FakeProvider(
+        [fake_assistant_message("\n".join(rows))],
+        chunk_size=len(rows[0]) + 1,
+    )
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    replies = iter(("explain", "/exit"))
+    output = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(replies, None)
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=StringIO(),
+            read_line=read_line,
+        )
+    )
+
+    assert code == 0
+    screen = output.getvalue()
+    counts = {row: screen.count(row) for row in rows}
+    assert counts == {row: 1 for row in rows}
+    assert all(f"{row} " not in screen for row in rows)
+    assert screen.endswith("\r\n")
 
 
 def test_streaming_updates_render_only_the_active_block_then_commit(tmp_path: Path) -> None:
