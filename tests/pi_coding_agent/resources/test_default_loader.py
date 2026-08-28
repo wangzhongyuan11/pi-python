@@ -62,6 +62,25 @@ def test_untrusted_project_is_skipped_with_diagnostic(tmp_path: Path) -> None:
     assert any("untrusted" in diagnostic for diagnostic in result.diagnostics)
 
 
+def test_untrusted_project_prompt_excludes_project_instructions(tmp_path: Path) -> None:
+    cwd = tmp_path / "project"
+    agent_dir = tmp_path / "agent"
+    (cwd / ".pi-python").mkdir(parents=True)
+    (cwd / ".pi-python" / "SYSTEM.md").write_text("untrusted system", encoding="utf-8")
+    (cwd / "AGENTS.md").write_text("untrusted instructions", encoding="utf-8")
+    loader = DefaultResourceLoader(
+        trust_store=_FakeTrustStore(TrustDecision.UNTRUSTED),
+        agent_dir=agent_dir,
+    )
+
+    loader.discover(cwd)
+    prompt = loader.build_system_prompt(cwd)
+
+    assert "expert coding assistant" in prompt
+    assert "untrusted system" not in prompt
+    assert "untrusted instructions" not in prompt
+
+
 def test_extension_manifests_are_enumerated_without_import(tmp_path: Path) -> None:
     marker = tmp_path / "marker.txt"
     extension_root = tmp_path / "extensions" / "spy"

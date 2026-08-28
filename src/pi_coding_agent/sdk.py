@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Self, cast
+from typing import Any, Protocol, Self, cast, runtime_checkable
 from uuid import uuid4
 
 from pi_agent import Agent, AgentTool
@@ -24,12 +24,14 @@ from .compaction.service import CompactionService
 from .compaction.summarizer import CompactionSummarizer
 from .deepseek_credentials import DeepSeekCredentialResolver
 from .model_runtime import ModelRuntime, create_model_runtime
+from .prompts.system import build_system_prompt
 from .services import ProductServices, ServiceOverrides, create_product_services
 from .session.context import project_session_context
 from .session.importer import import_pi_session as _import_pi_session
 from .session.manager import SessionManager
 from .session.models import ImportResult
 from .session.tree import SessionTree
+from .tools.registry import create_coding_tools
 
 
 def _timestamp() -> str:
@@ -52,6 +54,11 @@ def _restore_thinking_level(value: str) -> ModelThinkingLevel:
     return cast("ModelThinkingLevel", value)
 
 
+@runtime_checkable
+class _BuildsSystemPrompt(Protocol):
+    def build_system_prompt(self, cwd: Path) -> str: ...
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CreateAgentSessionOptions:
     cwd: Path = field(default_factory=Path.cwd)
@@ -59,9 +66,9 @@ class CreateAgentSessionOptions:
     model_runtime: ModelRuntime | None = None
     credential_resolver: CredentialResolver | None = None
     session_manager: SessionManager | None = None
-    system_prompt: str = ""
+    system_prompt: str | None = None
     thinking_level: ModelThinkingLevel = "high"
-    tools: tuple[AgentTool[Any, Any], ...] = ()
+    tools: tuple[AgentTool[Any, Any], ...] | None = None
     permission_gate: PermissionGate | None = None
     agent_clock: Callable[[], int] | None = None
     entry_id_factory: Callable[[], str] = lambda: uuid4().hex
@@ -189,7 +196,10 @@ async def create_agent_session(
             thinking_level = clamp_thinking_level(
                 agent_model, _restore_thinking_level(context.thinking_level)
             )
-        registered_tools = (*selected.tools, *services.extensions.tools)
+        configured_tools = (
+            create_coding_tools(cwd=target.cwd) if selected.tools is None else selected.tools
+        )
+        registered_tools = (*configured_tools, *services.extensions.tools)
         tool_names = [tool.name for tool in registered_tools]
         if len(set(tool_names)) != len(tool_names):
             raise ValueError("duplicate tool names across configured and extension tools")
@@ -201,7 +211,16 @@ async def create_agent_session(
         agent = Agent(
             model=agent_model,
             stream_function=model_runtime.stream,
-            system_prompt=selected.system_prompt,
+            system_prompt=(
+                services.resources.build_system_prompt(target.cwd)
+                if selected.system_prompt is None
+                and isinstance(services.resources, _BuildsSystemPrompt)
+                else (
+                    build_system_prompt(cwd=target.cwd)
+                    if selected.system_prompt is None
+                    else selected.system_prompt
+                )
+            ),
             thinking_level=thinking_level,
             tools=tools,
             messages=messages,

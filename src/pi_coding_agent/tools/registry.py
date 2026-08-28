@@ -25,6 +25,7 @@ from .search import find_files, grep_files
 from .write import write_file
 
 ALL_TOOL_NAMES = ("read", "bash", "edit", "write", "grep", "find", "ls")
+DEFAULT_CODING_TOOL_NAMES = ("read", "bash", "edit", "write")
 
 
 class _InputModel(BaseModel):
@@ -121,12 +122,22 @@ def _prepare_edit_arguments(raw: object) -> object:
 def create_all_tools(
     *,
     cwd: Path,
-    filesystem_operations: FilesystemOperations,
-    search_operations: SearchOperations,
+    filesystem_operations: FilesystemOperations | None = None,
+    search_operations: SearchOperations | None = None,
     process_operations: ProcessOperations | None = None,
     bash_config: BashConfig | None = None,
     mutation_queue: FileMutationQueue | None = None,
+    tool_names: tuple[str, ...] = ALL_TOOL_NAMES,
 ) -> tuple[AgentTool[Any, Any], ...]:
+    unknown = tuple(name for name in tool_names if name not in ALL_TOOL_NAMES)
+    if unknown:
+        raise ValueError(f"unknown built-in tool names: {', '.join(unknown)}")
+    if len(set(tool_names)) != len(tool_names):
+        raise ValueError("duplicate built-in tool names")
+    if "ls" in tool_names and filesystem_operations is None:
+        raise ValueError("filesystem operations are required for the ls tool")
+    if {"grep", "find"}.intersection(tool_names) and search_operations is None:
+        raise ValueError("search operations are required for the grep and find tools")
     queue = FileMutationQueue() if mutation_queue is None else mutation_queue
 
     async def execute_read(
@@ -239,6 +250,7 @@ def create_all_tools(
         on_update: AgentToolUpdateCallback[ToolDetails] | None,
     ) -> AgentToolResult[ToolDetails]:
         del tool_call_id, on_update
+        assert search_operations is not None
         value = await grep_files(
             params.pattern,
             params.path or ".",
@@ -263,6 +275,7 @@ def create_all_tools(
         on_update: AgentToolUpdateCallback[ToolDetails] | None,
     ) -> AgentToolResult[ToolDetails]:
         del tool_call_id, on_update
+        assert search_operations is not None
         value = await find_files(
             params.pattern,
             params.path or ".",
@@ -286,6 +299,7 @@ def create_all_tools(
         on_update: AgentToolUpdateCallback[ToolDetails] | None,
     ) -> AgentToolResult[ToolDetails]:
         del tool_call_id, on_update
+        assert filesystem_operations is not None
         value = await list_directory(
             params.path or ".",
             cwd=cwd,
@@ -301,7 +315,7 @@ def create_all_tools(
             },
         )
 
-    return (
+    available = (
         AgentTool(
             name="read",
             label="read",
@@ -353,10 +367,29 @@ def create_all_tools(
             execute=execute_list,
         ),
     )
+    selected = set(tool_names)
+    return tuple(tool for tool in available if tool.name in selected)
+
+
+def create_coding_tools(
+    *,
+    cwd: Path,
+    process_operations: ProcessOperations | None = None,
+    bash_config: BashConfig | None = None,
+    mutation_queue: FileMutationQueue | None = None,
+) -> tuple[AgentTool[Any, Any], ...]:
+    return create_all_tools(
+        cwd=cwd,
+        process_operations=process_operations,
+        bash_config=bash_config,
+        mutation_queue=mutation_queue,
+        tool_names=DEFAULT_CODING_TOOL_NAMES,
+    )
 
 
 __all__ = [
     "ALL_TOOL_NAMES",
+    "DEFAULT_CODING_TOOL_NAMES",
     "BashInput",
     "EditInput",
     "EditReplacementInput",
@@ -366,4 +399,5 @@ __all__ = [
     "ReadInput",
     "WriteInput",
     "create_all_tools",
+    "create_coding_tools",
 ]

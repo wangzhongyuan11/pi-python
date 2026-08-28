@@ -15,7 +15,9 @@ from pi_coding_agent.builtin_extensions.permission_gate import (
     PermissionGate,
 )
 from pi_coding_agent.model_runtime import ModelRuntime
-from pi_coding_agent.ports import ResourceDescriptor
+from pi_coding_agent.ports import NoopExtensionRuntime, ResourceDescriptor
+from pi_coding_agent.resources.default_loader import DefaultResourceLoader
+from pi_coding_agent.resources.trust import TrustDecision
 from pi_coding_agent.sdk import CreateAgentSessionOptions, create_agent_session
 from pi_coding_agent.services import ServiceOverrides
 from pi_coding_agent.session.manager import SessionManager
@@ -67,6 +69,55 @@ def test_async_factory_composes_prompt_path_and_context_manager_cleanup(tmp_path
     assert closed
     assert call_count == 1
     assert roles == ("user", "assistant")
+
+
+def test_async_factory_composes_trusted_project_system_and_context_files(
+    tmp_path: Path,
+) -> None:
+    class TrustedProject:
+        def get(self, cwd: Path) -> TrustDecision:
+            assert cwd == project
+            return TrustDecision.TRUSTED
+
+    project = tmp_path / "project"
+    agent_dir = tmp_path / "agent"
+    (project / ".pi-python").mkdir(parents=True)
+    (project / ".pi-python" / "SYSTEM.md").write_text("trusted project system", encoding="utf-8")
+    (project / ".pi-python" / "skills").mkdir()
+    (project / ".pi-python" / "skills" / "architecture.md").write_text(
+        "---\nname: architecture\ndescription: Inspect project structure\n---\nDetails",
+        encoding="utf-8",
+    )
+    (project / "AGENTS.md").write_text("trusted project rules", encoding="utf-8")
+    provider = FakeProvider([fake_assistant_message("done")])
+
+    async def scenario() -> str:
+        created = await create_agent_session(
+            CreateAgentSessionOptions(
+                cwd=project,
+                model_runtime=ModelRuntime(provider=provider, model=provider.models[0]),
+                session_manager=_manager(project),
+                service_overrides=ServiceOverrides(
+                    resources=DefaultResourceLoader(
+                        trust_store=TrustedProject(),
+                        agent_dir=agent_dir,
+                    ),
+                    extensions=NoopExtensionRuntime(),
+                ),
+            )
+        )
+        async with created:
+            await created.session.prompt("inspect")
+        prompt = provider.calls[0][1].system_prompt
+        assert prompt is not None
+        return prompt
+
+    prompt = asyncio.run(scenario())
+
+    assert prompt.startswith("trusted project system")
+    assert "trusted project rules" in prompt
+    assert "<name>architecture</name>" in prompt
+    assert project.resolve().as_posix() in prompt
 
 
 def test_async_context_cleanup_runs_when_caller_raises(tmp_path: Path) -> None:
@@ -183,6 +234,7 @@ def test_sdk_adds_extension_tools_before_applying_permission_gate(tmp_path: Path
                 cwd=tmp_path,
                 model_runtime=ModelRuntime(provider=provider, model=provider.models[0]),
                 session_manager=_manager(tmp_path),
+                tools=(),
                 permission_gate=PermissionGate(enabled=True, confirmer=lambda _name: False),
                 service_overrides=ServiceOverrides(
                     resources=Resources(),

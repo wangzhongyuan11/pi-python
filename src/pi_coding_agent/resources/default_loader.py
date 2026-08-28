@@ -11,8 +11,11 @@ from typing import Protocol
 from ..extensions.loader import discover_extensions
 from ..extensions.metadata import ExtensionMetadata
 from ..ports import ResourceDescriptor, ResourceKind
+from ..prompts.system import build_system_prompt, discover_prompt_files
+from .context_files import load_context_files
 from .descriptors import ResourceSource  # re-exported type value guard
 from .discovery import DiscoveryInputs, discover_resources
+from .skills import format_skills_for_prompt, load_skill_descriptors
 from .trust import TrustDecision, TrustStoreError
 
 _PACKAGE_SOURCE: ResourceSource = "package"
@@ -28,6 +31,7 @@ class ResourceLoadResult:
     descriptors: tuple[ResourceDescriptor, ...]
     extensions: tuple[ExtensionMetadata, ...]
     diagnostics: tuple[str, ...] = field(default_factory=tuple)
+    project_trusted: bool = False
 
 
 class DefaultResourceLoader:
@@ -36,6 +40,7 @@ class DefaultResourceLoader:
     __slots__ = (
         "_agent_dir",
         "_extension_roots",
+        "_last_cwd",
         "_last_result",
         "_package_roots",
         "_trust_store",
@@ -55,6 +60,7 @@ class DefaultResourceLoader:
         }
         self._extension_roots = tuple(extension_roots)
         self._agent_dir = (agent_dir or _default_agent_dir()).expanduser().resolve()
+        self._last_cwd: Path | None = None
         self._last_result: ResourceLoadResult | None = None
 
     @property
@@ -96,9 +102,43 @@ class DefaultResourceLoader:
             descriptors=tuple(descriptors),
             extensions=extensions,
             diagnostics=tuple(diagnostics),
+            project_trusted=project_trusted,
         )
+        self._last_cwd = cwd.resolve()
         self._last_result = result
         return result
+
+    def build_system_prompt(self, cwd: Path) -> str:
+        resolved_cwd = cwd.resolve()
+        result = (
+            self._last_result
+            if self._last_result is not None and self._last_cwd == resolved_cwd
+            else self.load(cwd=resolved_cwd, agent_dir=self._agent_dir)
+        )
+        prompt_files = discover_prompt_files(
+            cwd=resolved_cwd,
+            agent_dir=self._agent_dir,
+            project_trusted=result.project_trusted,
+        )
+        context_files = load_context_files(
+            cwd=resolved_cwd,
+            agent_dir=self._agent_dir,
+            project_trusted=result.project_trusted,
+            project_root=_project_root(resolved_cwd),
+        )
+        skill_paths = tuple(
+            descriptor.path
+            for descriptor in result.descriptors
+            if descriptor.kind == "skill" and descriptor.path is not None
+        )
+        skills = format_skills_for_prompt(load_skill_descriptors(skill_paths).skills)
+        append_parts = tuple(part for part in (prompt_files.append_system_prompt, skills) if part)
+        return build_system_prompt(
+            cwd=resolved_cwd,
+            system_prompt=prompt_files.system_prompt,
+            append_system_prompt="\n\n".join(append_parts) or None,
+            context_files=context_files,
+        )
 
     def _collect_package_layer(self, diagnostics: list[str]) -> list[tuple[ResourceKind, Path]]:
         collected: list[tuple[ResourceKind, Path]] = []
@@ -147,6 +187,13 @@ def _insert_package_layer(
         tail_seen.add(identity)
         merged.append(descriptor)
     return merged
+
+
+def _project_root(cwd: Path) -> Path:
+    for candidate in (cwd, *cwd.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return cwd
 
 
 def _collect_extensions(

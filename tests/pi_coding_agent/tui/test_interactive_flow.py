@@ -257,6 +257,57 @@ def test_real_interactive_loop_reads_multiple_prompts_and_exits(tmp_path: Path) 
     assert errors.getvalue() == ""
 
 
+def test_real_interactive_loop_can_read_the_current_project_by_default(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("project architecture", encoding="utf-8")
+    provider = FakeProvider(
+        [
+            fake_assistant_message(
+                ToolCall(id="read-project", name="read", arguments={"path": "README.md"}),
+                stop_reason="toolUse",
+            ),
+            fake_assistant_message("architecture explained"),
+        ]
+    )
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    replies = iter(("explain this project", "/exit"))
+    output = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(replies, None)
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=StringIO(),
+            read_line=read_line,
+        )
+    )
+
+    first_context = provider.calls[0][1]
+    second_context = provider.calls[1][1]
+    assert code == 0
+    assert first_context.tools is not None
+    assert first_context.system_prompt is not None
+    assert [tool.name for tool in first_context.tools] == ["read", "bash", "edit", "write"]
+    assert "expert coding assistant" in first_context.system_prompt
+    assert tmp_path.resolve().as_posix() in first_context.system_prompt
+    assert any(
+        message.role == "toolResult"
+        and any(
+            isinstance(block, TextContent) and "project architecture" in block.text
+            for block in message.content
+        )
+        for message in second_context.messages
+    )
+    assert "architecture explained" in output.getvalue()
+
+
 def test_interactive_terminal_sanitizes_provider_control_sequences(tmp_path: Path) -> None:
     provider = FakeProvider([fake_assistant_message("\x1b]52;c;stolen\x07safe answer")])
     runtime = ModelRuntime(provider=provider, model=provider.models[0])
