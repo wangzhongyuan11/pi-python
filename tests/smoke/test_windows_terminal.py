@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -38,14 +39,19 @@ _CHILD_SCRIPT = textwrap.dedent(
     import sys
     from pathlib import Path
 
-    from pi_ai import FakeProvider, fake_assistant_message
+    from pi_ai import FakeProvider, TextContent, ThinkingContent, fake_assistant_message
     from pi_coding_agent.deepseek_credentials import DeepSeekCredentialResolver
     from pi_coding_agent.model_runtime import ModelRuntime
     from pi_coding_agent.tui.runner import InteractiveOptions, run_interactive
 
 
     async def main() -> int:
-        provider = FakeProvider([fake_assistant_message("子进程你好")])
+        provider = FakeProvider([
+            fake_assistant_message((
+                ThinkingContent(thinking="需要逐项检查长思考内容是否会越过终端边界。" * 20),
+                TextContent(text="子进程你好"),
+            ))
+        ])
         runtime = ModelRuntime(provider=provider, model=provider.models[0])
         loop = asyncio.get_running_loop()
 
@@ -80,10 +86,14 @@ def test_windows_terminal_smoke_drives_the_product_loop_in_a_real_process(
 ) -> None:
     script = tmp_path / "smoke_child.py"
     script.write_text(_CHILD_SCRIPT, encoding="utf-8")
+    source_root = Path(__file__).resolve().parents[2] / "src"
     env = {
         **os.environ,
+        "COLUMNS": "80",
+        "LINES": "24",
         "PI_PYTHON_SMOKE_CWD": str(tmp_path),
         "PYTHONIOENCODING": "utf-8",
+        "PYTHONPATH": os.pathsep.join((str(source_root), os.environ.get("PYTHONPATH", ""))),
     }
 
     completed = subprocess.run(  # noqa: S603
@@ -102,6 +112,15 @@ def test_windows_terminal_smoke_drives_the_product_loop_in_a_real_process(
     assert "\x1b]52" not in completed.stdout
     assert "\x1b[" in completed.stdout
     assert completed.stderr == ""
+
+    fragments = re.split(r"\r\n|\r|\n|\x1b\[[0-9;?]*[ -/]*[@-~]", completed.stdout)
+    printable = [fragment for fragment in fragments if fragment]
+    assert printable
+    assert all(visible_width(fragment) <= 79 for fragment in printable), [
+        (visible_width(fragment), fragment.encode("unicode_escape"))
+        for fragment in printable
+        if visible_width(fragment) > 79
+    ]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the PowerShell extension is Windows-only")

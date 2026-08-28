@@ -17,7 +17,7 @@ from pi_agent import (
 )
 from pi_ai import AssistantMessage, TextContent, ThinkingContent, UserMessage
 from pi_tui.layout import wrap_text
-from pi_tui.width import visible_width
+from pi_tui.width import sanitize_terminal_text, truncate_to_width, visible_width
 
 from ..agent_session import AgentSession
 from ..agent_session_events import (
@@ -168,7 +168,7 @@ class InteractiveApp:
         elif isinstance(event, ToolExecutionEndEvent):
             view = self._tools.get(event.tool_call_id)
             if view is not None:
-                detail = _result_detail(event.result)
+                detail = _result_detail(event.result, include_content=event.is_error)
                 (view.fail if event.is_error else view.complete)(detail)
                 self._set_block(f"tool:{event.tool_call_id}", view.render(self._width))
         elif isinstance(event, AutoRetryStartEvent):
@@ -224,11 +224,19 @@ class InteractiveApp:
         self._append_text(f"> {text}")
 
 
-def _result_detail(result: object) -> str | None:
+def _result_detail(result: object, *, include_content: bool = False) -> str | None:
     details = getattr(result, "details", None)
-    if details in (None, {}, ""):
+    if details not in (None, {}, ""):
+        return str(details)
+    if not include_content:
         return None
-    return str(details)
+    content = getattr(result, "content", ())
+    for block in content:
+        if isinstance(block, TextContent):
+            summary = " ".join(sanitize_terminal_text(block.text).split())
+            if summary:
+                return truncate_to_width(summary, 240)
+    return None
 
 
 __all__ = ["InteractiveApp"]

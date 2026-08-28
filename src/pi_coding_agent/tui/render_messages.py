@@ -36,9 +36,15 @@ class AssistantMessageView:
     def render(self, width: int) -> tuple[str, ...]:
         lines: list[str] = []
         if self._thinking.strip():
-            wrapped = wrap_text(f"thinking: {self._thinking.strip()}", width)
-            lines.extend(wrapped[:1])
-            lines.extend(" " * len("thinking: ") + chunk for chunk in wrapped[1:])
+            prefix = "thinking: "
+            content_width = width - visible_width(prefix)
+            if content_width <= 0:
+                lines.extend(wrap_text(f"{prefix}{self._thinking.strip()}", width))
+            else:
+                wrapped = wrap_text(self._thinking.strip(), content_width)
+                if wrapped:
+                    lines.append(f"{prefix}{wrapped[0]}")
+                    lines.extend(" " * len(prefix) + chunk for chunk in wrapped[1:])
         if self._text.strip():
             lines.extend(wrap_text(self._text.strip(), width))
         if self._error is not None:

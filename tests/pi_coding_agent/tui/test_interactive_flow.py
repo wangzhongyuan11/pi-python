@@ -116,6 +116,46 @@ def test_tool_turn_renders_done_row(tmp_path: Path) -> None:
     assert "finished" in screen
 
 
+def test_tool_failure_renders_the_error_content_summary(tmp_path: Path) -> None:
+    async def execute(
+        _tool_call_id: str,
+        _params: _Args,
+        _abort_event: object,
+        _on_update: AgentToolUpdateCallback[dict[str, str]] | None,
+    ) -> AgentToolResult[dict[str, str]]:
+        raise RuntimeError("execvpe(/bin/bash) failed: No such file or directory")
+
+    tool = AgentTool(
+        name="bash",
+        label="bash",
+        description="fails",
+        parameter_type=_Args,
+        execute=execute,
+    )
+    provider = FakeProvider(
+        [
+            fake_assistant_message(
+                ToolCall(id="call-1", name="bash", arguments={"value": "x"}),
+                stop_reason="toolUse",
+            ),
+            fake_assistant_message("finished"),
+        ]
+    )
+    session = AgentSession(
+        agent=Agent(model=fake_model(), stream_function=provider.stream, tools=(tool,)),
+        session_manager=SessionManager.in_memory(
+            cwd=tmp_path, session_id="tool-error", timestamp="2026-08-24T00:00:00Z"
+        ),
+        services=create_product_services(tmp_path),
+    )
+    app = _app(session)
+
+    asyncio.run(app.handle("run it"))
+    screen = "".join(app.lines)
+
+    assert "bash: failed (execvpe(/bin/bash) failed: No such file or directory)" in screen
+
+
 def test_tool_lifecycle_emits_running_before_done(tmp_path: Path) -> None:
     observed: list[str] = []
 
