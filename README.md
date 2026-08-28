@@ -4,7 +4,9 @@
 
 ## 当前状态
 
-项目目前处于 **Phase 0：规范和测试底座**。现阶段只提供包边界、测试隔离、只读源码 oracle、契约文档和 CI 安全门；**尚未实现 Agent、DeepSeek Provider、CLI 或工具，不能用于聊天或编码任务**。
+项目当前已完成 **Phase 11 / 0.5.0 checkpoint**：Agent、DeepSeek Provider、v3 Session、CLI/SDK、Extension/资源加载、七个 Coding Tools 和 regular/fullscreen TUI 均已实现。默认 SDK、CLI 和 TUI 启用上游一致的 `read`、`bash`、`edit`、`write` 编码工具，并把当前工作目录及可信的 `SYSTEM.md`、`AGENTS.md`、skills 组合进 Agent 提示。
+
+Phase 12 的完整 CLI/RPC/HTML export 和 Phase 13 的发布审查尚未完成；当前状态不能等同于 1.0 发布就绪。
 
 完整路线图见 [tasks/plan.md](tasks/plan.md)，原子任务见 [tasks/todo.md](tasks/todo.md)，兼容范围见 [surface matrix](docs/compatibility/surface-matrix.md)。
 
@@ -25,7 +27,18 @@ pi_tui  ───────────────────────┤
 - `pi_tui`：不依赖 Agent/AI 的通用终端 UI。
 - `pi_coding_agent`：Session、工具、资源、Extension、CLI、SDK 和产品 TUI 的组合层。
 
-Phase 0 中这些包只是可导入的空边界，后续按 Phase 逐步实现。
+这些包边界已经落地，产品组合只发生在 `pi_coding_agent`。
+
+## 使用
+
+在希望 Agent 操作的项目目录中启动：
+
+```powershell
+$env:DEEPSEEK_API_KEY = '你的 API Key'
+uv run --frozen pi-python --tui-mode regular
+```
+
+进入后可直接要求它分析当前项目；默认工具能够读取和修改 cwd 下的文件。无头调用使用 `--print`，事件流使用 `--mode json`。完整参数以当前安装的 `pi-python --help` 为准。
 
 ## 开发环境
 
@@ -49,7 +62,7 @@ uv run --frozen pip-audit --local
 
 pytest 会在收集测试前切换到临时 HOME/cwd、清除常见 credential，并阻断 Python
 网络、Python 子进程和常见网络客户端。该门禁不是 OS 防火墙；任意原生二进制的
-raw socket 只能由隔离 runner 保证。不要为了运行 Phase 0 测试复制真实 `.env`。
+raw socket 只能由隔离 runner 保证。不要为了运行离线测试复制真实 `.env`。
 
 ## 上游源码 oracle
 
@@ -64,7 +77,7 @@ uv run --frozen python scripts/ts_oracle.py --source D:\pi verify
 
 ## DeepSeek 配置
 
-DeepSeek Provider 计划在 Phase 4 实现，在此之前 `.env` 不会被程序使用。未来凭据优先级已经冻结为：
+DeepSeek Provider 已实现，凭据优先级为：
 
 ```text
 --api-key > 进程环境 > --env-file > 当前工作目录 .env
