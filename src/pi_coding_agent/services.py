@@ -7,6 +7,8 @@ from pathlib import Path
 
 from pi_tui import UI, NoopUI
 
+from .config.models import settings_payload
+from .config.settings import SettingsManager
 from .extensions.runtime import DefaultExtensionRuntime
 from .ports import (
     DefaultSessionImporter,
@@ -54,9 +56,20 @@ def create_product_services(
     )
     resources = selected.resources if selected.resources is not None else default_resources
     default_extensions = DefaultExtensionRuntime(cwd=cwd, resources=default_resources)
+    settings = selected.settings
+    if settings is None:
+        settings = InMemorySettings(
+            settings_payload(
+                SettingsManager.load(
+                    agent_dir=_agent_dir(),
+                    cwd=cwd,
+                    project_trusted=False,
+                ).values
+            )
+        )
     return ProductServices(
         cwd=cwd.resolve(),
-        settings=selected.settings if selected.settings is not None else InMemorySettings(),
+        settings=settings,
         resources=resources,
         extensions=selected.extensions if selected.extensions is not None else default_extensions,
         exporter=(selected.exporter if selected.exporter is not None else NoopSessionExporter()),

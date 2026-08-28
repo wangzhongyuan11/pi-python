@@ -196,8 +196,13 @@ async def create_agent_session(
             thinking_level = clamp_thinking_level(
                 agent_model, _restore_thinking_level(context.thinking_level)
             )
+        shell_path = services.settings.get("shellPath")
+        if shell_path is not None and not isinstance(shell_path, str):
+            raise ValueError("shellPath must be a string")
         configured_tools = (
-            create_coding_tools(cwd=target.cwd) if selected.tools is None else selected.tools
+            create_coding_tools(cwd=target.cwd, custom_shell_path=shell_path)
+            if selected.tools is None
+            else selected.tools
         )
         registered_tools = (*configured_tools, *services.extensions.tools)
         tool_names = [tool.name for tool in registered_tools]

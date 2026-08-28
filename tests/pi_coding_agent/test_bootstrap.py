@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from pi_coding_agent.bootstrap import BootstrapConfig, ProductBootstrap
 from pi_coding_agent.extensions.runtime import DefaultExtensionRuntime
 from pi_coding_agent.ports import (
@@ -67,3 +69,18 @@ def test_bootstrap_instances_do_not_share_mutable_defaults(tmp_path: Path) -> No
     assert first.services is not second.services
     assert first.services.settings is not second.services.settings
     assert second.services.settings.get("theme") is None
+
+
+def test_default_bootstrap_loads_global_shell_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    (agent_dir / "settings.json").write_text(
+        '{"shellPath":"D:\\\\Git\\\\bin\\\\bash.exe"}', encoding="utf-8"
+    )
+    monkeypatch.setenv("PI_PYTHON_AGENT_DIR", str(agent_dir))
+
+    services = ProductBootstrap(BootstrapConfig(cwd=tmp_path / "project")).services
+
+    assert services.settings.get("shellPath") == r"D:\Git\bin\bash.exe"

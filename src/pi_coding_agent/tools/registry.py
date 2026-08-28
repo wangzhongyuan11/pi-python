@@ -126,6 +126,7 @@ def create_all_tools(
     search_operations: SearchOperations | None = None,
     process_operations: ProcessOperations | None = None,
     bash_config: BashConfig | None = None,
+    custom_shell_path: str | None = None,
     mutation_queue: FileMutationQueue | None = None,
     tool_names: tuple[str, ...] = ALL_TOOL_NAMES,
 ) -> tuple[AgentTool[Any, Any], ...]:
@@ -179,6 +180,7 @@ def create_all_tools(
             params.command,
             cwd=cwd,
             config=bash_config,
+            custom_shell_path=custom_shell_path,
             operations=process_operations,
             timeout=params.timeout,
             abort_event=abort_event,
@@ -376,12 +378,14 @@ def create_coding_tools(
     cwd: Path,
     process_operations: ProcessOperations | None = None,
     bash_config: BashConfig | None = None,
+    custom_shell_path: str | None = None,
     mutation_queue: FileMutationQueue | None = None,
 ) -> tuple[AgentTool[Any, Any], ...]:
     return create_all_tools(
         cwd=cwd,
         process_operations=process_operations,
         bash_config=bash_config,
+        custom_shell_path=custom_shell_path,
         mutation_queue=mutation_queue,
         tool_names=DEFAULT_CODING_TOOL_NAMES,
     )

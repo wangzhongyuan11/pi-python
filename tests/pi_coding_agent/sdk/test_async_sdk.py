@@ -15,7 +15,7 @@ from pi_coding_agent.builtin_extensions.permission_gate import (
     PermissionGate,
 )
 from pi_coding_agent.model_runtime import ModelRuntime
-from pi_coding_agent.ports import NoopExtensionRuntime, ResourceDescriptor
+from pi_coding_agent.ports import InMemorySettings, NoopExtensionRuntime, ResourceDescriptor
 from pi_coding_agent.resources.default_loader import DefaultResourceLoader
 from pi_coding_agent.resources.trust import TrustDecision
 from pi_coding_agent.sdk import CreateAgentSessionOptions, create_agent_session
@@ -69,6 +69,38 @@ def test_async_factory_composes_prompt_path_and_context_manager_cleanup(tmp_path
     assert closed
     assert call_count == 1
     assert roles == ("user", "assistant")
+
+
+def test_async_factory_passes_shell_path_to_default_coding_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pi_coding_agent.sdk as sdk
+
+    captured: list[tuple[Path, str | None]] = []
+
+    def create_tools(*, cwd: Path, custom_shell_path: str | None = None):
+        captured.append((cwd, custom_shell_path))
+        return ()
+
+    monkeypatch.setattr(sdk, "create_coding_tools", create_tools)
+
+    async def scenario() -> None:
+        provider = FakeProvider()
+        created = await create_agent_session(
+            CreateAgentSessionOptions(
+                cwd=tmp_path,
+                model_runtime=ModelRuntime(provider=provider, model=provider.models[0]),
+                session_manager=_manager(tmp_path),
+                service_overrides=ServiceOverrides(
+                    settings=InMemorySettings({"shellPath": r"D:\Git\bin\bash.exe"})
+                ),
+            )
+        )
+        await created.close()
+
+    asyncio.run(scenario())
+
+    assert captured == [(tmp_path.resolve(), r"D:\Git\bin\bash.exe")]
 
 
 def test_async_factory_composes_trusted_project_system_and_context_files(
