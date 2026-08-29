@@ -213,3 +213,26 @@ def test_abort_interrupts_an_idle_open_stream() -> None:
     assert [event.type for event in events] == ["start", "error"]
     assert isinstance(events[-1], ErrorEvent)
     assert events[-1].reason == "aborted"
+
+
+def test_missing_credential_yields_actionable_error_message() -> None:
+    class NoneResolver:
+        async def resolve(self, provider: str) -> str | None:
+            return None
+
+    provider = DeepSeekProvider(
+        credential_resolver=NoneResolver(),
+        client_factory=lambda api_key, base_url, timeout: None,
+        timestamp_ms=lambda: 123,
+    )
+
+    async def scenario() -> str:
+        context = Context(messages=(UserMessage(content="hello", timestamp=1),))
+        events = [event async for event in provider.stream(DEFAULT_DEEPSEEK_MODEL, context)]
+        error_events = [event for event in events if isinstance(event, ErrorEvent)]
+        assert error_events, "expected an error event"
+        return error_events[-1].error.error_message or ""
+
+    message = asyncio.run(scenario())
+    assert "DEEPSEEK_API_KEY" in message
+    assert message != "DeepSeek request failed"

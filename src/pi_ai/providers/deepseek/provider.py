@@ -11,6 +11,7 @@ from typing import Any, Protocol, cast
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 
 from ...context import Context
+from ...credentials import MissingCredentialError
 from ...events import (
     AssistantMessageEvent,
     AssistantMessageStartEvent,
@@ -104,6 +105,8 @@ def _empty_message(model: Model, timestamp_ms: int) -> AssistantMessage:
 
 
 def _safe_error_message(error: BaseException) -> str:
+    if isinstance(error, MissingCredentialError):
+        return str(error)
     status = provider_status_code(error)
     if status is not None:
         return f"DeepSeek request failed with HTTP {status}"
@@ -257,7 +260,7 @@ class DeepSeekProvider:
         try:
             credential = await self._credential_resolver.resolve("deepseek")
             if credential is None:
-                raise RuntimeError("DeepSeek credential resolver returned no credential")
+                raise MissingCredentialError("deepseek", "DEEPSEEK_API_KEY")
             request = build_deepseek_request(
                 model,
                 context,
