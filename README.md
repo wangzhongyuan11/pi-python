@@ -102,12 +102,12 @@ pi-python --list-models
 | `--print` | 明确请求非交互执行，通常与位置消息一起使用 |
 | `--tui-mode regular\|fullscreen` | 普通滚屏 TUI 或全屏 alternate-screen TUI |
 | `--provider PROVIDER` | 选择 Provider；默认发行版当前内置 DeepSeek |
-| `--model MODEL` | 选择模型 |
-| `--thinking LEVEL` | `off/minimal/low/medium/high/xhigh/max` |
+| `--model MODEL` | 选择模型；接受裸模型 id 或 `provider/model` 前缀形式（与 `--list-models` 输出一致） |
+| `--thinking LEVEL` | `off/minimal/low/medium/high/xhigh/max`；DeepSeek 只支持 `off/high/max`，其余按最近支持级别钳制（`minimal/low/medium→high`，`xhigh→max`）。注意：实测当前 DeepSeek V4 API 在 `off` 下仍可能返回 reasoning 内容（请求侧已正确发送 `thinking: disabled`） |
 | `--no-session` | 本轮不创建持久化 Session |
 | `--session PATH` | 打开指定 Session |
-| `--resume` | 选择并恢复 Session |
-| `--continue` | 继续最近 Session |
+| `--resume` | 选择并恢复 Session；交互模式下未指定 `--session-dir` 时自动使用默认 Session 目录 |
+| `--continue` | 继续最近 Session；交互模式下未指定 `--session-dir` 时自动使用默认 Session 目录 |
 | `--session-dir DIR` | 覆盖 Session 目录 |
 | `--env-file FILE` | 从指定 dotenv 文件读取凭据 |
 
@@ -133,6 +133,8 @@ pi-python --mode json --no-session "读取 README.md 并用三点概括项目"
 ```
 
 JSON 模式会输出 Agent、消息、工具和流式状态事件；它不是 Phase 12 计划中的本地 RPC 协议。
+工具事件带完整负载：`tool_execution_start`/`update`/`end` 分别包含 `toolCallId`、`toolName`、
+`args`、`partialResult`/`result`（content 与 details）和 `isError`。
 
 ### 3.2 凭据和 Session 导入
 
@@ -150,7 +152,9 @@ pi-python import-pi-session D:\path\to\session.jsonl
 ```
 
 `print-api-key` 会输出秘密，只应在私有终端使用。导入器先严格验证 v3 JSONL，再复制原始字节；
-不会自动修复中间损坏，也不会重写源文件。
+不会自动修复中间损坏，也不会重写源文件。缺少凭据时，请求会以明确消息失败
+（`No credential configured for deepseek; set DEEPSEEK_API_KEY or provide an explicit API key`），
+而不会伪装成通用请求错误。
 
 ## 4. TUI 交互能力
 
@@ -167,6 +171,17 @@ pi-python import-pi-session D:\path\to\session.jsonl
 
 文本附件会以 UTF-8 全文嵌入下一条 UserMessage；当前没有文本附件大小上限，因此不要附加巨型
 文件或秘密文件。
+
+回合运行期间的键盘行为（真实控制台可用；管道输入自动降级为不可中断）：
+
+- `Esc` 或 `Ctrl+C`：取消当前回合。回合以 aborted 结束，已生成的部分回答保留在屏幕上，
+  并显示 `cancelled` 状态行；输入提示随后恢复。
+- 直接输入一行并回车：作为 steering 消息插入当前 Agent 队列。若模型仍在工具链中，下一轮
+  立即消费；否则在下一次发送提示时作为最前消息生效。屏幕显示 `steered: <文本>` 确认行。
+
+恢复与切换：以 `--resume`/`--continue`/`--session` 启动，或在 `/sessions` 切换、`/fork` 分叉后，
+已恢复的历史消息会按原样式重放到当前 transcript（用户消息带 `> ` 前缀，含 thinking 摘要与
+工具结果行），无需依赖记忆提问。
 
 - `regular`：保留 scrollback，只重绘活动块；Windows 下按终端宽度减一列，避免右边界自动
   换行造成重复和覆盖。
