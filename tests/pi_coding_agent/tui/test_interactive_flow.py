@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import re
+import time
 from dataclasses import replace
 from io import StringIO
 from pathlib import Path
@@ -1044,3 +1045,117 @@ def test_replay_renders_restored_history_on_interactive_resume(tmp_path: Path) -
     assert "seed answer" in output, "restored history must be replayed into the transcript"
     assert "> seed" in output
     assert "resumed answer" in output
+
+
+class _SlowFakeProvider(FakeProvider):
+    """FakeProvider whose responses arrive after a configurable delay."""
+
+    def __init__(self, responses, *, delay: float) -> None:
+        super().__init__(responses)
+        self._delay = delay
+
+    def stream(self, model, context, options=None):
+        from pi_ai import AssistantStream
+
+        self._calls.append((model, context))
+        stream = AssistantStream()
+        task = asyncio.create_task(self._slow_produce(stream, model, options))
+        self._tasks.add(task)
+        return stream
+
+    async def _slow_produce(self, stream, model, options) -> None:
+        from dataclasses import replace as dc_replace
+
+        await asyncio.sleep(self._delay)
+        aborted = (
+            options is not None and options.abort_event is not None and options.abort_event.is_set()
+        )
+        response = self._responses.popleft() if self._responses else None
+        if aborted and response is not None:
+            response = dc_replace(response, stop_reason="aborted")
+        await self._produce(stream, model, response, options)
+
+
+def test_input_typed_during_a_turn_is_queued_as_steering(tmp_path: Path) -> None:
+    provider = _SlowFakeProvider(
+        [fake_assistant_message("first reply"), fake_assistant_message("second reply")],
+        delay=0.5,
+    )
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    lines = iter(("start", "next", "/exit"))
+    typed = iter("fix the bug please\r")
+    output = StringIO()
+    errors = StringIO()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(lines, None)
+
+    def read_char():
+        try:
+            return next(typed)
+        except StopIteration:
+            return None
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=errors,
+            read_line=read_line,
+            read_char=read_char,
+        )
+    )
+
+    assert code == 0, output + errors
+    assert errors.getvalue() == "", repr(errors.getvalue())
+    assert "steered: fix the bug please" in output.getvalue()
+    assert provider.call_count == 3
+    steered_texts = [
+        block.text
+        for message in provider.calls[1][1].messages
+        for block in (message.content or ())
+        if getattr(block, "text", "") == "fix the bug please"
+    ]
+    assert steered_texts, "steered message must reach the next model request"
+
+
+def test_escape_during_a_turn_aborts_and_reports_cancellation(tmp_path: Path) -> None:
+    provider = _SlowFakeProvider(
+        [fake_assistant_message("long running answer")],
+        delay=0.8,
+    )
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+    lines = iter(("go", "/exit"))
+    output = StringIO()
+    errors = StringIO()
+    started = time.monotonic()
+
+    async def read_line(_prompt: str) -> str | None:
+        return next(lines, None)
+
+    def read_char():
+        return "\x1b" if time.monotonic() - started > 0.3 else None
+
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=errors,
+            read_line=read_line,
+            read_char=read_char,
+        )
+    )
+
+    assert code == 0, output + errors
+    assert errors.getvalue() == "", repr(errors.getvalue())
+    assert "cancelled" in output.getvalue()

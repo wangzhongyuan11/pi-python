@@ -215,8 +215,12 @@ class InteractiveApp:
                 view.add_text_delta(block.text)
             elif isinstance(block, ThinkingContent):
                 view.add_thinking_delta(block.thinking)
-        if message.stop_reason in ("error", "aborted"):
+        if message.stop_reason == "error":
             view.fail(message.error_message or "provider error")
+        elif message.stop_reason == "aborted" and message.error_message:
+            # A user-initiated cancel keeps the partial answer visible
+            # without a misleading provider-error banner.
+            view.fail(message.error_message)
         self._set_block(key, view.render(self._width), live=live)
 
     def _render_user(self, message: UserMessage) -> None:

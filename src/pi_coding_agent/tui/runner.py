@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import os
 import shutil
 import sys
 from collections.abc import Awaitable, Callable
@@ -26,6 +27,7 @@ from pi_ai import (
 )
 from pi_tui.render import InlineRenderer, ScreenRenderer
 
+from ..agent_session import AgentSession
 from ..attachments import (
     build_image_attachment,
     build_text_file_attachment,
@@ -44,8 +46,127 @@ from .render_messages import render_replay_lines
 from .session_ui import fork_from, switch_to
 
 type ReadLine = Callable[[str], Awaitable[str | None]]
+type ReadChar = Callable[[], str | None]
 
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+_KEY_POLL_INTERVAL_SECONDS = 0.02
+
+
+def _console_char_reader() -> ReadChar | None:
+    """Non-blocking console key reader for interrupting running turns.
+
+    Returns ``None`` when stdin is not an interactive console (piped input,
+    tests, smoke harnesses) so the turn loop keeps its previous behavior.
+    """
+
+    try:
+        if not sys.stdin.isatty():
+            return None
+    except (AttributeError, OSError, ValueError):
+        return None
+    if sys.platform == "win32":
+        import msvcrt
+
+        try:
+            msvcrt.kbhit()
+        except (OSError, ValueError):
+            return None
+
+        def read_char_windows() -> str | None:
+            return msvcrt.getwch() if msvcrt.kbhit() else None
+
+        return read_char_windows
+    import select
+    import termios
+    import tty
+
+    try:
+        tty.setcbreak(sys.stdin.fileno())
+    except (OSError, ValueError, termios.error):
+        return None
+
+    def read_char_posix() -> str | None:
+        ready, _, _ = select.select([sys.stdin], [], [], 0)
+        if not ready:
+            return None
+        return os.read(sys.stdin.fileno(), 1).decode("utf-8", errors="ignore") or None
+
+    return read_char_posix
+
+
+async def _drive_turn(
+    app: InteractiveApp,
+    session: AgentSession,
+    line: str,
+    read_char: ReadChar | None,
+) -> None:
+    """Run one user turn, polling console keys for interrupt/steer input."""
+
+    if read_char is None:
+        await app.handle(line)
+        return
+    stop_polling = asyncio.Event()
+    abort_requested = asyncio.Event()
+    typed: list[str] = []
+
+    async def poll_keys() -> None:
+        while not stop_polling.is_set():
+            char = read_char()
+            if char is None:
+                await asyncio.sleep(_KEY_POLL_INTERVAL_SECONDS)
+                continue
+            if char == "\x03":
+                abort_requested.set()
+                session.abort()
+                break
+            if char == "\x1b":
+                # A lone ESC aborts; ESC followed by [ or O is a CSI/SS3
+                # key sequence (arrows etc.) and must not cancel the turn.
+                if read_char() in ("[", "O"):
+                    read_char()
+                    await asyncio.sleep(0)
+                    continue
+                abort_requested.set()
+                session.abort()
+                break
+            if char in ("\r", "\n"):
+                text = "".join(typed).strip()
+                typed.clear()
+                if text:
+                    message = UserMessage(
+                        content=(TextContent(text=text),),
+                        timestamp=_message_timestamp(),
+                    )
+                    session.agent.steer(message)
+                    app.note(f"steered: {text}")
+                await asyncio.sleep(0)
+                continue
+            typed.append(char)
+            # Yield to the event loop so a burst of buffered keys cannot
+            # starve the running agent turn.
+            await asyncio.sleep(0)
+
+    turn = asyncio.create_task(app.handle(line))
+    poller = asyncio.create_task(poll_keys())
+    try:
+        await turn
+    finally:
+        stop_polling.set()
+        poller.cancel()
+        try:
+            await poller
+        except asyncio.CancelledError:
+            pass
+    if abort_requested.is_set() and _last_stop_reason(session) == "aborted":
+        app.note("cancelled")
+
+
+def _last_stop_reason(session: AgentSession) -> str | None:
+    for message in reversed(session.state.messages):
+        if isinstance(message, AssistantMessage):
+            return message.stop_reason
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +298,7 @@ async def run_interactive(
     stdout: TextIO,
     stderr: TextIO,
     read_line: ReadLine | None = None,
+    read_char: ReadChar | None = None,
 ) -> int:
     if sys.platform == "darwin":
         stderr.write("interactive mode is not supported on macOS\n")
@@ -449,6 +571,7 @@ async def run_interactive(
         renderer = ScreenRenderer(terminal) if fullscreen else InlineRenderer(terminal)
         rebuild()
         terminal.start()
+        char_reader = read_char if read_char is not None else _console_char_reader()
         try:
             while True:
                 try:
@@ -461,7 +584,7 @@ async def run_interactive(
                 if not line.strip():
                     continue
                 try:
-                    await app_holder[0].handle(line)
+                    await _drive_turn(app_holder[0], created.session, line, char_reader)
                 except Exception as error:
                     stderr.write(f"{error}\n")
                     stderr.flush()
