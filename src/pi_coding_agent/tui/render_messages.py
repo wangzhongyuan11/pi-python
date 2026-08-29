@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from pi_agent import AgentMessage
+from pi_ai import AssistantMessage, TextContent, ThinkingContent, ToolResultMessage, UserMessage
 from pi_tui.layout import wrap_text
-from pi_tui.width import visible_width
+from pi_tui.width import sanitize_terminal_text, truncate_to_width, visible_width
 
 
 class AssistantMessageView:
@@ -56,4 +60,43 @@ def _pad(line: str, width: int) -> str:
     return line + " " * max(0, width - visible_width(line))
 
 
-__all__ = ["AssistantMessageView"]
+def render_replay_lines(messages: Sequence[AgentMessage], width: int) -> tuple[str, ...]:
+    """Render persisted session messages as settled transcript lines.
+
+    Used when the product TUI opens, resumes, or switches to a session so the
+    restored history is visible instead of starting from a blank prompt.
+    """
+
+    lines: list[str] = []
+    for message in messages:
+        if isinstance(message, UserMessage):
+            for block in message.content:
+                text = block.text if isinstance(block, TextContent) else "[image]"
+                if not text:
+                    continue
+                for chunk in wrap_text(text, max(1, width - 2)):
+                    lines.append(_pad(f"> {chunk}", width))
+        elif isinstance(message, AssistantMessage):
+            view = AssistantMessageView()
+            for block in message.content:
+                if isinstance(block, ThinkingContent):
+                    view.add_thinking_delta(block.thinking)
+                elif isinstance(block, TextContent):
+                    view.add_text_delta(block.text)
+            if message.stop_reason in ("error", "aborted"):
+                view.fail(message.error_message or "provider error")
+            lines.extend(view.render(width))
+        elif isinstance(message, ToolResultMessage):
+            status = "failed" if message.is_error else "done"
+            detail = ""
+            for block in message.content:
+                if isinstance(block, TextContent) and block.text.strip():
+                    detail = sanitize_terminal_text(block.text.strip().splitlines()[0])
+                    break
+            if detail:
+                detail = f" ({truncate_to_width(detail, min(width, 120))})"
+            lines.append(_pad(f"{message.tool_name}: {status}{detail}", width))
+    return tuple(lines)
+
+
+__all__ = ["AssistantMessageView", "render_replay_lines"]

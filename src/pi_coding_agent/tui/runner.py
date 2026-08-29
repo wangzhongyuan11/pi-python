@@ -40,6 +40,7 @@ from ..session.catalog import SessionSummary, list_sessions
 from .commands import CommandDispatcher, CommandOutcome, CommandSpec
 from .config_ui import ModelSettingsController
 from .main import InteractiveApp
+from .render_messages import render_replay_lines
 from .session_ui import fork_from, switch_to
 
 type ReadLine = Callable[[str], Awaitable[str | None]]
@@ -225,7 +226,14 @@ async def run_interactive(
         controller_holder: list[ModelSettingsController] = []
 
         def rebuild() -> None:
+            replay_width = terminal.columns
+            if options.tui_mode != "fullscreen":
+                replay_width = terminal.columns - 1
             previous_lines = tuple(app_holder[0].lines) if app_holder else ()
+            history_lines = render_replay_lines(
+                created.session.state.messages, max(1, replay_width)
+            )
+            initial_lines = history_lines if history_lines else previous_lines
             controller_holder[:] = [
                 ModelSettingsController(
                     session=created.session,
@@ -245,7 +253,7 @@ async def run_interactive(
                     screen_sink=lambda lines: renderer.render(list(lines[-terminal.rows :])),
                     raw_sink=terminal.write,
                     compose_prompt=compose,
-                    initial_lines=previous_lines,
+                    initial_lines=initial_lines,
                 )
             else:
                 # Inline mode: only the active block may repaint; settled blocks commit
@@ -261,7 +269,7 @@ async def run_interactive(
                     commit_sink=renderer.commit,
                     raw_sink=terminal.write,
                     compose_prompt=compose,
-                    initial_lines=previous_lines,
+                    initial_lines=initial_lines,
                 )
             app_holder[:] = [app]
 

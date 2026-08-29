@@ -1023,3 +1023,24 @@ def test_interactive_mode_clearly_rejects_macos(
 
     assert code == 2
     assert "macOS" in errors.getvalue()
+
+
+def test_replay_renders_restored_history_on_interactive_resume(tmp_path: Path) -> None:
+    _drive(
+        tmp_path,
+        ("seed", "/exit"),
+        FakeProvider([fake_assistant_message("seed answer")]),
+    )
+
+    code, output, errors = _drive(
+        tmp_path,
+        ("hello", "/exit"),
+        FakeProvider([fake_assistant_message("resumed answer")]),
+        resume=True,
+    )
+
+    assert code == 0, output + errors
+    assert errors == ""
+    assert "seed answer" in output, "restored history must be replayed into the transcript"
+    assert "> seed" in output
+    assert "resumed answer" in output

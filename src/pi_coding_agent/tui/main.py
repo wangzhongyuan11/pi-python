@@ -90,6 +90,15 @@ class InteractiveApp:
         self._block_sink: Callable[[tuple[str, ...]], None] | None = block_sink
         self._commit_sink: Callable[[], None] | None = commit_sink
         self._raw_sink: Callable[[str], None] | None = raw_sink
+        if initial_lines:
+            # Paint the restored transcript through the active renderer so
+            # resumed/switched sessions show their history immediately.
+            if self._screen_sink is not None:
+                self._screen_sink(tuple(self.lines))
+            elif self._block_sink is not None:
+                self._block_sink(tuple(initial_lines))
+                if self._commit_sink is not None:
+                    self._commit_sink()
         session.subscribe(self._on_event)
 
     def note(self, text: str) -> None:
