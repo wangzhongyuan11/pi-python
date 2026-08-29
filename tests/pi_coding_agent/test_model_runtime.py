@@ -101,3 +101,32 @@ def test_extension_provider_registration_selects_and_streams_canonical_model() -
     assert other.call_count == 1
     with pytest.raises(ValueError, match="active"):
         runtime.unregister_provider("other")
+
+
+def test_create_model_runtime_accepts_provider_model_prefix() -> None:
+    runtime = create_model_runtime(
+        credential_resolver=StaticResolver(),
+        model_id="deepseek/deepseek-v4-flash",
+    )
+
+    assert runtime.provider.id == "deepseek"
+    assert runtime.model.id == "deepseek-v4-flash"
+
+
+def test_create_model_runtime_prefix_may_override_default_provider() -> None:
+    runtime = create_model_runtime(
+        credential_resolver=StaticResolver(),
+        provider_id="deepseek",
+        model_id="deepseek/deepseek-v4-pro",
+    )
+
+    assert runtime.provider.id == "deepseek"
+    assert runtime.model.id == "deepseek-v4-pro"
+
+
+def test_create_model_runtime_rejects_unknown_prefixed_provider() -> None:
+    with pytest.raises(UnknownProviderError):
+        create_model_runtime(
+            credential_resolver=StaticResolver(),
+            model_id="openai/gpt-x",
+        )

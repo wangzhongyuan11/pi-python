@@ -114,6 +114,9 @@ def create_model_runtime(
     timeout_seconds: float = 300.0,
     max_tokens: int | None = None,
 ) -> ModelRuntime:
+    if model_id is not None and "/" in model_id:
+        prefixed_provider, _, model_id = model_id.partition("/")
+        provider_id = prefixed_provider
     provider = create_builtin_provider(
         provider_id,
         credential_resolver=credential_resolver,
