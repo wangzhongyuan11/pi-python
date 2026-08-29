@@ -174,7 +174,9 @@ def test_json_presenter_includes_tool_execution_payloads() -> None:
     )
 
     presenter(
-        ToolExecutionStartEvent(tool_call_id="call_1", tool_name="bash", args={"command": "git --version"}),
+        ToolExecutionStartEvent(
+            tool_call_id="call_1", tool_name="bash", args={"command": "git --version"}
+        ),
         signal,
     )
     presenter(
@@ -187,7 +189,9 @@ def test_json_presenter_includes_tool_execution_payloads() -> None:
         signal,
     )
     presenter(
-        ToolExecutionEndEvent(tool_call_id="call_1", tool_name="bash", result=result, is_error=False),
+        ToolExecutionEndEvent(
+            tool_call_id="call_1", tool_name="bash", result=result, is_error=False
+        ),
         signal,
     )
 
@@ -209,7 +213,10 @@ def test_json_presenter_includes_tool_execution_payloads() -> None:
             "type": "tool_execution_end",
             "toolCallId": "call_1",
             "toolName": "bash",
-            "result": {"content": [{"type": "text", "text": "git version 2.50.1"}], "details": {"exitCode": 0}},
+            "result": {
+                "content": [{"type": "text", "text": "git version 2.50.1"}],
+                "details": {"exitCode": 0},
+            },
             "isError": False,
         },
     ]

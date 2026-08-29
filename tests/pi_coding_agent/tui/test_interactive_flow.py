@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import replace
 from io import StringIO
 from pathlib import Path
@@ -14,7 +15,18 @@ import pytest
 from pydantic import BaseModel
 
 from pi_agent import Agent, AgentTool, AgentToolResult, AgentToolUpdateCallback
-from pi_ai import FakeProvider, TextContent, ToolCall, fake_assistant_message, fake_model
+from pi_ai import (
+    AssistantMessage,
+    AssistantStream,
+    Context,
+    FakeProvider,
+    Model,
+    StreamOptions,
+    TextContent,
+    ToolCall,
+    fake_assistant_message,
+    fake_model,
+)
 from pi_coding_agent.agent_session import AgentSession
 from pi_coding_agent.compaction.service import CompactionService
 from pi_coding_agent.compaction.summarizer import CompactionSummarizer
@@ -1050,29 +1062,35 @@ def test_replay_renders_restored_history_on_interactive_resume(tmp_path: Path) -
 class _SlowFakeProvider(FakeProvider):
     """FakeProvider whose responses arrive after a configurable delay."""
 
-    def __init__(self, responses, *, delay: float) -> None:
+    def __init__(self, responses: Iterable[AssistantMessage], *, delay: float) -> None:
         super().__init__(responses)
         self._delay = delay
 
-    def stream(self, model, context, options=None):
-        from pi_ai import AssistantStream
-
-        self._calls.append((model, context))
+    def stream(
+        self,
+        model: Model,
+        context: Context,
+        options: StreamOptions | None = None,
+    ) -> AssistantStream:
         stream = AssistantStream()
+        self._calls.append((model, context))
         task = asyncio.create_task(self._slow_produce(stream, model, options))
         self._tasks.add(task)
         return stream
 
-    async def _slow_produce(self, stream, model, options) -> None:
-        from dataclasses import replace as dc_replace
-
+    async def _slow_produce(
+        self,
+        stream: AssistantStream,
+        model: Model,
+        options: StreamOptions | None,
+    ) -> None:
         await asyncio.sleep(self._delay)
         aborted = (
             options is not None and options.abort_event is not None and options.abort_event.is_set()
         )
         response = self._responses.popleft() if self._responses else None
         if aborted and response is not None:
-            response = dc_replace(response, stop_reason="aborted")
+            response = replace(response, stop_reason="aborted")
         await self._produce(stream, model, response, options)
 
 
@@ -1090,7 +1108,7 @@ def test_input_typed_during_a_turn_is_queued_as_steering(tmp_path: Path) -> None
     async def read_line(_prompt: str) -> str | None:
         return next(lines, None)
 
-    def read_char():
+    def read_char() -> str | None:
         try:
             return next(typed)
         except StopIteration:
@@ -1111,7 +1129,7 @@ def test_input_typed_during_a_turn_is_queued_as_steering(tmp_path: Path) -> None
         )
     )
 
-    assert code == 0, output + errors
+    assert code == 0, output.getvalue() + errors.getvalue()
     assert errors.getvalue() == "", repr(errors.getvalue())
     assert "steered: fix the bug please" in output.getvalue()
     assert provider.call_count == 3
@@ -1119,7 +1137,7 @@ def test_input_typed_during_a_turn_is_queued_as_steering(tmp_path: Path) -> None
         block.text
         for message in provider.calls[1][1].messages
         for block in (message.content or ())
-        if getattr(block, "text", "") == "fix the bug please"
+        if isinstance(block, TextContent) and block.text == "fix the bug please"
     ]
     assert steered_texts, "steered message must reach the next model request"
 
@@ -1156,6 +1174,6 @@ def test_escape_during_a_turn_aborts_and_reports_cancellation(tmp_path: Path) ->
         )
     )
 
-    assert code == 0, output + errors
+    assert code == 0, output.getvalue() + errors.getvalue()
     assert errors.getvalue() == "", repr(errors.getvalue())
     assert "cancelled" in output.getvalue()

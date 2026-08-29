@@ -62,7 +62,10 @@ def test_deepseek_thinking_clamp_matches_upstream_thinkinglevelmap() -> None:
     from pi_ai.providers.deepseek import DEFAULT_DEEPSEEK_MODEL
 
     assert get_supported_thinking_levels(DEFAULT_DEEPSEEK_MODEL) == ("off", "high", "max")
-    assert [clamp_thinking_level(DEFAULT_DEEPSEEK_MODEL, level) for level in ("minimal", "low", "medium")] == [
+    assert [
+        clamp_thinking_level(DEFAULT_DEEPSEEK_MODEL, level)
+        for level in ("minimal", "low", "medium")
+    ] == [
         "high",
         "high",
         "high",

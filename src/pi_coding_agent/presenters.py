@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TextIO
+from typing import TextIO, cast
 
 from pi_agent import (
     MessageEndEvent,
@@ -15,7 +15,7 @@ from pi_agent import (
     ToolExecutionUpdateEvent,
 )
 from pi_agent.tools import AgentToolResult
-from pi_ai import AssistantMessage, ImageContent, TextContent, ToolResultMessage, UserMessage
+from pi_ai import AssistantMessage, TextContent, ToolResultMessage, UserMessage
 from pi_ai.wire.events import dump_event
 from pi_ai.wire.messages import dump_message
 
@@ -37,17 +37,21 @@ def assistant_text(message: AssistantMessage) -> str:
 def _dump_tool_result(result: object) -> object:
     if not isinstance(result, AgentToolResult):
         return result
+    typed = cast("AgentToolResult[object]", result)
     content: list[dict[str, object]] = []
-    for block in result.content:
+    for block in typed.content:
         if isinstance(block, TextContent):
             content.append({"type": "text", "text": block.text})
-        elif isinstance(block, ImageContent):
-            content.append({"type": "image", "mimeType": block.mime_type})
         else:
-            content.append({"type": getattr(block, "type", "unknown")})
-    dumped: dict[str, object] = {"content": content, "details": result.details}
-    if result.usage is not None:
-        dumped["usage"] = result.usage
+            content.append(
+                {
+                    "type": getattr(block, "type", "unknown"),
+                    "mimeType": getattr(block, "mime_type", None),
+                }
+            )
+    dumped: dict[str, object] = {"content": content, "details": typed.details}
+    if typed.usage is not None:
+        dumped["usage"] = typed.usage
     return dumped
 
 
