@@ -190,6 +190,9 @@ async def run_interactive(
     elif options.model_id is not None:
         runtime.select_model(options.model_id, provider_id=options.provider_id)
     thinking = clamp_thinking_level(runtime.model, options.thinking_level)
+    session_dir = options.session_dir
+    if options.resume and session_dir is None and options.session is None:
+        session_dir = default_session_dir(options.cwd)
     manager = resolve_session_manager(
         HeadlessOptions(
             cwd=options.cwd,
@@ -202,7 +205,7 @@ async def run_interactive(
             no_session=options.no_session,
             session=options.session,
             resume=options.resume,
-            session_dir=options.session_dir,
+            session_dir=session_dir,
             model_runtime=runtime,
         )
     )

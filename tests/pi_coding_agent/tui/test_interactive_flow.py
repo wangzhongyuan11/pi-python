@@ -631,6 +631,7 @@ def _drive(
     provider: FakeProvider,
     *,
     session_dir: Path | None = None,
+    resume: bool = False,
 ) -> tuple[int, str, str]:
     runtime = ModelRuntime(provider=provider, model=provider.models[0])
     lines = iter(replies)
@@ -647,6 +648,7 @@ def _drive(
                 credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
                 model_runtime=runtime,
                 session_dir=session_dir,
+                resume=resume,
             ),
             stdout=output,
             stderr=errors,
@@ -736,6 +738,37 @@ def test_sessions_selector_defaults_to_the_per_project_session_directory(
         if path.name.endswith(f"{match.group(1)}.jsonl")
     )
     content = target.read_text(encoding="utf-8")
+    assert '"hello"' in content
+
+
+def test_interactive_resume_without_session_dir_continues_newest_session(
+    tmp_path: Path,
+) -> None:
+    _drive(
+        tmp_path,
+        ("seed", "/exit"),
+        FakeProvider([fake_assistant_message("seed answer")]),
+    )
+    default_root = Path.home() / ".pi-python" / "agent" / "sessions"
+    project_dirs = [path for path in default_root.glob("*") if path.is_dir()]
+    assert project_dirs, "expected the first turn to create the per-project session directory"
+    before = list(default_root.rglob("*.jsonl"))
+    assert len(before) == 1
+
+    code, output, errors = _drive(
+        tmp_path,
+        ("hello", "/exit"),
+        FakeProvider([fake_assistant_message("resumed answer")]),
+        resume=True,
+    )
+
+    assert code == 0, output + errors
+    assert errors == ""
+    assert "resumed answer" in output
+    after = list(default_root.rglob("*.jsonl"))
+    assert len(after) == 1, "resume must continue the existing session, not create a new one"
+    content = after[0].read_text(encoding="utf-8")
+    assert '"seed"' in content
     assert '"hello"' in content
 
 
