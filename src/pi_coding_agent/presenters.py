@@ -6,8 +6,16 @@ import asyncio
 import json
 from typing import TextIO
 
-from pi_agent import MessageEndEvent, MessageStartEvent, MessageUpdateEvent
-from pi_ai import AssistantMessage, TextContent, ToolResultMessage, UserMessage
+from pi_agent import (
+    MessageEndEvent,
+    MessageStartEvent,
+    MessageUpdateEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
+)
+from pi_agent.tools import AgentToolResult
+from pi_ai import AssistantMessage, ImageContent, TextContent, ToolResultMessage, UserMessage
 from pi_ai.wire.events import dump_event
 from pi_ai.wire.messages import dump_message
 
@@ -24,6 +32,23 @@ from .session.codec import dump_record
 
 def assistant_text(message: AssistantMessage) -> str:
     return "".join(block.text for block in message.content if isinstance(block, TextContent))
+
+
+def _dump_tool_result(result: object) -> object:
+    if not isinstance(result, AgentToolResult):
+        return result
+    content: list[dict[str, object]] = []
+    for block in result.content:
+        if isinstance(block, TextContent):
+            content.append({"type": "text", "text": block.text})
+        elif isinstance(block, ImageContent):
+            content.append({"type": "image", "mimeType": block.mime_type})
+        else:
+            content.append({"type": getattr(block, "type", "unknown")})
+    dumped: dict[str, object] = {"content": content, "details": result.details}
+    if result.usage is not None:
+        dumped["usage"] = result.usage
+    return dumped
 
 
 class JsonEventPresenter:
@@ -60,6 +85,26 @@ class JsonEventPresenter:
             )
         elif isinstance(event, MessageUpdateEvent):
             payload["assistantMessageEvent"] = dump_event(event.assistant_message_event)
+        elif isinstance(event, ToolExecutionStartEvent):
+            payload.update(
+                toolCallId=event.tool_call_id,
+                toolName=event.tool_name,
+                args=event.args,
+            )
+        elif isinstance(event, ToolExecutionUpdateEvent):
+            payload.update(
+                toolCallId=event.tool_call_id,
+                toolName=event.tool_name,
+                args=event.args,
+                partialResult=_dump_tool_result(event.partial_result),
+            )
+        elif isinstance(event, ToolExecutionEndEvent):
+            payload.update(
+                toolCallId=event.tool_call_id,
+                toolName=event.tool_name,
+                result=_dump_tool_result(event.result),
+                isError=event.is_error,
+            )
         self._stdout.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         self._stdout.write("\n")
 

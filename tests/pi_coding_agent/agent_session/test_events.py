@@ -154,3 +154,62 @@ def test_json_presenter_preserves_product_retry_event_metadata() -> None:
             "finalError": "retry cancelled",
         },
     ]
+
+
+def test_json_presenter_includes_tool_execution_payloads() -> None:
+    from pi_agent import (
+        ToolExecutionEndEvent,
+        ToolExecutionStartEvent,
+        ToolExecutionUpdateEvent,
+    )
+    from pi_agent.tools import AgentToolResult
+    from pi_ai import TextContent
+
+    stdout = StringIO()
+    presenter = JsonEventPresenter(stdout)
+    signal = asyncio.Event()
+    result = AgentToolResult(
+        content=(TextContent(text="git version 2.50.1"),),
+        details={"exitCode": 0},
+    )
+
+    presenter(
+        ToolExecutionStartEvent(tool_call_id="call_1", tool_name="bash", args={"command": "git --version"}),
+        signal,
+    )
+    presenter(
+        ToolExecutionUpdateEvent(
+            tool_call_id="call_1",
+            tool_name="bash",
+            args={"command": "git --version"},
+            partial_result=AgentToolResult(content=(TextContent(text="…running"),), details=None),
+        ),
+        signal,
+    )
+    presenter(
+        ToolExecutionEndEvent(tool_call_id="call_1", tool_name="bash", result=result, is_error=False),
+        signal,
+    )
+
+    assert [json.loads(line) for line in stdout.getvalue().splitlines()] == [
+        {
+            "type": "tool_execution_start",
+            "toolCallId": "call_1",
+            "toolName": "bash",
+            "args": {"command": "git --version"},
+        },
+        {
+            "type": "tool_execution_update",
+            "toolCallId": "call_1",
+            "toolName": "bash",
+            "args": {"command": "git --version"},
+            "partialResult": {"content": [{"type": "text", "text": "…running"}], "details": None},
+        },
+        {
+            "type": "tool_execution_end",
+            "toolCallId": "call_1",
+            "toolName": "bash",
+            "result": {"content": [{"type": "text", "text": "git version 2.50.1"}], "details": {"exitCode": 0}},
+            "isError": False,
+        },
+    ]
