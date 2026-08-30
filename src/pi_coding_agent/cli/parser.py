@@ -38,6 +38,13 @@ def create_parser(*, version: str) -> argparse.ArgumentParser:
     )
     importer.add_argument("source")
     importer.add_argument("--session-dir")
+    session = commands.add_parser("session", help="session maintenance commands")
+    session_commands = session.add_subparsers(dest="session_command", required=True)
+    repair = session_commands.add_parser(
+        "repair",
+        help="truncate a torn trailing record so a crashed session can open again",
+    )
+    repair.add_argument("path")
     return parser
 
 

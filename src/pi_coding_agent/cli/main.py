@@ -25,6 +25,7 @@ from ..tui.runner import InteractiveOptions, run_interactive
 from .import_session import run_import_session
 from .parser import create_parser, create_run_parser
 from .run import HeadlessOptions, run_headless
+from .session_repair import run_session_repair
 
 _GLOBAL_VALUE_OPTIONS = {"--api-key", "--env-file"}
 
@@ -56,7 +57,7 @@ def _uses_command_parser(arguments: Sequence[str]) -> bool:
         if value in _GLOBAL_VALUE_OPTIONS:
             index += 2
             continue
-        return value in {"auth", "import-pi-session"}
+        return value in {"auth", "import-pi-session", "session"}
     return False
 
 
@@ -163,6 +164,12 @@ def main(
         return run_import_session(
             arguments.source,
             session_dir=arguments.session_dir,
+            stdout=output,
+            stderr=errors,
+        )
+    if command_mode and arguments.command == "session":
+        return run_session_repair(
+            arguments.path,
             stdout=output,
             stderr=errors,
         )
