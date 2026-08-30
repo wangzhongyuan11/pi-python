@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,7 +33,10 @@ def _resolve(value: str | Path, session_dir: str | Path | None) -> Path:
     candidates = sorted(directory.glob(f"*_{session_id}.jsonl")) if directory.is_dir() else []
     matches: list[Path] = []
     for candidate in candidates:
-        parsed = read_session(candidate)
+        try:
+            parsed = read_session(candidate)
+        except (OSError, SessionError):
+            continue
         if parsed.header.id == session_id:
             matches.append(candidate.resolve())
     if len(matches) != 1:
@@ -58,6 +62,31 @@ def open_session(
         entries=parsed.entries,
         persisted=True,
     )
+
+
+def open_or_create_session(
+    value: str | Path,
+    *,
+    session_dir: str | Path,
+    cwd: str | Path,
+    timestamp_factory: Callable[[], str],
+) -> SessionManager:
+    """Open the Session for ``value``, creating it when a valid id is missing."""
+    try:
+        return open_session(value, session_dir=session_dir)
+    except SessionNotFoundError:
+        if _looks_like_path(value):
+            raise
+        session_id = validate_session_id(str(value))
+        directory = Path(session_dir).resolve()
+        if directory.is_dir() and any(directory.glob(f"*_{session_id}.jsonl")):
+            raise
+        return SessionManager.create(
+            cwd=cwd,
+            session_dir=directory,
+            session_id=session_id,
+            timestamp=timestamp_factory(),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +152,7 @@ __all__ = [
     "SessionDiagnostic",
     "SessionSummary",
     "list_sessions",
+    "open_or_create_session",
     "open_session",
     "validate_session_id",
 ]
