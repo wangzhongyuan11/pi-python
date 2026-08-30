@@ -5,18 +5,20 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from pi_ai import (
     FakeProvider,
     Usage,
-    fake_model,
     UsageCost,
     fake_assistant_message,
+    fake_model,
 )
 from pi_coding_agent.agent_session_events import CompactionEndEvent, CompactionStartEvent
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.sdk import CreateAgentSessionOptions, create_agent_session
 from pi_coding_agent.session.manager import SessionManager
+from pi_coding_agent.session.models import CompactionEntry, SessionEntry
 
 
 def _usage(total: int) -> Usage:
@@ -40,9 +42,9 @@ def _session_manager(cwd: Path) -> SessionManager:
 
 async def _run_prompt(
     tmp_path: Path,
-    responses: list,
-    **options,
-) -> tuple[SessionManager, list]:
+    responses: list[Any],
+    **options: Any,
+) -> tuple[tuple[SessionEntry, ...], list[Any]]:
     provider = FakeProvider(responses)
     runtime = ModelRuntime(provider=provider, model=fake_model())
     created = await create_agent_session(
@@ -55,16 +57,16 @@ async def _run_prompt(
             **options,
         )
     )
-    events: list = []
+    events: list[Any] = []
     created.session.subscribe(lambda event, signal: events.append(event))
     async with created:
         await created.session.prompt("hello there")
-        manager = created.session.session_manager
-    return manager, events
+        entries = tuple(created.session.session_manager.entries)
+    return entries, events
 
 
 def test_threshold_exceeded_triggers_one_auto_compaction(tmp_path: Path) -> None:
-    manager, events = asyncio.run(
+    entries, events = asyncio.run(
         _run_prompt(
             tmp_path,
             [
@@ -73,9 +75,10 @@ def test_threshold_exceeded_triggers_one_auto_compaction(tmp_path: Path) -> None
             ],
         )
     )
-    compactions = [entry for entry in manager.entries if entry.type == "compaction"]
+    compactions = [entry for entry in entries if isinstance(entry, CompactionEntry)]
     assert len(compactions) == 1
-    assert compactions[0].details["reason"] == "threshold"
+    details = compactions[0].details
+    assert isinstance(details, dict) and details.get("reason") == "threshold"
     assert compactions[0].summary == "## Goal\n- summarized checkpoint"
     start_reasons = [event.reason for event in events if isinstance(event, CompactionStartEvent)]
     assert start_reasons == ["threshold"]
@@ -84,17 +87,17 @@ def test_threshold_exceeded_triggers_one_auto_compaction(tmp_path: Path) -> None
 
 
 def test_below_threshold_does_not_compact(tmp_path: Path) -> None:
-    manager, _events = asyncio.run(
+    entries, _events = asyncio.run(
         _run_prompt(
             tmp_path,
             [replace(fake_assistant_message("turn one"), usage=_usage(1_000))],
         )
     )
-    assert not [entry for entry in manager.entries if entry.type == "compaction"]
+    assert not [entry for entry in entries if isinstance(entry, CompactionEntry)]
 
 
 def test_aborted_turn_does_not_compact(tmp_path: Path) -> None:
-    manager, _events = asyncio.run(
+    entries, _events = asyncio.run(
         _run_prompt(
             tmp_path,
             [
@@ -106,15 +109,15 @@ def test_aborted_turn_does_not_compact(tmp_path: Path) -> None:
             ],
         )
     )
-    assert not [entry for entry in manager.entries if entry.type == "compaction"]
+    assert not [entry for entry in entries if isinstance(entry, CompactionEntry)]
 
 
 def test_disabled_auto_compaction_does_not_compact(tmp_path: Path) -> None:
-    manager, _events = asyncio.run(
+    entries, _events = asyncio.run(
         _run_prompt(
             tmp_path,
             [replace(fake_assistant_message("turn one"), usage=_usage(128_000))],
             auto_compaction_enabled=False,
         )
     )
-    assert not [entry for entry in manager.entries if entry.type == "compaction"]
+    assert not [entry for entry in entries if isinstance(entry, CompactionEntry)]

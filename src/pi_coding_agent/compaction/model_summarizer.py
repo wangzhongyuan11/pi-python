@@ -1,6 +1,23 @@
 """Model-backed compaction summarizer with upstream-aligned prompts."""
 
+# The prompt blocks below are verbatim ports of the upstream summarization
+# prompts; wrapping their source lines would desync future re-ports.
+# ruff: noqa: E501
+
 from __future__ import annotations
+
+from typing import Protocol
+
+from pi_ai import (
+    AssistantStream,
+    Context,
+    Model,
+    StreamOptions,
+    TextContent,
+    TextDeltaEvent,
+    ThinkingDeltaEvent,
+    UserMessage,
+)
 
 from ..session.models import CompactionEntry, MessageEntry, SessionEntry
 from .summarizer import CompactionSummarizer
@@ -67,8 +84,11 @@ def _message_text(entry: MessageEntry) -> str:
         parts.append(content)
     elif isinstance(content, list):
         for block in content:
-            if isinstance(block, dict) and isinstance(block.get("text"), str):
-                parts.append(block["text"])
+            if not isinstance(block, dict):
+                continue
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
     prefix = role if isinstance(role, str) else "unknown"
     return f"[{prefix}] {' '.join(parts)}"
 
@@ -101,12 +121,24 @@ def build_summarization_prompt(
     return prompt + base
 
 
+class _StreamsContexts(Protocol):
+    @property
+    def model(self) -> Model: ...
+
+    def stream(
+        self,
+        model: Model,
+        context: Context,
+        options: StreamOptions | None = None,
+    ) -> AssistantStream: ...
+
+
 class ModelRuntimeSummarizer(CompactionSummarizer):
     """Summarizes session entries with the currently selected model."""
 
     __slots__ = ("_model_runtime",)
 
-    def __init__(self, *, model_runtime: object) -> None:
+    def __init__(self, *, model_runtime: _StreamsContexts) -> None:
         self._model_runtime = model_runtime
 
     async def summarize(
@@ -115,10 +147,7 @@ class ModelRuntimeSummarizer(CompactionSummarizer):
         *,
         previous_summary: str | None,
     ) -> str:
-        from pi_ai import Context, StreamOptions, TextContent, UserMessage
-
-        runtime = self._model_runtime
-        model = runtime.model  # type: ignore[attr-defined]
+        model = self._model_runtime.model
         prompt = build_summarization_prompt(entries, previous_summary=previous_summary)
         message = UserMessage(
             content=(TextContent(text=prompt),),
@@ -128,12 +157,10 @@ class ModelRuntimeSummarizer(CompactionSummarizer):
             system_prompt=SUMMARIZATION_SYSTEM_PROMPT,
             messages=(message,),
         )
-        stream = runtime.stream(model, context, StreamOptions())  # type: ignore[attr-defined]
         pieces: list[str] = []
-        async for event in stream:
-            delta = getattr(event, "delta", None)
-            if isinstance(delta, str):
-                pieces.append(delta)
+        async for event in self._model_runtime.stream(model, context, StreamOptions()):
+            if isinstance(event, TextDeltaEvent | ThinkingDeltaEvent):
+                pieces.append(event.delta)
         return "".join(pieces)
 
 

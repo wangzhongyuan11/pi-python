@@ -382,12 +382,11 @@ class AgentSession:
 
     def _context_tokens(self, message: AssistantMessage) -> int | None:
         usage = message.usage
-        if usage is not None:
-            total = usage.total_tokens or (
-                usage.input + usage.output + usage.cache_read + usage.cache_write
-            )
-            if total > 0:
-                return total
+        total = usage.total_tokens or (
+            usage.input + usage.output + usage.cache_read + usage.cache_write
+        )
+        if total > 0:
+            return total
         path = self.session_manager.active_path()
         if not path:
             return None
