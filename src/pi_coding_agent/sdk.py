@@ -69,6 +69,16 @@ def _default_tools_setting(settings: Settings) -> tuple[str, ...] | None:
     return tuple(item for item in value if item in known)
 
 
+def _reserve_tokens_setting(settings: Settings) -> int:
+    value = settings.get("compaction")
+    if not isinstance(value, dict):
+        return 16_384
+    reserve = cast("dict[str, object]", value).get("reserveTokens")
+    if isinstance(reserve, int) and not isinstance(reserve, bool) and reserve >= 0:
+        return reserve
+    return 16_384
+
+
 @runtime_checkable
 class _BuildsSystemPrompt(Protocol):
     def build_system_prompt(self, cwd: Path) -> str: ...
@@ -331,7 +341,7 @@ async def create_agent_session(
             timestamp_factory=selected.timestamp_factory,
             compaction_service=compaction_service,
             compaction_keep_recent_tokens=selected.compaction_keep_recent_tokens,
-            compaction_reserve_tokens=selected.compaction_reserve_tokens,
+            compaction_reserve_tokens=_reserve_tokens_setting(services.settings),
             auto_compaction_enabled=selected.auto_compaction_enabled,
             compaction_token_count=selected.compaction_token_count,
             branch_summary_service=branch_summary_service,
