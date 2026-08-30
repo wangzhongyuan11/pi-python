@@ -228,13 +228,32 @@ class AgentSession:
         previous = next(
             (entry for entry in reversed(path) if isinstance(entry, CompactionEntry)), None
         )
-        previous_summary = previous.summary if previous is not None else None
-        entries = path[path.index(previous) + 1 :] if previous is not None else path
+        if previous is not None:
+            # The next compaction starts at the previous first-kept entry: those
+            # messages are still live context that must be summarized (upstream
+            # prepareCompaction boundaryStart).
+            kept_start = next(
+                (
+                    index
+                    for index, entry in enumerate(path)
+                    if entry.id == previous.first_kept_entry_id
+                ),
+                path.index(previous) + 1,
+            )
+            entries = path[kept_start:]
+            previous_summary = previous.summary
+        else:
+            entries = path
+            previous_summary = None
         cutpoint = choose_compaction_cutpoint(
             entries,
             keep_recent_tokens=self._compaction_keep_recent_tokens,
             token_count=self._compaction_token_count,
         )
+        if cutpoint.first_kept_index == 0:
+            # Upstream prepareCompaction returns undefined in this case: there is
+            # nothing to summarize, so compacting would only drop live context.
+            raise ValueError("nothing to compact: all recent entries are kept")
         await self._emit(CompactionStartEvent(reason=reason), asyncio.Event())
         entry = await self._compaction_service.compact(
             entries,

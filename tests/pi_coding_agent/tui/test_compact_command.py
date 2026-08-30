@@ -38,7 +38,11 @@ def _drive(tmp_path: Path, replies: list[str], responses: list[Any]) -> str:
     return output.getvalue()
 
 
-def test_compact_command_reports_the_result(tmp_path: Path) -> None:
+def test_compact_command_reports_nothing_to_summarize_for_small_sessions(
+    tmp_path: Path,
+) -> None:
+    # A single tiny turn leaves nothing to summarize: upstream skips the
+    # compaction entirely instead of writing an empty-summary checkpoint.
     output = _drive(
         tmp_path,
         ["hello", "/compact", "/exit"],
@@ -47,7 +51,7 @@ def test_compact_command_reports_the_result(tmp_path: Path) -> None:
             fake_assistant_message("## Goal\n- checkpoint"),
         ],
     )
-    assert "compacted" in output
+    assert "nothing to compact" in output
 
 
 def test_compact_command_reports_nothing_to_compact(tmp_path: Path) -> None:

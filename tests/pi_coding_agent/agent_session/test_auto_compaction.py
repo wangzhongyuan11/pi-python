@@ -53,6 +53,8 @@ async def _run_prompt(
             model_runtime=runtime,
             session_manager=_session_manager(tmp_path),
             compaction_reserve_tokens=100,
+            compaction_keep_recent_tokens=1,
+            compaction_token_count=lambda _entry: 500,
             agent_clock=lambda: 1,
             **options,
         )

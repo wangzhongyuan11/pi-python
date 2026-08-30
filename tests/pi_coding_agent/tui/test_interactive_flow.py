@@ -246,6 +246,8 @@ def test_manual_compaction_reports_activity_in_status_lines(tmp_path: Path) -> N
             entry_id_factory=lambda: "compaction-1",
             timestamp_factory=lambda: "2026-08-24T00:00:01Z",
         ),
+        compaction_keep_recent_tokens=1,
+        compaction_token_count=lambda _entry: 500,
     )
     app = InteractiveApp(session=session)
 

@@ -79,6 +79,8 @@ def test_compaction_emits_start_and_end_product_events(tmp_path: Path) -> None:
                 entry_id_factory=lambda: "compaction-1",
                 timestamp_factory=lambda: timestamp,
             ),
+            compaction_keep_recent_tokens=1,
+            compaction_token_count=lambda _entry: 500,
         )
         starts: list[CompactionStartEvent] = []
         ends: list[CompactionEndEvent] = []

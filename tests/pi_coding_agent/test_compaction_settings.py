@@ -50,6 +50,8 @@ def test_settings_reserve_tokens_drive_the_threshold(tmp_path: Path) -> None:
                 service_overrides=ServiceOverrides(
                     settings=InMemorySettings({"compaction": {"reserveTokens": 127_500}})
                 ),
+                compaction_keep_recent_tokens=1,
+                compaction_token_count=lambda _entry: 500,
                 agent_clock=lambda: 1,
             )
         )
