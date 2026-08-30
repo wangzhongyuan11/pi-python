@@ -620,6 +620,7 @@ async def run_interactive(
                         "/thinking [level]  show or set thinking level\n"
                         "/attach <path>  attach a file or image to the next prompt\n"
                         "/copy  copy the last reply to the terminal clipboard (OSC-52)\n"
+                        "/compact  summarize the conversation so far into a checkpoint\n"
                         "/sessions  list saved sessions and switch by number\n"
                         "/fork  fork the current session and switch to the copy\n"
                         "/exit  leave the session\n"
@@ -633,6 +634,24 @@ async def run_interactive(
         dispatcher.register(CommandSpec(name="model", source="builtin", handler=select_model))
         dispatcher.register(CommandSpec(name="thinking", source="builtin", handler=select_thinking))
         dispatcher.register(CommandSpec(name="copy", source="builtin", handler=copy_last_reply))
+
+        async def compact_session(args: str) -> CommandOutcome:
+            if args.strip():
+                return CommandOutcome(kind="message", text="usage: /compact")
+            if created.session.session_manager.leaf_id is None:
+                return CommandOutcome(kind="message", text="nothing to compact yet")
+            try:
+                entry = await created.session.compact(reason="manual")
+            except RuntimeError as error:
+                return CommandOutcome(kind="error", text=str(error))
+            except ValueError as error:
+                return CommandOutcome(kind="error", text=f"cannot compact: {error}")
+            return CommandOutcome(
+                kind="message",
+                text=f"compacted ({entry.tokens_before} tokens summarized into a checkpoint)",
+            )
+
+        dispatcher.register(CommandSpec(name="compact", source="builtin", handler=compact_session))
 
         pending_attachments: list[dict[str, JsonValue]] = []
 
