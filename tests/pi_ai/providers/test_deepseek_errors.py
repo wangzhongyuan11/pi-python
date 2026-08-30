@@ -5,7 +5,7 @@ from collections import deque
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
-from pi_ai import Context, DoneEvent, ErrorEvent, StreamOptions, UserMessage
+from pi_ai import Context, DoneEvent, ErrorEvent, ImageContent, StreamOptions, TextContent, UserMessage
 from pi_ai.events import AssistantMessageEvent
 from pi_ai.providers.deepseek.models import DEFAULT_DEEPSEEK_MODEL
 from pi_ai.providers.deepseek.provider import (
@@ -245,3 +245,38 @@ def test_missing_credential_yields_actionable_error_message() -> None:
     message = asyncio.run(scenario())
     assert "DEEPSEEK_API_KEY" in message
     assert message != "DeepSeek request failed"
+
+
+def test_capability_error_yields_actionable_error_message() -> None:
+    """A text-only model with an image must fail with the capability message
+    (P11.5-T22), not the generic "DeepSeek request failed" text."""
+    from pi_ai import ImageContent
+    from pi_ai.providers.deepseek.request import DeepSeekCapabilityError
+
+    provider = DeepSeekProvider(
+        credential_resolver=StaticCredentialResolver(),
+        client_factory=_unused_client_factory,
+        timestamp_ms=lambda: 123,
+    )
+    context = Context(
+        messages=(
+            UserMessage(
+                content=(
+                    TextContent(text="look"),
+                    ImageContent(data="aGk=", mime_type="image/png"),
+                ),
+                timestamp=1,
+            ),
+        )
+    )
+    flash = next(model for model in provider.models if model.id == "deepseek-v4-flash")
+
+    async def scenario() -> str:
+        events = [event async for event in provider.stream(flash, context)]
+        error_events = [event for event in events if isinstance(event, ErrorEvent)]
+        assert error_events, "expected an error event"
+        return error_events[-1].error.error_message or ""
+
+    message = asyncio.run(scenario())
+    assert "does not support image input" in message
+    assert isinstance(DeepSeekCapabilityError("x"), ValueError)
