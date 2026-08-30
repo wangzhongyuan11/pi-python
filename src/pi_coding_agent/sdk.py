@@ -24,6 +24,7 @@ from .compaction.service import CompactionService
 from .compaction.summarizer import CompactionSummarizer
 from .deepseek_credentials import DeepSeekCredentialResolver
 from .model_runtime import ModelRuntime, create_model_runtime
+from .ports import Settings
 from .prompts.system import build_system_prompt
 from .services import ProductServices, ServiceOverrides, create_product_services
 from .session.context import project_session_context
@@ -52,6 +53,18 @@ def _restore_thinking_level(value: str) -> ModelThinkingLevel:
     if value not in {"off", "minimal", "low", "medium", "high", "xhigh", "max"}:
         raise ValueError(f"invalid restored thinking level: {value}")
     return cast("ModelThinkingLevel", value)
+
+
+def _default_tools_setting(settings: Settings) -> tuple[str, ...] | None:
+    value = settings.get("defaultTools")
+    if value is None or not isinstance(value, list):
+        return None
+    if not all(isinstance(item, str) for item in value):
+        raise ValueError("defaultTools must be a list of tool names")
+    if not value:
+        return None
+    known = set(ALL_TOOL_NAMES)
+    return tuple(item for item in value if item in known)
 
 
 @runtime_checkable
@@ -211,11 +224,14 @@ async def create_agent_session(
         shell_path = services.settings.get("shellPath")
         if shell_path is not None and not isinstance(shell_path, str):
             raise ValueError("shellPath must be a string")
+        configured_default_tools = _default_tools_setting(services.settings)
         excluded_tools = set(selected.exclude_tools or ())
         if selected.tool_names is not None:
             builtin_names = tuple(name for name in selected.tool_names if name in ALL_TOOL_NAMES)
         elif selected.no_tools is not None:
             builtin_names = ()
+        elif configured_default_tools is not None:
+            builtin_names = configured_default_tools
         else:
             builtin_names = DEFAULT_CODING_TOOL_NAMES
         builtin_names = tuple(name for name in builtin_names if name not in excluded_tools)
