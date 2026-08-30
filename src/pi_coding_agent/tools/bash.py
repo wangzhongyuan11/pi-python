@@ -155,6 +155,8 @@ async def execute_bash(
     custom_shell_path: str | None = None,
     operations: ProcessOperations | None = None,
     environment: Mapping[str, str] | None = None,
+    session_environment: Mapping[str, str] | None = None,
+    command_prefix: str | None = None,
     timeout: float | None = None,
     abort_event: asyncio.Event | None = None,
     on_update: UpdateSink | None = None,
@@ -167,12 +169,19 @@ async def execute_bash(
         resolve_bash(custom_shell_path=custom_shell_path) if config is None else config
     )
     selected_operations = NativeProcessOperations() if operations is None else operations
+    if command_prefix:
+        command = command_prefix + "\n" + command
     argv = [selected_config.executable, *selected_config.arguments]
     stdin = None
     if selected_config.command_transport == "stdin":
         stdin = command.encode("utf-8")
     else:
         argv.append(command)
+    merged_environment: dict[str, str] | None = None
+    if environment is not None or session_environment is not None:
+        merged_environment = dict(environment) if environment is not None else {}
+        if session_environment is not None:
+            merged_environment.update(session_environment)
 
     accumulator = OutputAccumulator(
         max_lines=max_lines,
@@ -195,7 +204,7 @@ async def execute_bash(
         exit_code = await selected_operations.run(
             argv,
             cwd=cwd,
-            environment=environment,
+            environment=merged_environment,
             stdin=stdin,
             stdout=accept,
             stderr=accept,

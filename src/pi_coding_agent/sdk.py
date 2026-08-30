@@ -238,6 +238,23 @@ async def create_agent_session(
         else:
             builtin_names = DEFAULT_CODING_TOOL_NAMES
         builtin_names = tuple(name for name in builtin_names if name not in excluded_tools)
+        shell_command_prefix = services.settings.get("shellCommandPrefix")
+        if shell_command_prefix is not None and not isinstance(shell_command_prefix, str):
+            raise ValueError("shellCommandPrefix must be a string")
+        session_manager = target.session_manager
+
+        def session_environment() -> dict[str, str]:
+            model = model_runtime.model
+            environment = {
+                "PI_SESSION_ID": session_manager.header.id,
+                "PI_PROVIDER": model.provider,
+                "PI_MODEL": model.id,
+                "PI_REASONING_LEVEL": thinking_level,
+            }
+            if session_manager.path is not None:
+                environment["PI_SESSION_FILE"] = str(session_manager.path)
+            return environment
+
         configured_tools = (
             selected.tools
             if selected.tools is not None
@@ -245,6 +262,8 @@ async def create_agent_session(
                 cwd=target.cwd,
                 custom_shell_path=shell_path,
                 tool_names=builtin_names,
+                session_environment_provider=session_environment,
+                command_prefix=shell_command_prefix,
             )
         )
         extension_tools = services.extensions.tools

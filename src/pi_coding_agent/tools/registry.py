@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -142,6 +142,8 @@ def create_all_tools(
     bash_config: BashConfig | None = None,
     custom_shell_path: str | None = None,
     mutation_queue: FileMutationQueue | None = None,
+    session_environment_provider: Callable[[], dict[str, str] | None] | None = None,
+    command_prefix: str | None = None,
     tool_names: tuple[str, ...] = ALL_TOOL_NAMES,
 ) -> tuple[AgentTool[Any, Any], ...]:
     unknown = tuple(name for name in tool_names if name not in ALL_TOOL_NAMES)
@@ -209,6 +211,10 @@ def create_all_tools(
             config=bash_config,
             custom_shell_path=custom_shell_path,
             operations=process_operations,
+            session_environment=(
+                session_environment_provider() if session_environment_provider else None
+            ),
+            command_prefix=command_prefix,
             timeout=params.timeout,
             abort_event=abort_event,
             on_update=update if on_update is not None else None,
