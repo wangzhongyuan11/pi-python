@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -11,6 +12,26 @@ from .paths import resolve_tool_path
 
 DEFAULT_MAX_LINES = 2_000
 DEFAULT_MAX_BYTES = 50 * 1024
+
+_IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+_INLINE_IMAGE_MIMES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+
+
+def detect_image_mime(data: bytes) -> str | None:
+    """Identify an image file by magic bytes; returns None for text files."""
+    for magic, mime in _IMAGE_MAGIC:
+        if data.startswith(magic):
+            return mime
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data.startswith(b"BM"):
+        return "image/bmp"
+    return None
 
 
 class ReadToolError(RuntimeError):
@@ -28,6 +49,8 @@ class ReadResult:
     truncated_by: Literal["lines", "bytes"] | None = None
     first_line_exceeds_limit: bool = False
     next_offset: int | None = None
+    image_mime: str | None = None
+    image_data: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -124,6 +147,33 @@ async def read_file(
     if abort_event is not None and abort_event.is_set():
         raise ReadToolError("Read operation aborted")
 
+    image_mime = detect_image_mime(data)
+    if image_mime is not None:
+        # Image reads ignore offset/limit and are never line-truncated.
+        if image_mime in _INLINE_IMAGE_MIMES:
+            return ReadResult(
+                path=resolved,
+                text=f"Read image file [{image_mime}]",
+                start_line=1,
+                end_line=1,
+                total_lines=1,
+                truncated=False,
+                image_mime=image_mime,
+                image_data=base64.b64encode(data).decode("ascii"),
+            )
+        return ReadResult(
+            path=resolved,
+            text=(
+                f"Read image file [{image_mime}]\n"
+                f"[Image omitted: providers accept png/jpeg/gif/webp inline; "
+                f"convert the {image_mime} file to one of those formats first.]"
+            ),
+            start_line=1,
+            end_line=1,
+            total_lines=1,
+            truncated=False,
+        )
+
     text = data.decode("utf-8", errors="replace")
     all_lines = text.split("\n")
     start_index = start_line - 1
@@ -188,5 +238,6 @@ __all__ = [
     "DEFAULT_MAX_LINES",
     "ReadResult",
     "ReadToolError",
+    "detect_image_mime",
     "read_file",
 ]

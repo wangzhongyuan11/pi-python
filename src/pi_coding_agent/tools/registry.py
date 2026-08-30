@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from pi_agent import AgentTool, AgentToolResult, AgentToolUpdateCallback
-from pi_ai import JsonValue, TextContent
+from pi_ai import ImageContent, JsonValue, TextContent
 
 from .bash import BashToolError, NativeProcessOperations, execute_bash
 from .bash_resolver import BashConfig
@@ -174,6 +174,14 @@ def create_all_tools(
             limit=params.limit,
             abort_event=abort_event,
         )
+        if value.image_mime is not None and value.image_data is not None:
+            return AgentToolResult(
+                content=(
+                    TextContent(text=value.text),
+                    ImageContent(data=value.image_data, mime_type=value.image_mime),
+                ),
+                details={"path": str(value.path), "imageMime": value.image_mime},
+            )
         return _result(
             value.text,
             {
