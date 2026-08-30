@@ -80,7 +80,8 @@ def test_factory_defaults_to_pro_and_zero_request_retries() -> None:
     provider = create_deepseek_provider(credential_resolver=StaticCredentialResolver())
 
     assert isinstance(provider, DeepSeekProvider)
-    assert provider.models[-1] is DEFAULT_DEEPSEEK_MODEL
+    assert DEFAULT_DEEPSEEK_MODEL in provider.models
+    assert provider.models[-1].id == "deepseek-v4-flash-vision-exp"
 
 
 def test_deepseek_provider_is_exported_from_pi_ai() -> None:
