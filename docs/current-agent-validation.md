@@ -454,3 +454,59 @@ pi-python 当前缺口(除计划内 Post-v1 外,对"达到 codex/pi-agent 体验
 新增/更新测试 5 项(resume 降级、模型匹配、补全器、双击退出、单击提示),TUI+smoke 75 项全绿;回归门再次全绿(pyright 0、ruff 干净、全量 637 通过、`uv build` 重新生成 dist wheel)。README §3/§4 已同步。
 
 用户侧更新方式:`uv tool install --force D:\pi-python-claude`(dist wheel 已重新构建)。
+
+---
+
+## 20. 差距分析:vs Codex/Claude Code、vs 上游 Pi 工具、Session 正确性、计划余量(2026-08-30)
+
+> 本节为合并 `phase/09-pi-tui-claude` → `main`(merge commit `cc00d71`,已推送 GitHub)时的快照分析;工具/Session 结论基于对 `D:\pi`(e14afc648)与本项目源码的逐文件对照。
+
+### 20.1 与 Codex CLI / Claude Code 的差距(产品级)
+
+| 维度 | Codex / Claude Code 已有 | pi-python 现状 |
+| --- | --- | --- |
+| 权限与沙箱 | Codex:OS 级沙箱(macOS seatbelt/Linux landlock)+ 审批模式;CC:权限提示/允许清单/hooks | 仅有未接线的 `PermissionGate` 脚手架,默认关闭,bash 无任何隔离 |
+| 上下文管理 | 两者都有自动压缩/摘要 | 无 token 计数、无自动压缩;仅 SDK 手动 + overflow 一次性恢复 |
+| 任务规划 UI | Codex update_plan;CC TodoWrite/Plan mode | 无 |
+| 生态集成 | 两者都是 MCP client;CC 有 subagent/后台任务/skills/hooks/web | 无 MCP、无 subagent、无 web 工具;Extension 注册表存在但 CLI 未接线 |
+| 多模态 | 图片输入(读图/粘贴) | 模型目录 text-only,read 工具不支持图片 |
+| 补全/交互 | 成熟的命令面板/文件 @-补全 | 本轮已加 `/` 命令与参数补全;仍无 @file 补全、无鼠标 |
+| Session | 两者:resume/continue;CC 另有 fork(JSONL transcripts) | v3 JSONL + 树/fork/recovery(部分强于上游,见 20.3) |
+
+### 20.2 工具层 vs 上游 Pi(7 工具逐项对照)
+
+共享语义已忠实复刻:2000 行/50KB 截断、续读 offset、尾部截断+完整输出 spill 文件、BOM/CRLF 感知 edit、唯一性/重叠校验、per-realpath 串行化、超时/abort/退出码文案。pi-python 额外多出:原子写+fsync、PermissionGate、PowerShell 扩展。
+
+**缺失/未接线(按影响排序)**:
+1. **grep/find/ls 无生产实现**——`operations.py` 只定义 Protocol,`binaries.py` 的 pinned ripgrep/fd 下载器从未接线,SDK 硬编码 `create_coding_tools`,三工具完全不可达(上游默认全 7 工具可用)。
+2. **read 不支持图片**(上游 jpg/png/gif/webp/bmp + 2000×2000 缩放);无 macOS 路径变体回退。
+3. **edit 无 diff/patch 输出**(上游 details.diff/patch/firstChangedLine 支撑 UI diff 预览)、**无模糊匹配回退**(NFKC/智能标点/尾随空白)。
+4. **bash 无 PI_* 会话环境注入、无 commandPrefix/spawnHook/binDir PATH、更新不带 details、无限流节流**。
+5. grep 缺 glob/ignoreCase/literal/context 参数与 `--json` 流式;find 缺 fd 细节(`--full-path` 等);二者输出格式偏差(`:column:`)。
+6. 无 readonly 工具集助手、无 allowlist/denylist/defaultTools 设置、CLI 无工具开关与 `--approve/--no-approve` 信任标志。
+7. 工具描述不贡献 promptSnippet/截断限制说明;无 constrainedSampling。
+
+### 20.3 Session 管理正确性判定
+
+**结论:在文档化范围内(v3 JSONL、本地单用户)是正确的,且多处比上游更稳。** 已验证:延迟建文件、逐条 fsync+0600(上游不 fsync)、单根前向树、与上游语义一致的压缩投影、目录损坏文件隔离为诊断项、逐字节导入、原子 fork、上游没有的 unmatched-tool-call recovery。
+
+风险/缺陷清单:
+- **[RISK] 崩溃撕裂行严格拒读**(`reader.py:26-34` vs 上游跳过坏行 `session-manager.ts:299-313`):写一半崩溃会让整个会话无法打开(仅隔离+提示),上游只丢最后一条。文档声明为有意分歧,但**无修复 CLI**——建议后续加"截断末行修复"命令。
+- **[RISK] 未知记录类型导致整文件不可读**(上游透传)——前向兼容弱。
+- **[BUG] `--name`/SessionInfoEntry 无任何写入方**,但 surface matrix `CLI-FLAG-020` 标为 Supported——矩阵与代码不符。
+- [RISK] catalog cwd 过滤比上游严(Windows 盘符大小写/目录改名会藏会话);[RISK] 大会话全量载入+双重校验+O(n·depth) 验证,上游流式+4KB 头扫描;[RISK] `open_session` 不支持"打开即创建"(上游支持);[RISK] UNC/相对 cwd 的目录编码与上游不一致(当前调用方均传绝对路径,未触发)。
+
+### 20.4 计划余量
+
+- 14 个阶段:P0–P11 完成(Phase 11 修复仍以 Unreleased 进入本分支);**P12(9 项)与 P13(7 项)未开始**,todo 总量 147,未勾选 16。
+- Surface matrix 231 项:Supported 190(**约 63 项未落实**,集中于 RPC 19、CLI 标志 30、子命令 6、SDK 导出 3、设置接线 3、发布冒烟 2)、有意分歧 28、Post-v1 13(明确不做)。
+- ADR 已钉死边界:1.0 不做 Harness/SQLite/lanes/CBOR 远程、DeepSeek-only、无 JS 扩展、严格 v3。
+
+### 20.5 建议的下一步优先级
+
+1. **P12-T01 CLI 大合并**(一次性补 30 个标志 + 工具 allow/deny + trust/approve)——消除最大的矩阵缺口;
+2. **grep/find 生产接线**(BinaryManager → SearchOperations,半天工作量,直接从"4 工具"变"7 工具");
+3. **read 图片 + edit diff/模糊匹配**(对齐上游体验);
+4. **自动压缩**(threshold watcher + /compact 命令)——向 Codex/CC 的上下文管理看齐;
+5. **撕裂行修复命令 + `--name`**(补 session 两个短板);
+6. 之后按计划走 P12 RPC → P13 发布门。
