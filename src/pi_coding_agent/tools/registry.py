@@ -28,6 +28,7 @@ from .write import write_file
 
 ALL_TOOL_NAMES = ("read", "bash", "edit", "write", "grep", "find", "ls")
 DEFAULT_CODING_TOOL_NAMES = ("read", "bash", "edit", "write")
+DEFAULT_READONLY_TOOL_NAMES = ("read", "grep", "find", "ls")
 
 
 class _InputModel(BaseModel):
@@ -398,9 +399,20 @@ def create_coding_tools(
     )
 
 
+def create_readonly_tools(
+    *,
+    cwd: Path,
+) -> tuple[AgentTool[Any, Any], ...]:
+    return create_all_tools(
+        cwd=cwd,
+        tool_names=DEFAULT_READONLY_TOOL_NAMES,
+    )
+
+
 __all__ = [
     "ALL_TOOL_NAMES",
     "DEFAULT_CODING_TOOL_NAMES",
+    "DEFAULT_READONLY_TOOL_NAMES",
     "BashInput",
     "EditInput",
     "EditReplacementInput",
@@ -411,4 +423,5 @@ __all__ = [
     "WriteInput",
     "create_all_tools",
     "create_coding_tools",
+    "create_readonly_tools",
 ]

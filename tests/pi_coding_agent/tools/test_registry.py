@@ -151,3 +151,10 @@ def test_edit_prepare_arguments_accepts_json_string_and_legacy_shape(tmp_path: P
     assert isinstance(validated_legacy, EditInput)
     assert validated_json.edits[0].old_text == "a"
     assert validated_legacy.edits[0].new_text == "b"
+
+
+def test_create_readonly_tools_returns_read_grep_find_ls(tmp_path: Path) -> None:
+    from pi_coding_agent.tools import create_readonly_tools
+
+    tools = create_readonly_tools(cwd=tmp_path)
+    assert tuple(tool.name for tool in tools) == ("read", "grep", "find", "ls")
