@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from pi_tui.layout import wrap_text
 from pi_tui.width import visible_width
 
@@ -46,4 +48,25 @@ def _pad(line: str, width: int) -> str:
     return line + " " * max(0, width - visible_width(line))
 
 
-__all__ = ["ToolExecutionView"]
+def edit_diff_summary(details: object) -> str | None:
+    """Compact ``+N -M, line K`` summary from edit tool result details."""
+    if not isinstance(details, dict):
+        return None
+    payload = cast("dict[str, object]", details)
+    diff = payload.get("diff")
+    if not isinstance(diff, str):
+        return None
+    added = sum(1 for line in diff.split("\n") if line.startswith("+"))
+    removed = sum(1 for line in diff.split("\n") if line.startswith("-"))
+    replacements = payload.get("replacements")
+    blocks = (
+        replacements if isinstance(replacements, int) and not isinstance(replacements, bool) else 0
+    )
+    parts = [f"{blocks} block(s)", f"+{added} -{removed}"]
+    first_changed_line = payload.get("firstChangedLine")
+    if isinstance(first_changed_line, int) and not isinstance(first_changed_line, bool):
+        parts.append(f"line {first_changed_line}")
+    return ", ".join(parts)
+
+
+__all__ = ["ToolExecutionView", "edit_diff_summary"]
