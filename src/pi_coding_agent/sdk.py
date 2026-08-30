@@ -20,6 +20,7 @@ from .bootstrap import BootstrapConfig, ProductBootstrap, bootstrap
 from .branch_summary import BranchSummarizer, BranchSummaryService
 from .builtin_extensions.permission_gate import PermissionGate
 from .compaction.cutpoint import TokenCounter, estimate_entry_tokens
+from .compaction.model_summarizer import ModelRuntimeSummarizer
 from .compaction.service import CompactionService
 from .compaction.summarizer import CompactionSummarizer
 from .deepseek_credentials import DeepSeekCredentialResolver
@@ -100,6 +101,8 @@ class CreateAgentSessionOptions:
     timestamp_factory: Callable[[], str] = _timestamp
     compaction_summarizer: CompactionSummarizer | None = None
     compaction_keep_recent_tokens: int = 20_000
+    compaction_reserve_tokens: int = 16_384
+    auto_compaction_enabled: bool = True
     compaction_token_count: TokenCounter = estimate_entry_tokens
     branch_summarizer: BranchSummarizer | None = None
 
@@ -275,15 +278,15 @@ async def create_agent_session(
             messages=messages,
             clock=selected.agent_clock,
         )
-        compaction_service = (
-            CompactionService(
-                session_manager=target.session_manager,
-                summarizer=selected.compaction_summarizer,
-                entry_id_factory=selected.entry_id_factory,
-                timestamp_factory=selected.timestamp_factory,
-            )
-            if selected.compaction_summarizer is not None
-            else None
+        compaction_service = CompactionService(
+            session_manager=target.session_manager,
+            summarizer=(
+                selected.compaction_summarizer
+                if selected.compaction_summarizer is not None
+                else ModelRuntimeSummarizer(model_runtime=model_runtime)
+            ),
+            entry_id_factory=selected.entry_id_factory,
+            timestamp_factory=selected.timestamp_factory,
         )
         branch_summary_service = (
             BranchSummaryService(
@@ -307,6 +310,8 @@ async def create_agent_session(
             timestamp_factory=selected.timestamp_factory,
             compaction_service=compaction_service,
             compaction_keep_recent_tokens=selected.compaction_keep_recent_tokens,
+            compaction_reserve_tokens=selected.compaction_reserve_tokens,
+            auto_compaction_enabled=selected.auto_compaction_enabled,
             compaction_token_count=selected.compaction_token_count,
             branch_summary_service=branch_summary_service,
             on_close=close_services,
