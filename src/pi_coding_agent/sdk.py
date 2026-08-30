@@ -79,6 +79,16 @@ def _reserve_tokens_setting(settings: Settings) -> int:
     return 16_384
 
 
+def _keep_recent_tokens_setting(settings: Settings) -> int:
+    value = settings.get("compaction")
+    if not isinstance(value, dict):
+        return 20_000
+    keep_recent = cast("dict[str, object]", value).get("keepRecentTokens")
+    if isinstance(keep_recent, int) and not isinstance(keep_recent, bool) and keep_recent >= 0:
+        return keep_recent
+    return 20_000
+
+
 @runtime_checkable
 class _BuildsSystemPrompt(Protocol):
     def build_system_prompt(self, cwd: Path) -> str: ...
@@ -340,7 +350,7 @@ async def create_agent_session(
             entry_id_factory=selected.entry_id_factory,
             timestamp_factory=selected.timestamp_factory,
             compaction_service=compaction_service,
-            compaction_keep_recent_tokens=selected.compaction_keep_recent_tokens,
+            compaction_keep_recent_tokens=_keep_recent_tokens_setting(services.settings),
             compaction_reserve_tokens=_reserve_tokens_setting(services.settings),
             auto_compaction_enabled=selected.auto_compaction_enabled,
             compaction_token_count=selected.compaction_token_count,
