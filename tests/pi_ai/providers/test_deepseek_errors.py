@@ -5,7 +5,15 @@ from collections import deque
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
-from pi_ai import Context, DoneEvent, ErrorEvent, ImageContent, StreamOptions, TextContent, UserMessage
+from pi_ai import (
+    Context,
+    DoneEvent,
+    ErrorEvent,
+    ImageContent,
+    StreamOptions,
+    TextContent,
+    UserMessage,
+)
 from pi_ai.events import AssistantMessageEvent
 from pi_ai.providers.deepseek.models import DEFAULT_DEEPSEEK_MODEL
 from pi_ai.providers.deepseek.provider import (
@@ -250,7 +258,6 @@ def test_missing_credential_yields_actionable_error_message() -> None:
 def test_capability_error_yields_actionable_error_message() -> None:
     """A text-only model with an image must fail with the capability message
     (P11.5-T22), not the generic "DeepSeek request failed" text."""
-    from pi_ai import ImageContent
     from pi_ai.providers.deepseek.request import DeepSeekCapabilityError
 
     provider = DeepSeekProvider(
