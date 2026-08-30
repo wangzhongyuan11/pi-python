@@ -29,7 +29,7 @@ from ..agent_session_events import (
 from .commands import CommandDispatcher
 from .render_messages import AssistantMessageView
 from .render_status import RetryStatusLine, SessionStatusLine
-from .render_tools import ToolExecutionView
+from .render_tools import ToolExecutionView, edit_diff_summary
 
 
 def _pad(line: str, width: int) -> str:
@@ -172,12 +172,12 @@ class InteractiveApp:
         elif isinstance(event, ToolExecutionUpdateEvent):
             view = self._tools.get(event.tool_call_id)
             if view is not None:
-                view.update(_result_detail(event.partial_result))
+                view.update(result_detail(event.partial_result))
                 self._set_block(f"tool:{event.tool_call_id}", view.render(self._width), live=True)
         elif isinstance(event, ToolExecutionEndEvent):
             view = self._tools.get(event.tool_call_id)
             if view is not None:
-                detail = _result_detail(event.result, include_content=event.is_error)
+                detail = result_detail(event.result, include_content=event.is_error)
                 (view.fail if event.is_error else view.complete)(detail)
                 self._set_block(f"tool:{event.tool_call_id}", view.render(self._width))
         elif isinstance(event, AutoRetryStartEvent):
@@ -237,8 +237,11 @@ class InteractiveApp:
         self._append_text(f"> {text}")
 
 
-def _result_detail(result: object, *, include_content: bool = False) -> str | None:
+def result_detail(result: object, *, include_content: bool = False) -> str | None:
     details = getattr(result, "details", None)
+    summary = edit_diff_summary(details)
+    if summary is not None:
+        return summary
     if details not in (None, {}, ""):
         return str(details)
     if not include_content:

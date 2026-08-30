@@ -12,7 +12,7 @@ from pi_ai import AssistantMessage, CredentialResolver, ModelThinkingLevel, clam
 
 from ..model_runtime import ModelRuntime, create_model_runtime
 from ..presenters import JsonEventPresenter, assistant_text
-from ..sdk import CreateAgentSessionOptions, create_agent_session
+from ..sdk import CreateAgentSessionOptions, ToolSelection, create_agent_session
 from ..session.catalog import list_sessions, open_session
 from ..session.errors import SessionNotFoundError
 from ..session.manager import SessionManager
@@ -36,6 +36,8 @@ class HeadlessOptions:
     resume: bool = False
     session_dir: Path | None = None
     model_runtime: ModelRuntime | None = None
+    tool_selection: ToolSelection | None = None
+    name: str | None = None
 
 
 def resolve_session_manager(options: HeadlessOptions) -> SessionManager | None:
@@ -75,15 +77,25 @@ async def run_headless(options: HeadlessOptions, *, stdout: TextIO, stderr: Text
     elif options.model_id is not None:
         runtime.select_model(options.model_id)
     thinking = clamp_thinking_level(runtime.model, options.thinking_level)
+    selection = options.tool_selection or ToolSelection()
     created = await create_agent_session(
         CreateAgentSessionOptions(
             cwd=options.cwd,
             model_runtime=runtime,
             session_manager=resolve_session_manager(options),
             thinking_level=thinking,
+            no_tools=selection.no_tools,
+            tool_names=selection.tool_names,
+            exclude_tools=selection.exclude_tools,
         )
     )
     async with created:
+        if options.name:
+            created.session.session_manager.append_session_info(
+                options.name,
+                entry_id_factory=lambda: uuid4().hex,
+                timestamp_factory=_timestamp,
+            )
         if options.mode == "json":
             created.session.subscribe(JsonEventPresenter(stdout))
         await created.session.prompt(options.prompt)

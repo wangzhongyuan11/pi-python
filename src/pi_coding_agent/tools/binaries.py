@@ -25,6 +25,15 @@ type Which = Callable[[str], str | None]
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 
 
+def default_binary_cache_dir() -> Path:
+    """Cache directory for pinned search binaries under the agent home."""
+    configured = os.environ.get("PI_PYTHON_AGENT_DIR")
+    agent_dir = (
+        Path(configured).expanduser() if configured else Path.home() / ".pi-python" / "agent"
+    )
+    return agent_dir.resolve() / "binaries"
+
+
 class BinaryManagerError(RuntimeError):
     pass
 
@@ -273,4 +282,5 @@ __all__ = [
     "BinaryManagerError",
     "Downloader",
     "PINNED_ASSETS",
+    "default_binary_cache_dir",
 ]

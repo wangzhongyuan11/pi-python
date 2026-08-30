@@ -63,6 +63,8 @@ class AgentSession:
         "_branch_summary_service",
         "_closed",
         "_compaction_keep_recent_tokens",
+        "_compaction_reserve_tokens",
+        "_auto_compaction_enabled",
         "_compaction_service",
         "_compaction_token_count",
         "_entry_id_factory",
@@ -93,6 +95,8 @@ class AgentSession:
         overflow_recovery: OverflowRecovery | None = None,
         compaction_service: CompactionService | None = None,
         compaction_keep_recent_tokens: int = 20_000,
+        compaction_reserve_tokens: int = 16_384,
+        auto_compaction_enabled: bool = True,
         compaction_token_count: TokenCounter = estimate_entry_tokens,
         branch_summary_service: BranchSummaryService | None = None,
     ) -> None:
@@ -108,6 +112,8 @@ class AgentSession:
         self._overflow_recovery = overflow_recovery
         self._compaction_service = compaction_service
         self._compaction_keep_recent_tokens = compaction_keep_recent_tokens
+        self._compaction_reserve_tokens = compaction_reserve_tokens
+        self._auto_compaction_enabled = auto_compaction_enabled
         self._compaction_token_count = compaction_token_count
         self._branch_summary_service = branch_summary_service
         self._listeners: list[AgentSessionEventListener] = []
@@ -175,6 +181,8 @@ class AgentSession:
                     await self._emit(
                         AutoRetryEndEvent(success=True, attempt=attempt), asyncio.Event()
                     )
+                if isinstance(last, AssistantMessage):
+                    await self._check_threshold_compaction(last)
                 return
             if (
                 not self._retry_policy.allows_turn_retry
@@ -220,13 +228,32 @@ class AgentSession:
         previous = next(
             (entry for entry in reversed(path) if isinstance(entry, CompactionEntry)), None
         )
-        previous_summary = previous.summary if previous is not None else None
-        entries = path[path.index(previous) + 1 :] if previous is not None else path
+        if previous is not None:
+            # The next compaction starts at the previous first-kept entry: those
+            # messages are still live context that must be summarized (upstream
+            # prepareCompaction boundaryStart).
+            kept_start = next(
+                (
+                    index
+                    for index, entry in enumerate(path)
+                    if entry.id == previous.first_kept_entry_id
+                ),
+                path.index(previous) + 1,
+            )
+            entries = path[kept_start:]
+            previous_summary = previous.summary
+        else:
+            entries = path
+            previous_summary = None
         cutpoint = choose_compaction_cutpoint(
             entries,
             keep_recent_tokens=self._compaction_keep_recent_tokens,
             token_count=self._compaction_token_count,
         )
+        if cutpoint.first_kept_index == 0:
+            # Upstream prepareCompaction returns undefined in this case: there is
+            # nothing to summarize, so compacting would only drop live context.
+            raise ValueError("nothing to compact: all recent entries are kept")
         await self._emit(CompactionStartEvent(reason=reason), asyncio.Event())
         entry = await self._compaction_service.compact(
             entries,
@@ -356,6 +383,33 @@ class AgentSession:
         except ValueError:
             return False
         return True
+
+    async def _check_threshold_compaction(self, message: AssistantMessage) -> None:
+        """Compact once when the finished turn's context exceeds the token threshold."""
+        if not self._auto_compaction_enabled or self._compaction_service is None:
+            return
+        if message.stop_reason != "stop":
+            return
+        model = self.agent.state.model
+        tokens = self._context_tokens(message)
+        if tokens is None or tokens <= model.context_window - self._compaction_reserve_tokens:
+            return
+        try:
+            await self.compact(reason="threshold")
+        except ValueError:
+            return
+
+    def _context_tokens(self, message: AssistantMessage) -> int | None:
+        usage = message.usage
+        total = usage.total_tokens or (
+            usage.input + usage.output + usage.cache_read + usage.cache_write
+        )
+        if total > 0:
+            return total
+        path = self.session_manager.active_path()
+        if not path:
+            return None
+        return sum(self._compaction_token_count(entry) for entry in path)
 
     def _restore_active_context(self) -> None:
         leaf_id = self.session_manager.leaf_id

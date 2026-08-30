@@ -76,13 +76,13 @@ def test_async_factory_passes_shell_path_to_default_coding_tools(
 ) -> None:
     import pi_coding_agent.sdk as sdk
 
-    captured: list[tuple[Path, str | None]] = []
+    captured: list[tuple[object, object]] = []
 
-    def create_tools(*, cwd: Path, custom_shell_path: str | None = None):
-        captured.append((cwd, custom_shell_path))
+    def create_tools(**kwargs: object):
+        captured.append((kwargs.get("cwd"), kwargs.get("custom_shell_path")))
         return ()
 
-    monkeypatch.setattr(sdk, "create_coding_tools", create_tools)
+    monkeypatch.setattr(sdk, "create_all_tools", create_tools)
 
     async def scenario() -> None:
         provider = FakeProvider()

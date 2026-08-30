@@ -72,6 +72,33 @@ def _assistant_message(message: AssistantMessage) -> dict[str, Any] | None:
     return converted
 
 
+def _user_content(message: UserMessage) -> str | list[dict[str, Any]]:
+    if isinstance(message.content, str):
+        return message.content
+    text_chunks: list[str] = []
+    content: list[dict[str, Any]] = []
+    for block in message.content:
+        if isinstance(block, TextContent):
+            text_chunks.append(block.text)
+        else:
+            if text_chunks:
+                content.append({"type": "text", "text": "\n".join(text_chunks)})
+                text_chunks.clear()
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{block.mime_type};base64,{block.data}"},
+                }
+            )
+    if text_chunks:
+        content.append({"type": "text", "text": "\n".join(text_chunks)})
+    if not content:
+        return ""
+    if len(content) == 1 and content[0]["type"] == "text":
+        return str(content[0]["text"])
+    return content
+
+
 def _convert_messages(context: Context) -> list[dict[str, Any]]:
     converted: list[dict[str, Any]] = []
     if context.system_prompt:
@@ -79,13 +106,7 @@ def _convert_messages(context: Context) -> list[dict[str, Any]]:
 
     for message in context.messages:
         if isinstance(message, UserMessage):
-            if isinstance(message.content, str):
-                content = message.content
-            else:
-                content = "\n".join(
-                    block.text for block in message.content if isinstance(block, TextContent)
-                )
-            converted.append({"role": "user", "content": content})
+            converted.append({"role": "user", "content": _user_content(message)})
         elif isinstance(message, AssistantMessage):
             assistant = _assistant_message(message)
             if assistant is not None:

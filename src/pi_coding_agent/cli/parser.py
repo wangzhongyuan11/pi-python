@@ -38,6 +38,13 @@ def create_parser(*, version: str) -> argparse.ArgumentParser:
     )
     importer.add_argument("source")
     importer.add_argument("--session-dir")
+    session = commands.add_parser("session", help="session maintenance commands")
+    session_commands = session.add_subparsers(dest="session_command", required=True)
+    repair = session_commands.add_parser(
+        "repair",
+        help="truncate a torn trailing record so a crashed session can open again",
+    )
+    repair.add_argument("path")
     return parser
 
 
@@ -60,6 +67,15 @@ def create_run_parser(*, version: str) -> argparse.ArgumentParser:
     sessions.add_argument("--resume", "-r", action="store_true")
     sessions.add_argument("--continue", "-c", action="store_true", dest="continue_session")
     parser.add_argument("--session-dir")
+    parser.add_argument("--name", "-n", help="set a display name for the session")
+    parser.add_argument("--no-tools", "-nt", action="store_true", help="disable all tools")
+    parser.add_argument(
+        "--no-builtin-tools", "-nbt", action="store_true", help="disable the built-in tools"
+    )
+    parser.add_argument(
+        "--tools", "-t", help="comma-separated built-in tool allowlist ('all' selects every tool)"
+    )
+    parser.add_argument("--exclude-tools", "-xt", help="comma-separated built-in tool denylist")
     parser.add_argument("messages", nargs="*")
     return parser
 

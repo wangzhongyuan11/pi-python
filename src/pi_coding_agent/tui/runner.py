@@ -41,7 +41,12 @@ from ..attachments import (
 from ..cli.run import HeadlessOptions, resolve_session_manager
 from ..extensions.registry import CapabilityRegistry
 from ..model_runtime import ModelRuntime, create_model_runtime, match_model_argument
-from ..sdk import CreateAgentSessionOptions, create_agent_session, default_session_dir
+from ..sdk import (
+    CreateAgentSessionOptions,
+    ToolSelection,
+    create_agent_session,
+    default_session_dir,
+)
 from ..session.catalog import SessionSummary, list_sessions
 from ..session.errors import SessionNotFoundError
 from .commands import CommandDispatcher, CommandOutcome, CommandSpec
@@ -250,6 +255,12 @@ class _PathRef:
     path: Path
 
 
+def _utc_timestamp() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def _message_timestamp() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
 
@@ -298,6 +309,8 @@ class InteractiveOptions:
     session_dir: Path | None = None
     model_runtime: ModelRuntime | None = None
     tui_mode: Literal["regular", "fullscreen"] = "regular"
+    tool_selection: ToolSelection | None = None
+    name: str | None = None
 
 
 class _StreamTerminal:
@@ -485,6 +498,7 @@ async def run_interactive(
         stderr.write(f"{error}\nstarting a new session for this directory\n")
         stderr.flush()
         manager = None
+    selection = options.tool_selection or ToolSelection()
     created = await create_agent_session(
         CreateAgentSessionOptions(
             cwd=options.cwd,
@@ -492,9 +506,18 @@ async def run_interactive(
             model_runtime=runtime,
             session_manager=manager,
             thinking_level=thinking,
+            no_tools=selection.no_tools,
+            tool_names=selection.tool_names,
+            exclude_tools=selection.exclude_tools,
         )
     )
     async with created:
+        if options.name:
+            created.session.session_manager.append_session_info(
+                options.name,
+                entry_id_factory=lambda: uuid4().hex,
+                timestamp_factory=_utc_timestamp,
+            )
         dispatcher = CommandDispatcher()
         reader_fn = read_line or _prompt_toolkit_reader()
         app_holder: list[InteractiveApp] = []
@@ -610,6 +633,7 @@ async def run_interactive(
                         "/thinking [level]  show or set thinking level\n"
                         "/attach <path>  attach a file or image to the next prompt\n"
                         "/copy  copy the last reply to the terminal clipboard (OSC-52)\n"
+                        "/compact  summarize the conversation so far into a checkpoint\n"
                         "/sessions  list saved sessions and switch by number\n"
                         "/fork  fork the current session and switch to the copy\n"
                         "/exit  leave the session\n"
@@ -623,6 +647,24 @@ async def run_interactive(
         dispatcher.register(CommandSpec(name="model", source="builtin", handler=select_model))
         dispatcher.register(CommandSpec(name="thinking", source="builtin", handler=select_thinking))
         dispatcher.register(CommandSpec(name="copy", source="builtin", handler=copy_last_reply))
+
+        async def compact_session(args: str) -> CommandOutcome:
+            if args.strip():
+                return CommandOutcome(kind="message", text="usage: /compact")
+            if created.session.session_manager.leaf_id is None:
+                return CommandOutcome(kind="message", text="nothing to compact yet")
+            try:
+                entry = await created.session.compact(reason="manual")
+            except RuntimeError as error:
+                return CommandOutcome(kind="error", text=str(error))
+            except ValueError as error:
+                return CommandOutcome(kind="error", text=f"cannot compact: {error}")
+            return CommandOutcome(
+                kind="message",
+                text=f"compacted ({entry.tokens_before} tokens summarized into a checkpoint)",
+            )
+
+        dispatcher.register(CommandSpec(name="compact", source="builtin", handler=compact_session))
 
         pending_attachments: list[dict[str, JsonValue]] = []
 

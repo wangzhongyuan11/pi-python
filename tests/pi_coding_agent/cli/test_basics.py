@@ -52,6 +52,7 @@ def test_list_models_uses_reviewed_deepseek_catalog(tmp_path: Path) -> None:
     assert stdout.splitlines() == [
         "deepseek/deepseek-v4-flash\tDeepSeek V4 Flash",
         "deepseek/deepseek-v4-pro\tDeepSeek V4 Pro (default)",
+        "deepseek/deepseek-v4-flash-vision-exp\tDeepSeek V4 Flash Vision (exp)",
     ]
     assert stderr == ""
 

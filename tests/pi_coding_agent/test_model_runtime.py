@@ -29,6 +29,7 @@ def test_builtin_runtime_defaults_to_deepseek_pro_and_lists_both_models() -> Non
     assert [model.id for model in runtime.models] == [
         "deepseek-v4-flash",
         "deepseek-v4-pro",
+        "deepseek-v4-flash-vision-exp",
     ]
 
 

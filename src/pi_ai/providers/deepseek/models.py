@@ -49,6 +49,20 @@ DEEPSEEK_MODELS: tuple[Model, ...] = (
         thinking_level_map=_THINKING_LEVELS,
         compat=_COMPAT,
     ),
+    Model(
+        id="deepseek-v4-flash-vision-exp",
+        name="DeepSeek V4 Flash Vision (exp)",
+        api="openai-completions",
+        provider="deepseek",
+        base_url="https://api.deepseek.com",
+        reasoning=True,
+        input=("text", "image"),
+        cost=ModelCost(input=0.44, output=1.32, cache_read=0.014, cache_write=0.0),
+        context_window=1_000_000,
+        max_tokens=384_000,
+        thinking_level_map=_THINKING_LEVELS,
+        compat=_COMPAT,
+    ),
 )
 
 _MODELS_BY_ID = {model.id: model for model in DEEPSEEK_MODELS}

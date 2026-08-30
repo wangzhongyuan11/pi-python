@@ -510,3 +510,47 @@ pi-python 当前缺口(除计划内 Post-v1 外,对"达到 codex/pi-agent 体验
 4. **自动压缩**(threshold watcher + /compact 命令)——向 Codex/CC 的上下文管理看齐;
 5. **撕裂行修复命令 + `--name`**(补 session 两个短板);
 6. 之后按计划走 P12 RPC → P13 发布门。
+
+---
+
+## 21. Phase 11.5 产品级补全验收（2026-08-30）
+
+> 目标：以真实运行证据关闭 §20 差距分析中的 Phase 11.5 能力组。环境：隔离临时 Git 项目
+> `D:\tmp-p11t5\live`、独立 `PI_PYTHON_AGENT_DIR`（隔离 sessions/binaries/settings）、
+> DeepSeek API 注入测试进程（不落盘、不输出）。分支 `phase/11.5-product-completion`。
+
+| 验收项 | 结果 | 证据要点 |
+| --- | --- | --- |
+| A. DeepSeek headless 文本 | **通过** | `pi-python --print "只回答四个字：验收开始"` → 真实回复「验收开始」，exit 0，8.2s，默认模型 deepseek-v4-pro |
+| B. `--tools all` 真实 grep/find/ls | **通过** | `--mode json --tools all`：JSONL 事件依次出现 `find`→`grep`→`ls` tool_execution_start/end；fd 不在 PATH → BinaryManager 真实下载 pinned fd 10.4.2 zip 并命中固定 SHA256（`b2816e50…c98c8`，与 GitHub 现网资产逐字节一致），rg 使用系统 14.1.1 |
+| C. 智能引号 fuzzy edit + JSON diff | **通过** | quotes.txt 含 `it’s`（U+2019）；模型发送 ASCII `it's` → 分级模糊匹配命中，文件变为 `say it was loud`；JSON `tool_execution_end` details 含 `diff`（`-1 say it’s loud` / `+1 say it was loud`）、`patch`（`@@`）、`firstChangedLine:1` |
+| D. 阈值自动压缩 + 恢复投影 | **通过** | settings `compaction.reserveTokens=999900, keepRecentTokens=50`；三轮真实会话：turn2 后写入两条 `compaction` entry（`details.reason="threshold"`，tokensBefore 302/970，摘要为真实模型输出且递增合并）；turn3 无上下文重发地答出暗号「蓝鲸号」→ 压缩投影正确 |
+| E. 撕裂行 repair + --continue | **通过** | 向会话文件追加 28 字节撕裂记录 → `pi-python session repair <file>` → `repaired: truncated torn trailing record (28 bytes removed)`，有效前缀逐字节保留 → `--continue` 正常回答 |
+| F. vision 真实读取 + text-only 拒绝 | **通过** | `deepseek-v4-flash-vision-exp`（T07 已先行真实验证 API 存在性）：SDK 产品路径发送真实 PNG → 文本答案「红色」（仅收集 TextDelta）；text-only `deepseek-v4-flash` 同一请求 → 请求构建期拒绝，错误事件消息 `DeepSeek model deepseek-v4-flash does not support image input` |
+| G. pywinpty/ConPTY regular TUI 多轮 + 工具 | 见下 | 真实 ConPTY 伪终端驱动 `--tui-mode regular`，bash 工具调用 + 第二轮记忆 + `/exit` |
+
+本轮发现并已修复的真实缺陷（每项独立提交、先红后绿）：
+
+1. **压缩边界语义（P11.5-T05 补正，commit c62ee76）**：live D 首轮暴露——当全部近期条目都
+   在 keep_recent 预算内时，`compact()` 仍以空摘要写 compaction entry，恢复投影会丢弃从未被
+   摘要的活动上下文（暗号丢失复现）。修复对齐上游 `prepareCompaction`：下一次压缩从
+   previous.firstKept 起算，无可摘要内容时跳过（不写空摘要）。
+2. **compaction 设置未接线（P11.5-T20/T21，commit 2b7b768/8cb4cbb）**：`reserveTokens` 与
+   `keepRecentTokens` 均为 Supported 设置但产品阈值固定为代码默认；已接线（显式 option 优先
+   于设置）。
+3. **capability 错误被笼统包装（P11.5-T22，commit 31403de）**：text-only 模型 + 图片的请求期
+   拒绝在错误事件中只剩 `DeepSeek request failed`；已与 MissingCredentialError 同样透传原文案。
+
+### G. ConPTY regular TUI 多轮验收
+
+**通过。** winpty PtyProcess 真实 ConPTY（100×30）spawn
+`pi-python --tui-mode regular --session-dir ./sessions-tui`（默认压缩设置的独立 agent 目录）：
+
+1. turn1：`用 bash 工具执行 echo P11LIVE-OK 然后告诉我输出内容` → 真实 bash 工具调用，
+   流式回复与工具输出中出现 `P11LIVE-OK`；
+2. turn2：`刚才命令的输出标记是什么？只回答标记。` → 模型凭会话上下文再次答出 `P11LIVE-OK`；
+3. 空闲提示符下提交 `/exit` → 转写以 `› /exit` 结束、无模型回复（命令被分派而非进入对话），
+   tasklist 确认 pi-python 进程已退出（winpty isalive 在进程退出瞬间存在误报，以进程表为准）。
+
+备注：前几次尝试中 `/exit` 在回合仍活跃时被输入轮询捕获为 steering（模型回复"再见"）——
+这正是 F7 已验收的"回合中插话"语义，属测试脚本时序问题而非产品缺陷；空闲提交后退出正常。

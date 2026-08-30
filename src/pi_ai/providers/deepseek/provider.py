@@ -31,7 +31,7 @@ from ...provider import CredentialResolver, StreamOptions
 from ...stream import AssistantStream
 from ...usage import ModelThinkingLevel, Usage, UsageCost
 from .models import DEEPSEEK_MODELS
-from .request import build_deepseek_request
+from .request import DeepSeekCapabilityError, build_deepseek_request
 from .retry import is_retryable_provider_error, provider_status_code, retry_delay_seconds
 from .stream import adapt_deepseek_stream
 
@@ -105,7 +105,7 @@ def _empty_message(model: Model, timestamp_ms: int) -> AssistantMessage:
 
 
 def _safe_error_message(error: BaseException) -> str:
-    if isinstance(error, MissingCredentialError):
+    if isinstance(error, MissingCredentialError | DeepSeekCapabilityError):
         return str(error)
     status = provider_status_code(error)
     if status is not None:
