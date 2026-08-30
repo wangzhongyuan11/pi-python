@@ -121,7 +121,7 @@ class CreateAgentSessionOptions:
     entry_id_factory: Callable[[], str] = lambda: uuid4().hex
     timestamp_factory: Callable[[], str] = _timestamp
     compaction_summarizer: CompactionSummarizer | None = None
-    compaction_keep_recent_tokens: int = 20_000
+    compaction_keep_recent_tokens: int | None = None
     compaction_reserve_tokens: int = 16_384
     auto_compaction_enabled: bool = True
     compaction_token_count: TokenCounter = estimate_entry_tokens
@@ -350,7 +350,11 @@ async def create_agent_session(
             entry_id_factory=selected.entry_id_factory,
             timestamp_factory=selected.timestamp_factory,
             compaction_service=compaction_service,
-            compaction_keep_recent_tokens=_keep_recent_tokens_setting(services.settings),
+            compaction_keep_recent_tokens=(
+                selected.compaction_keep_recent_tokens
+                if selected.compaction_keep_recent_tokens is not None
+                else _keep_recent_tokens_setting(services.settings)
+            ),
             compaction_reserve_tokens=_reserve_tokens_setting(services.settings),
             auto_compaction_enabled=selected.auto_compaction_enabled,
             compaction_token_count=selected.compaction_token_count,
