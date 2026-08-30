@@ -41,7 +41,12 @@ from ..attachments import (
 from ..cli.run import HeadlessOptions, resolve_session_manager
 from ..extensions.registry import CapabilityRegistry
 from ..model_runtime import ModelRuntime, create_model_runtime, match_model_argument
-from ..sdk import CreateAgentSessionOptions, create_agent_session, default_session_dir
+from ..sdk import (
+    CreateAgentSessionOptions,
+    ToolSelection,
+    create_agent_session,
+    default_session_dir,
+)
 from ..session.catalog import SessionSummary, list_sessions
 from ..session.errors import SessionNotFoundError
 from .commands import CommandDispatcher, CommandOutcome, CommandSpec
@@ -298,6 +303,7 @@ class InteractiveOptions:
     session_dir: Path | None = None
     model_runtime: ModelRuntime | None = None
     tui_mode: Literal["regular", "fullscreen"] = "regular"
+    tool_selection: ToolSelection | None = None
 
 
 class _StreamTerminal:
@@ -485,6 +491,7 @@ async def run_interactive(
         stderr.write(f"{error}\nstarting a new session for this directory\n")
         stderr.flush()
         manager = None
+    selection = options.tool_selection or ToolSelection()
     created = await create_agent_session(
         CreateAgentSessionOptions(
             cwd=options.cwd,
@@ -492,6 +499,9 @@ async def run_interactive(
             model_runtime=runtime,
             session_manager=manager,
             thinking_level=thinking,
+            no_tools=selection.no_tools,
+            tool_names=selection.tool_names,
+            exclude_tools=selection.exclude_tools,
         )
     )
     async with created:

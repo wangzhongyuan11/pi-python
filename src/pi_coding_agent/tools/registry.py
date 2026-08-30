@@ -31,6 +31,17 @@ DEFAULT_CODING_TOOL_NAMES = ("read", "bash", "edit", "write")
 DEFAULT_READONLY_TOOL_NAMES = ("read", "grep", "find", "ls")
 
 
+def expand_tool_selection(names: str | tuple[str, ...]) -> tuple[str, ...]:
+    """Expand a CLI tool selection; the ``all`` keyword selects every built-in tool."""
+    if isinstance(names, str):
+        parts: tuple[str, ...] = tuple(part.strip() for part in names.split(","))
+    else:
+        parts = names
+    if any(part == "all" for part in parts):
+        return ALL_TOOL_NAMES
+    return tuple(part for part in parts if part)
+
+
 class _InputModel(BaseModel):
     model_config = ConfigDict(
         alias_generator=to_camel,
@@ -424,4 +435,5 @@ __all__ = [
     "create_all_tools",
     "create_coding_tools",
     "create_readonly_tools",
+    "expand_tool_selection",
 ]

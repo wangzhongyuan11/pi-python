@@ -78,11 +78,17 @@ def test_async_factory_passes_shell_path_to_default_coding_tools(
 
     captured: list[tuple[Path, str | None]] = []
 
-    def create_tools(*, cwd: Path, custom_shell_path: str | None = None):
+    def create_tools(
+        *,
+        cwd: Path,
+        custom_shell_path: str | None = None,
+        tool_names: tuple[str, ...] = (),
+    ):
+        del tool_names
         captured.append((cwd, custom_shell_path))
         return ()
 
-    monkeypatch.setattr(sdk, "create_coding_tools", create_tools)
+    monkeypatch.setattr(sdk, "create_all_tools", create_tools)
 
     async def scenario() -> None:
         provider = FakeProvider()

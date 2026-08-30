@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import redirect_stderr, redirect_stdout
 from importlib.metadata import version
 from pathlib import Path
-from typing import TextIO, cast
+from typing import Literal, TextIO, cast
 
 from pi_ai.credentials import CredentialResolutionError
 from pi_ai.providers.deepseek import DEEPSEEK_MODELS, DEFAULT_DEEPSEEK_MODEL
@@ -19,6 +19,7 @@ from pi_ai.providers.deepseek import DEEPSEEK_MODELS, DEFAULT_DEEPSEEK_MODEL
 from ..deepseek_credentials import DeepSeekCredentialResolver
 from ..model_runtime import ModelRuntime, UnknownModelError
 from ..providers import UnknownProviderError
+from ..sdk import ToolSelection
 from ..session.errors import SessionError
 from ..tui.runner import InteractiveOptions, run_interactive
 from .import_session import run_import_session
@@ -26,6 +27,23 @@ from .parser import create_parser, create_run_parser
 from .run import HeadlessOptions, run_headless
 
 _GLOBAL_VALUE_OPTIONS = {"--api-key", "--env-file"}
+
+
+def tool_selection_from_arguments(arguments: argparse.Namespace) -> ToolSelection:
+    from ..tools.registry import expand_tool_selection
+
+    no_tools: Literal["all", "builtin"] | None = None
+    if getattr(arguments, "no_tools", False):
+        no_tools = "all"
+    elif getattr(arguments, "no_builtin_tools", False):
+        no_tools = "builtin"
+    raw_tools = getattr(arguments, "tools", None)
+    raw_exclude = getattr(arguments, "exclude_tools", None)
+    return ToolSelection(
+        no_tools=no_tools,
+        tool_names=expand_tool_selection(raw_tools) if raw_tools else None,
+        exclude_tools=expand_tool_selection(raw_exclude) if raw_exclude else None,
+    )
 
 
 def _uses_command_parser(arguments: Sequence[str]) -> bool:
@@ -149,6 +167,7 @@ def main(
             stderr=errors,
         )
     messages = cast("list[str]", arguments.messages)
+    tool_selection = tool_selection_from_arguments(arguments)
     session_dir = None
     if arguments.session_dir:
         candidate = Path(arguments.session_dir)
@@ -173,6 +192,7 @@ def main(
                         session_dir=session_dir,
                         model_runtime=model_runtime,
                         tui_mode=arguments.tui_mode,
+                        tool_selection=tool_selection,
                     ),
                     stdout=output,
                     stderr=errors,
@@ -197,6 +217,7 @@ def main(
                     resume=arguments.resume or arguments.continue_session,
                     session_dir=session_dir,
                     model_runtime=model_runtime,
+                    tool_selection=tool_selection,
                 ),
                 stdout=output,
                 stderr=errors,

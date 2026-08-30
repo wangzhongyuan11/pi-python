@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Protocol, Self, cast, runtime_checkable
+from typing import Any, Literal, Protocol, Self, cast, runtime_checkable
 from uuid import uuid4
 
 from pi_agent import Agent, AgentTool
@@ -31,7 +31,7 @@ from .session.importer import import_pi_session as _import_pi_session
 from .session.manager import SessionManager
 from .session.models import ImportResult
 from .session.tree import SessionTree
-from .tools.registry import create_coding_tools
+from .tools.registry import ALL_TOOL_NAMES, DEFAULT_CODING_TOOL_NAMES, create_all_tools
 
 
 def _timestamp() -> str:
@@ -60,6 +60,15 @@ class _BuildsSystemPrompt(Protocol):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ToolSelection:
+    """CLI/TUI-facing built-in and extension tool selection."""
+
+    no_tools: Literal["all", "builtin"] | None = None
+    tool_names: tuple[str, ...] | None = None
+    exclude_tools: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CreateAgentSessionOptions:
     cwd: Path = field(default_factory=Path.cwd)
     service_overrides: ServiceOverrides = field(default_factory=ServiceOverrides)
@@ -69,6 +78,9 @@ class CreateAgentSessionOptions:
     system_prompt: str | None = None
     thinking_level: ModelThinkingLevel = "high"
     tools: tuple[AgentTool[Any, Any], ...] | None = None
+    no_tools: Literal["all", "builtin"] | None = None
+    tool_names: tuple[str, ...] | None = None
+    exclude_tools: tuple[str, ...] | None = None
     permission_gate: PermissionGate | None = None
     agent_clock: Callable[[], int] | None = None
     entry_id_factory: Callable[[], str] = lambda: uuid4().hex
@@ -199,12 +211,28 @@ async def create_agent_session(
         shell_path = services.settings.get("shellPath")
         if shell_path is not None and not isinstance(shell_path, str):
             raise ValueError("shellPath must be a string")
+        excluded_tools = set(selected.exclude_tools or ())
+        if selected.tool_names is not None:
+            builtin_names = tuple(name for name in selected.tool_names if name in ALL_TOOL_NAMES)
+        elif selected.no_tools is not None:
+            builtin_names = ()
+        else:
+            builtin_names = DEFAULT_CODING_TOOL_NAMES
+        builtin_names = tuple(name for name in builtin_names if name not in excluded_tools)
         configured_tools = (
-            create_coding_tools(cwd=target.cwd, custom_shell_path=shell_path)
-            if selected.tools is None
-            else selected.tools
+            selected.tools
+            if selected.tools is not None
+            else create_all_tools(
+                cwd=target.cwd,
+                custom_shell_path=shell_path,
+                tool_names=builtin_names,
+            )
         )
-        registered_tools = (*configured_tools, *services.extensions.tools)
+        extension_tools = services.extensions.tools
+        if selected.no_tools == "all":
+            extension_tools = ()
+        extension_tools = tuple(tool for tool in extension_tools if tool.name not in excluded_tools)
+        registered_tools = (*configured_tools, *extension_tools)
         tool_names = [tool.name for tool in registered_tools]
         if len(set(tool_names)) != len(tool_names):
             raise ValueError("duplicate tool names across configured and extension tools")

@@ -60,6 +60,14 @@ def create_run_parser(*, version: str) -> argparse.ArgumentParser:
     sessions.add_argument("--resume", "-r", action="store_true")
     sessions.add_argument("--continue", "-c", action="store_true", dest="continue_session")
     parser.add_argument("--session-dir")
+    parser.add_argument("--no-tools", "-nt", action="store_true", help="disable all tools")
+    parser.add_argument(
+        "--no-builtin-tools", "-nbt", action="store_true", help="disable the built-in tools"
+    )
+    parser.add_argument(
+        "--tools", "-t", help="comma-separated built-in tool allowlist ('all' selects every tool)"
+    )
+    parser.add_argument("--exclude-tools", "-xt", help="comma-separated built-in tool denylist")
     parser.add_argument("messages", nargs="*")
     return parser
 
