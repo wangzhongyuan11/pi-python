@@ -4,6 +4,36 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Phase 11.5 product completion
+
+- Wire the pinned/system ripgrep and fd binaries into the production tool
+  factory: `grep`, `find`, and `ls` are now reachable in real sessions, and
+  `--tools all` selects all seven built-ins (default remains
+  read/bash/edit/write; the read-only set read/grep/find/ls is exposed via
+  `create_readonly_tools`).
+- Add CLI tool selection flags `--tools/-t`, `--exclude-tools/-xt`,
+  `--no-tools/-nt`, and `--no-builtin-tools/-nbt`, plus the `defaultTools`
+  setting, all applied in the shared session composition.
+- Add threshold auto-compaction driven by the `compaction.reserveTokens` and
+  `compaction.keepRecentTokens` settings with a model-backed summarizer, a
+  `/compact` slash command, and upstream-aligned skip semantics when nothing
+  can be summarized.
+- Add the `deepseek-v4-flash-vision-exp` catalog entry (ADR 0007), inline
+  image reads in the `read` tool (png/jpeg/gif/webp; bmp omitted with a hint),
+  and the vision request path including the actionable pre-request rejection
+  for text-only models.
+- Edit results now carry `diff`, `patch`, and `firstChangedLine` details
+  (ported from upstream edit-diff) with tiered fuzzy matching (NFKC, smart
+  quotes/dashes, trailing whitespace) and a TUI diff summary row.
+- The bash tool now exposes `PI_*` session environment variables, applies the
+  `shellCommandPrefix` setting, prepends the agent binary cache dir to `PATH`,
+  and throttles streaming updates.
+- Add `--name/-n` (session display names via `session_info`), the
+  `pi-python session repair` command for trailing torn records (ADR 0008),
+  and open-or-create semantics for missing valid session ids.
+- Surface verbatim capability errors for text-only models given image input
+  instead of a generic failure message.
+
 ### Phase 11 gap closure
 
 - Surface compaction activity as product events: `compaction_start` and `compaction_end`
