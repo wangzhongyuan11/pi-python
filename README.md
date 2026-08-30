@@ -161,8 +161,8 @@ pi-python import-pi-session D:\path\to\session.jsonl
 | 命令 | 作用 |
 | --- | --- |
 | `/help` | 显示命令帮助 |
-| `/model` | 查看或切换模型 |
-| `/thinking` | 查看或切换 thinking 等级 |
+| `/model` | 查看或切换模型；支持 `provider/model`、裸 id 和唯一部分匹配（如 `/model flash`），失败时列出可用模型 |
+| `/thinking` | 查看或切换 thinking 等级；非法级别会列出全部合法值 |
 | `/attach PATH` | 把文本或受支持图片加入下一条用户消息 |
 | `/copy` | 通过 OSC-52 复制最近 Assistant 文本 |
 | `/sessions` | 列出当前项目 Session，并按编号切换 |
@@ -174,10 +174,16 @@ pi-python import-pi-session D:\path\to\session.jsonl
 
 回合运行期间的键盘行为（真实控制台可用；管道输入自动降级为不可中断）：
 
-- `Esc` 或 `Ctrl+C`：取消当前回合。回合以 aborted 结束，已生成的部分回答保留在屏幕上，
+- 输入 `/` 会弹出命令自动补全菜单（Tab 确认），`/model`、`/thinking` 后接参数时同样给出
+  候选（模型支持子串匹配，如输入 `fl` 选中 `deepseek/deepseek-v4-flash`）。
+- `Esc` 或 `Ctrl+C`：取消当前回合。Windows/POSIX 控制台在回合期间会临时把 Ctrl+C 作为普通
+  按键捕获并优雅中止（连接正常关闭），回合以 aborted 结束，已生成的部分回答保留在屏幕上，
   并显示 `cancelled` 状态行；输入提示随后恢复。
 - 直接输入一行并回车：作为 steering 消息插入当前 Agent 队列。若模型仍在工具链中，下一轮
   立即消费；否则在下一次发送提示时作为最前消息生效。屏幕显示 `steered: <文本>` 确认行。
+- 空闲时按 `Ctrl+C`：第一次清空输入并提示，两秒内再按一次才退出。
+- `--resume`/`--continue` 在该目录还没有已持久化会话时，打印提示并自动开始新会话，不再抛
+  未捕获异常。
 
 恢复与切换：以 `--resume`/`--continue`/`--session` 启动，或在 `/sessions` 切换、`/fork` 分叉后，
 已恢复的历史消息会按原样式重放到当前 transcript（用户消息带 `> ` 前缀，含 thinking 摘要与

@@ -31,14 +31,14 @@ from pi_coding_agent.agent_session import AgentSession
 from pi_coding_agent.compaction.service import CompactionService
 from pi_coding_agent.compaction.summarizer import CompactionSummarizer
 from pi_coding_agent.deepseek_credentials import DeepSeekCredentialResolver
-from pi_coding_agent.model_runtime import ModelRuntime
+from pi_coding_agent.model_runtime import ModelRuntime, create_model_runtime, match_model_argument
 from pi_coding_agent.services import create_product_services
 from pi_coding_agent.session.manager import SessionManager
 from pi_coding_agent.session.models import SessionEntry
 from pi_coding_agent.tui.commands import CommandDispatcher, CommandOutcome, CommandSpec
 from pi_coding_agent.tui.extension_ui import DialogBridge
 from pi_coding_agent.tui.main import InteractiveApp
-from pi_coding_agent.tui.runner import InteractiveOptions, run_interactive
+from pi_coding_agent.tui.runner import InteractiveOptions, SlashCompleter, run_interactive
 
 
 def _session(tmp_path: Path, provider: FakeProvider) -> AgentSession:
@@ -1177,3 +1177,125 @@ def test_escape_during_a_turn_aborts_and_reports_cancellation(tmp_path: Path) ->
     assert code == 0, output.getvalue() + errors.getvalue()
     assert errors.getvalue() == "", repr(errors.getvalue())
     assert "cancelled" in output.getvalue()
+
+
+def test_resume_without_prior_session_starts_fresh_with_note(tmp_path: Path) -> None:
+    code, output, errors = _drive(
+        tmp_path,
+        ("hello", "/exit"),
+        FakeProvider([fake_assistant_message("fresh answer")]),
+        resume=True,
+    )
+
+    assert code == 0, output + errors
+    assert "starting a new session" in errors
+    assert "fresh answer" in output
+
+
+def test_model_argument_supports_unique_partial_match_and_lists_alternatives(
+    tmp_path: Path,
+) -> None:
+    class _KeyResolver:
+        async def resolve(self, provider: str) -> str | None:
+            return "test-key" if provider == "deepseek" else None
+
+    runtime = create_model_runtime(credential_resolver=_KeyResolver())
+
+    assert (
+        match_model_argument(runtime, "deepseek/deepseek-v4-flash") == "deepseek/deepseek-v4-flash"
+    )
+    assert match_model_argument(runtime, "deepseek-v4-flash") == "deepseek/deepseek-v4-flash"
+    assert match_model_argument(runtime, "flash") == "deepseek/deepseek-v4-flash"
+    assert match_model_argument(runtime, "pro") == "deepseek/deepseek-v4-pro"
+
+    with pytest.raises(ValueError) as ambiguous:
+        match_model_argument(runtime, "deepseek-v4")
+    assert "deepseek/deepseek-v4-flash" in str(ambiguous.value)
+    assert "deepseek/deepseek-v4-pro" in str(ambiguous.value)
+
+    with pytest.raises(ValueError) as unknown:
+        match_model_argument(runtime, "nope")
+    assert "available:" in str(unknown.value)
+    assert "deepseek/deepseek-v4-flash" in str(unknown.value)
+
+
+def test_slash_completer_suggests_commands_and_arguments() -> None:
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.document import Document
+
+    completer = SlashCompleter()
+
+    def completions(text: str) -> list[str]:
+        return [
+            c.text for c in completer.get_completions(Document(text, len(text)), CompleteEvent())
+        ]
+
+    assert completions("/hel") == ["/help"]
+    assert any(c.split(" ")[0] == "/model" for c in completions("/"))
+    assert any(c.split(" ")[0] == "/thinking" for c in completions("/"))
+    assert completions("/model fl") == ["deepseek/deepseek-v4-flash"]
+    assert "deepseek/deepseek-v4-pro" in completions("/model ")
+    assert set(completions("/thinking ")) >= {"off", "high", "max"}
+    assert completions("hello") == []
+
+
+def test_ctrl_c_at_idle_prompt_requires_double_press(tmp_path: Path) -> None:
+    provider = FakeProvider([fake_assistant_message("answer")])
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+
+    class Reader:
+        def __init__(self) -> None:
+            self.steps = 0
+
+        async def __call__(self, _prompt: str) -> str | None:
+            self.steps += 1
+            if self.steps == 1:
+                raise KeyboardInterrupt
+            return "/exit"
+
+    reader = Reader()
+    output = StringIO()
+    errors = StringIO()
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=errors,
+            read_line=reader,
+        )
+    )
+
+    assert code == 0
+    assert "press Ctrl+C again" in output.getvalue()
+
+
+def test_double_ctrl_c_at_idle_prompt_exits(tmp_path: Path) -> None:
+    provider = FakeProvider([])
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+
+    async def read_line(_prompt: str) -> str | None:
+        raise KeyboardInterrupt
+
+    output = StringIO()
+    errors = StringIO()
+    code = asyncio.run(
+        run_interactive(
+            InteractiveOptions(
+                cwd=tmp_path,
+                credential_resolver=DeepSeekCredentialResolver(environ={}, cwd=tmp_path),
+                model_runtime=runtime,
+                no_session=True,
+            ),
+            stdout=output,
+            stderr=errors,
+            read_line=read_line,
+        )
+    )
+
+    assert code == 130
+    assert "press Ctrl+C again" in output.getvalue()

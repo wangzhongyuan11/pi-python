@@ -7,12 +7,16 @@ import base64
 import os
 import shutil
 import sys
-from collections.abc import Awaitable, Callable
+import time
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol, TextIO, cast, runtime_checkable
 from uuid import uuid4
+
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion
+from prompt_toolkit.document import Document
 
 from pi_agent import AgentMessage
 from pi_ai import (
@@ -36,9 +40,10 @@ from ..attachments import (
 )
 from ..cli.run import HeadlessOptions, resolve_session_manager
 from ..extensions.registry import CapabilityRegistry
-from ..model_runtime import ModelRuntime, create_model_runtime
+from ..model_runtime import ModelRuntime, create_model_runtime, match_model_argument
 from ..sdk import CreateAgentSessionOptions, create_agent_session, default_session_dir
 from ..session.catalog import SessionSummary, list_sessions
+from ..session.errors import SessionNotFoundError
 from .commands import CommandDispatcher, CommandOutcome, CommandSpec
 from .config_ui import ModelSettingsController
 from .main import InteractiveApp
@@ -51,6 +56,61 @@ type ReadChar = Callable[[], str | None]
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 _KEY_POLL_INTERVAL_SECONDS = 0.02
+
+_WIN32_ENABLE_PROCESSED_INPUT = 0x0001
+
+
+def _disable_console_interrupt() -> Callable[[], None] | None:
+    """Temporarily deliver Ctrl+C as a plain key instead of a SIGINT signal.
+
+    Returns a restore callable, or ``None`` when stdin is not a real console
+    (piped input, tests). The key poller can then observe ``\\x03`` and abort
+    the running turn gracefully instead of the process dying mid-stream.
+    """
+
+    try:
+        if not sys.stdin.isatty():
+            return None
+    except (AttributeError, OSError, ValueError):
+        return None
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return None
+        original = mode.value
+        if original & _WIN32_ENABLE_PROCESSED_INPUT:
+            kernel32.SetConsoleMode(handle, original & ~_WIN32_ENABLE_PROCESSED_INPUT)
+
+        def restore_windows() -> None:
+            kernel32.SetConsoleMode(handle, original)
+
+        return restore_windows
+    import termios
+
+    try:
+        attributes = termios.tcgetattr(sys.stdin.fileno())
+    except (OSError, termios.error, ValueError):
+        return None
+    if attributes[3] & termios.ISIG:
+        attributes[3] &= ~termios.ISIG
+        try:
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, attributes)
+        except (OSError, termios.error):
+            return None
+
+        def restore_posix() -> None:
+            attributes[3] |= termios.ISIG
+            try:
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, attributes)
+            except (OSError, termios.error):
+                pass
+
+        return restore_posix
+    return None
 
 
 def _console_char_reader() -> ReadChar | None:
@@ -106,6 +166,20 @@ async def _drive_turn(
     if read_char is None:
         await app.handle(line)
         return
+    restore_interrupt = _disable_console_interrupt()
+    try:
+        await _drive_turn_with_polling(app, session, line, read_char)
+    finally:
+        if restore_interrupt is not None:
+            restore_interrupt()
+
+
+async def _drive_turn_with_polling(
+    app: InteractiveApp,
+    session: AgentSession,
+    line: str,
+    read_char: ReadChar,
+) -> None:
     stop_polling = asyncio.Event()
     abort_requested = asyncio.Event()
     typed: list[str] = []
@@ -278,10 +352,79 @@ class _StreamTerminal:
             self.write("\x1b[?1049l")
 
 
+_TUI_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("/help", "show commands"),
+    ("/model [provider/model]", "show or switch model"),
+    ("/thinking [level]", "show or set thinking level"),
+    ("/attach <path>", "attach a file or image to the next prompt"),
+    ("/copy", "copy the last reply to the terminal clipboard (OSC-52)"),
+    ("/sessions", "list saved sessions and switch by number"),
+    ("/fork", "fork the current session and switch to the copy"),
+    ("/exit", "leave the session"),
+    ("/quit", "leave the session"),
+)
+
+_THINKING_LEVEL_CHOICES = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+class SlashCompleter(Completer):
+    """prompt_toolkit completer: suggests slash commands and their arguments."""
+
+    def __init__(
+        self,
+        *,
+        commands: tuple[tuple[str, str], ...] = _TUI_COMMANDS,
+        models: tuple[str, ...] = (
+            "deepseek/deepseek-v4-flash",
+            "deepseek/deepseek-v4-pro",
+        ),
+        thinking_levels: tuple[str, ...] = _THINKING_LEVEL_CHOICES,
+    ) -> None:
+        self._commands = commands
+        self._models = models
+        self._thinking_levels = thinking_levels
+
+    def get_completions(  # noqa: E501 (signature must match prompt_toolkit's Completer)
+        self, document: Document, complete_event: CompleteEvent
+    ) -> Iterable[Completion]:
+        text = document.text_before_cursor
+        if not text.startswith("/"):
+            return ()
+        head, _, argument = text.partition(" ")
+        if argument or " " in text:
+            return list(self._argument_completions(head, argument))
+        return [
+            Completion(name, start_position=-len(head), display=name, display_meta=meta)
+            for name, meta in self._commands
+            if name.split(" ", 1)[0].startswith(head)
+        ]
+
+    def _argument_completions(self, head: str, argument: str) -> Iterable[Completion]:
+        lowered = argument.casefold()
+        if head == "/model":
+            for model in self._models:
+                if not lowered or lowered in model.casefold():
+                    yield Completion(
+                        model, start_position=-len(argument), display=model, display_meta="model"
+                    )
+        elif head == "/thinking":
+            for level in self._thinking_levels:
+                if level.startswith(argument):
+                    yield Completion(
+                        level,
+                        start_position=-len(argument),
+                        display=level,
+                        display_meta="thinking level",
+                    )
+
+
 def _prompt_toolkit_reader() -> ReadLine:
     from prompt_toolkit import PromptSession
 
-    session: PromptSession[str] = PromptSession()
+    session: PromptSession[str] = PromptSession(
+        completer=SlashCompleter(),
+        complete_while_typing=True,
+    )
 
     async def read_line(prompt: str) -> str | None:
         try:
@@ -316,22 +459,32 @@ async def run_interactive(
     session_dir = options.session_dir
     if options.resume and session_dir is None and options.session is None:
         session_dir = default_session_dir(options.cwd)
-    manager = resolve_session_manager(
-        HeadlessOptions(
-            cwd=options.cwd,
-            prompt="",
-            mode="text",
-            credential_resolver=options.credential_resolver,
-            provider_id=options.provider_id,
-            model_id=options.model_id,
-            thinking_level=thinking,
-            no_session=options.no_session,
-            session=options.session,
-            resume=options.resume,
-            session_dir=session_dir,
-            model_runtime=runtime,
+    try:
+        manager = resolve_session_manager(
+            HeadlessOptions(
+                cwd=options.cwd,
+                prompt="",
+                mode="text",
+                credential_resolver=options.credential_resolver,
+                provider_id=options.provider_id,
+                model_id=options.model_id,
+                thinking_level=thinking,
+                no_session=options.no_session,
+                session=options.session,
+                resume=options.resume,
+                session_dir=session_dir,
+                model_runtime=runtime,
+            )
         )
-    )
+    except SessionNotFoundError as error:
+        if not options.resume:
+            raise
+        # Nothing persisted for this directory yet (e.g. the previous run was
+        # cancelled before its first assistant message). Start fresh instead
+        # of crashing with a traceback.
+        stderr.write(f"{error}\nstarting a new session for this directory\n")
+        stderr.flush()
+        manager = None
     created = await create_agent_session(
         CreateAgentSessionOptions(
             cwd=options.cwd,
@@ -398,11 +551,16 @@ async def run_interactive(
         def select_model(args: str) -> CommandOutcome:
             model_id = args.strip()
             if not model_id:
+                current = created.session.state.model
                 return CommandOutcome(
-                    kind="message", text=f"current model: {created.session.state.model.id}"
+                    kind="message", text=f"current model: {current.provider}/{current.id}"
                 )
-            controller_holder[0].apply(model_id, created.session.state.thinking_level)
-            return CommandOutcome(kind="message", text=f"model: {model_id}")
+            try:
+                canonical = match_model_argument(runtime, model_id)
+            except ValueError as error:
+                return CommandOutcome(kind="error", text=str(error))
+            controller_holder[0].apply(canonical, created.session.state.thinking_level)
+            return CommandOutcome(kind="message", text=f"model: {canonical}")
 
         def select_thinking(args: str) -> CommandOutcome:
             level = args.strip()
@@ -410,6 +568,11 @@ async def run_interactive(
                 return CommandOutcome(
                     kind="message",
                     text=f"current thinking: {created.session.state.thinking_level}",
+                )
+            if level not in _THINKING_LEVEL_CHOICES:
+                valid = ", ".join(_THINKING_LEVEL_CHOICES)
+                return CommandOutcome(
+                    kind="error", text=f"unknown thinking level: {level} (valid: {valid})"
                 )
             controller_holder[0].apply(created.session.state.model.id, level)
             return CommandOutcome(kind="message", text=f"thinking: {level}")
@@ -443,13 +606,16 @@ async def run_interactive(
                     kind="message",
                     text=(
                         "/help  show commands\n"
-                        "/model [provider/model]  show or switch model\n"
+                        "/model [provider/model]  show or switch model (partial match ok)\n"
                         "/thinking [level]  show or set thinking level\n"
                         "/attach <path>  attach a file or image to the next prompt\n"
                         "/copy  copy the last reply to the terminal clipboard (OSC-52)\n"
                         "/sessions  list saved sessions and switch by number\n"
                         "/fork  fork the current session and switch to the copy\n"
-                        "/exit  leave the session"
+                        "/exit  leave the session\n"
+                        "\n"
+                        "keys: Esc/Ctrl+C cancels the running turn; a line typed during\n"
+                        "a turn steers it; Ctrl+C while idle exits on the second press"
                     ),
                 ),
             )
@@ -573,12 +739,21 @@ async def run_interactive(
         terminal.start()
         char_reader = read_char if read_char is not None else _console_char_reader()
         try:
+            last_idle_interrupt: float | None = None
             while True:
                 try:
                     line = await reader_fn("› ")
                 except KeyboardInterrupt:
+                    # First press clears the input and hints; a second press
+                    # within two seconds exits. Esc cancels a running turn.
                     stdout.write("\n")
-                    return 130
+                    now = time.monotonic()
+                    if last_idle_interrupt is not None and now - last_idle_interrupt <= 2.0:
+                        return 130
+                    last_idle_interrupt = now
+                    stdout.write("press Ctrl+C again to exit (Esc cancels a running turn)\n")
+                    continue
+                last_idle_interrupt = None
                 if line is None or line.strip() in {"/exit", "/quit"}:
                     return 0
                 if not line.strip():

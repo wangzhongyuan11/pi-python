@@ -132,9 +132,42 @@ def create_model_runtime(
     return ModelRuntime(provider=provider, model=selected)
 
 
+def match_model_argument(runtime: ModelRuntime, argument: str) -> str:
+    """Resolve a user-typed ``--model``/``/model`` argument to ``provider/model``.
+
+    Accepts the canonical ``provider/model`` form, a bare model id, or a unique
+    partial match (e.g. ``flash``). Ambiguous or unknown arguments raise a
+    ``ValueError`` that lists the available models.
+    """
+
+    available = [f"{model.provider}/{model.id}" for model in runtime.models]
+    argument = argument.strip()
+    if not argument:
+        raise ValueError(f"empty model argument; available: {', '.join(available)}")
+    if argument in available:
+        return argument
+    if "/" not in argument:
+        bare = [f"{model.provider}/{model.id}" for model in runtime.models if model.id == argument]
+        if len(bare) == 1:
+            return bare[0]
+    lowered = argument.casefold()
+    partial = [
+        candidate
+        for candidate in available
+        if lowered in candidate.casefold()
+        or candidate.split("/")[-1].casefold().startswith(lowered)
+    ]
+    if len(partial) == 1:
+        return partial[0]
+    if len(partial) > 1:
+        raise ValueError(f"ambiguous model {argument!r}; candidates: {', '.join(partial)}")
+    raise ValueError(f"unknown model {argument!r}; available: {', '.join(available)}")
+
+
 __all__ = [
     "ModelCapabilityError",
     "ModelRuntime",
     "UnknownModelError",
     "create_model_runtime",
+    "match_model_argument",
 ]
