@@ -14,10 +14,12 @@ from pydantic.alias_generators import to_camel
 from pi_agent import AgentTool, AgentToolResult, AgentToolUpdateCallback
 from pi_ai import JsonValue, TextContent
 
-from .bash import BashToolError, execute_bash
+from .bash import BashToolError, NativeProcessOperations, execute_bash
 from .bash_resolver import BashConfig
+from .binaries import BinaryManager, default_binary_cache_dir
 from .edit import Edit, edit_file
 from .listing import list_directory
+from .local_operations import LocalFilesystemOperations, LocalSearchOperations
 from .mutation_queue import FileMutationQueue
 from .operations import FilesystemOperations, ProcessOperations, SearchOperations
 from .read import read_file
@@ -136,9 +138,14 @@ def create_all_tools(
     if len(set(tool_names)) != len(tool_names):
         raise ValueError("duplicate built-in tool names")
     if "ls" in tool_names and filesystem_operations is None:
-        raise ValueError("filesystem operations are required for the ls tool")
+        filesystem_operations = LocalFilesystemOperations()
     if {"grep", "find"}.intersection(tool_names) and search_operations is None:
-        raise ValueError("search operations are required for the grep and find tools")
+        search_operations = LocalSearchOperations(
+            process_operations=(
+                NativeProcessOperations() if process_operations is None else process_operations
+            ),
+            binary_manager=BinaryManager(cache_dir=default_binary_cache_dir()),
+        )
     queue = FileMutationQueue() if mutation_queue is None else mutation_queue
 
     async def execute_read(
