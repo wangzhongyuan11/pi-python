@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 from pi_ai import (
     Context,
@@ -17,7 +16,6 @@ from pi_ai import (
 )
 from pi_ai.providers.deepseek.models import get_deepseek_model
 from pi_ai.providers.deepseek.request import DeepSeekCapabilityError, build_deepseek_request
-
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.sdk import CreateAgentSessionOptions, create_agent_session
 from pi_coding_agent.session.manager import SessionManager

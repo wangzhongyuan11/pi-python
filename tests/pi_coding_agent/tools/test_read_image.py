@@ -78,5 +78,4 @@ class TestRegistryImageContent:
         assert base64.b64decode(image.data) == raw
         details = result.details
         assert isinstance(details, dict)
-        mime: object = details.get("imageMime")
-        assert mime == "image/png"
+        assert details["imageMime"] == "image/png"
