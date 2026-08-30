@@ -168,6 +168,13 @@ def main(
         )
     messages = cast("list[str]", arguments.messages)
     tool_selection = tool_selection_from_arguments(arguments)
+    session_name: str | None = None
+    raw_name = getattr(arguments, "name", None)
+    if raw_name is not None:
+        session_name = " ".join(raw_name.split())
+        if not session_name:
+            errors.write("Error: --name requires a non-empty value\n")
+            return 1
     session_dir = None
     if arguments.session_dir:
         candidate = Path(arguments.session_dir)
@@ -193,6 +200,7 @@ def main(
                         model_runtime=model_runtime,
                         tui_mode=arguments.tui_mode,
                         tool_selection=tool_selection,
+                        name=session_name,
                     ),
                     stdout=output,
                     stderr=errors,
@@ -218,6 +226,7 @@ def main(
                     session_dir=session_dir,
                     model_runtime=model_runtime,
                     tool_selection=tool_selection,
+                    name=session_name,
                 ),
                 stdout=output,
                 stderr=errors,

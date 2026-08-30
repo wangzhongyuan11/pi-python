@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
 from pathlib import Path
 
 from pi_agent import AgentMessage
 
 from .errors import SessionGraphError
 from .ids import validate_session_id
-from .models import MessageEntry, SessionEntry, SessionHeader
+from .models import MessageEntry, SessionEntry, SessionHeader, SessionInfoEntry
 from .tree import SessionTree
 from .validation import SessionEntryValidator
 from .writer import append_session_record, create_session_file
@@ -88,6 +90,25 @@ class SessionManager:
         tree = SessionTree.build(self.entries)
         tree.active_path(entry_id)
         self.leaf_id = entry_id
+
+    def append_session_info(
+        self,
+        name: str,
+        *,
+        entry_id_factory: Callable[[], str],
+        timestamp_factory: Callable[[], str],
+    ) -> str:
+        """Append a display-name entry; newlines collapse to spaces."""
+        sanitized = re.sub(r"[\r\n]+", " ", name).strip()
+        entry = SessionInfoEntry(
+            type="session_info",
+            id=entry_id_factory(),
+            parent_id=self.leaf_id,
+            timestamp=timestamp_factory(),
+            name=sanitized,
+        )
+        self.append(entry)
+        return entry.id
 
     def active_path(self) -> tuple[SessionEntry, ...]:
         if self.leaf_id is None:

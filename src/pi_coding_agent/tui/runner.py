@@ -255,6 +255,12 @@ class _PathRef:
     path: Path
 
 
+def _utc_timestamp() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def _message_timestamp() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
 
@@ -304,6 +310,7 @@ class InteractiveOptions:
     model_runtime: ModelRuntime | None = None
     tui_mode: Literal["regular", "fullscreen"] = "regular"
     tool_selection: ToolSelection | None = None
+    name: str | None = None
 
 
 class _StreamTerminal:
@@ -505,6 +512,12 @@ async def run_interactive(
         )
     )
     async with created:
+        if options.name:
+            created.session.session_manager.append_session_info(
+                options.name,
+                entry_id_factory=lambda: uuid4().hex,
+                timestamp_factory=_utc_timestamp,
+            )
         dispatcher = CommandDispatcher()
         reader_fn = read_line or _prompt_toolkit_reader()
         app_holder: list[InteractiveApp] = []

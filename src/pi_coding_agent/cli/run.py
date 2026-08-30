@@ -37,6 +37,7 @@ class HeadlessOptions:
     session_dir: Path | None = None
     model_runtime: ModelRuntime | None = None
     tool_selection: ToolSelection | None = None
+    name: str | None = None
 
 
 def resolve_session_manager(options: HeadlessOptions) -> SessionManager | None:
@@ -89,6 +90,12 @@ async def run_headless(options: HeadlessOptions, *, stdout: TextIO, stderr: Text
         )
     )
     async with created:
+        if options.name:
+            created.session.session_manager.append_session_info(
+                options.name,
+                entry_id_factory=lambda: uuid4().hex,
+                timestamp_factory=_timestamp,
+            )
         if options.mode == "json":
             created.session.subscribe(JsonEventPresenter(stdout))
         await created.session.prompt(options.prompt)

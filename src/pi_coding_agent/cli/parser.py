@@ -60,6 +60,7 @@ def create_run_parser(*, version: str) -> argparse.ArgumentParser:
     sessions.add_argument("--resume", "-r", action="store_true")
     sessions.add_argument("--continue", "-c", action="store_true", dest="continue_session")
     parser.add_argument("--session-dir")
+    parser.add_argument("--name", "-n", help="set a display name for the session")
     parser.add_argument("--no-tools", "-nt", action="store_true", help="disable all tools")
     parser.add_argument(
         "--no-builtin-tools", "-nbt", action="store_true", help="disable the built-in tools"
