@@ -250,7 +250,13 @@ def create_all_tools(
         )
         return _result(
             f"Successfully replaced {value.replacements} block(s) in {params.path}.",
-            {"path": str(value.path), "replacements": value.replacements},
+            {
+                "path": str(value.path),
+                "replacements": value.replacements,
+                "diff": value.diff,
+                "patch": value.patch,
+                "firstChangedLine": value.first_changed_line,
+            },
         )
 
     async def execute_write(

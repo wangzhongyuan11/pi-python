@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .edit_diff import generate_diff_string, generate_unified_patch
 from .mutation_queue import FileMutationQueue, default_mutation_queue
 from .paths import resolve_tool_path
 from .write import WriteToolError, write_resolved_bytes
@@ -26,6 +27,9 @@ class Edit:
 class EditResult:
     path: Path
     replacements: int
+    diff: str = ""
+    patch: str = ""
+    first_changed_line: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +135,15 @@ async def edit_file(
             await write_resolved_bytes(resolved, (bom + restored).encode("utf-8"), abort_event)
         except WriteToolError as error:
             raise EditToolError(str(error)) from None
-        return EditResult(path=resolved, replacements=len(edits))
+        diff = generate_diff_string(normalized, edited)
+        patch = generate_unified_patch(resolved.as_posix(), normalized, edited)
+        return EditResult(
+            path=resolved,
+            replacements=len(edits),
+            diff=diff.diff,
+            patch=patch,
+            first_changed_line=diff.first_changed_line,
+        )
 
     queue = default_mutation_queue() if mutation_queue is None else mutation_queue
     return await queue.run(resolved, cwd=cwd, operation=edit_resolved)
