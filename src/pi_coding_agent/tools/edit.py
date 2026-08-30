@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,26 @@ class _Match:
     replacement: str
 
 
+_SMART_SINGLE = "\u2018\u2019\u201a\u201b"
+_SMART_DOUBLE = "\u201c\u201d\u201e\u201f"
+_DASHES = "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"
+_SPACES = "\u00a0" + "".join(chr(cp) for cp in range(0x2002, 0x200B)) + "\u202f\u205f\u3000"
+_FUZZY_TRANSLATION = str.maketrans(
+    {c: "'" for c in _SMART_SINGLE}
+    | {c: '"' for c in _SMART_DOUBLE}
+    | {c: "-" for c in _DASHES}
+    | {c: " " for c in _SPACES}
+)
+
+
+def _normalize_fuzzy(text: str) -> str:
+    """Upstream normalization for fuzzy matching: NFKC, per-line trailing
+    whitespace strip, smart quotes/dashes/special spaces to ASCII."""
+    normalized = unicodedata.normalize("NFKC", text)
+    normalized = "\n".join(line.rstrip() for line in normalized.split("\n"))
+    return normalized.translate(_FUZZY_TRANSLATION)
+
+
 def _line_ending(content: str) -> str:
     first_lf = content.find("\n")
     if first_lf > 0 and content[first_lf - 1] == "\r":
@@ -51,19 +72,9 @@ def _normalize_newlines(content: str) -> str:
     return content.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def _prepare_edits(content: str, edits: Sequence[Edit], path: Path) -> str:
-    if not edits:
-        raise EditToolError("Edit operation requires at least one replacement")
-
-    normalized_edits = [
-        Edit(
-            old_text=_normalize_newlines(edit.old_text),
-            new_text=_normalize_newlines(edit.new_text),
-        )
-        for edit in edits
-    ]
+def _locate(content: str, edits: Sequence[Edit], path: Path) -> list[_Match]:
     matches: list[_Match] = []
-    for index, edit in enumerate(normalized_edits):
+    for index, edit in enumerate(edits):
         if not edit.old_text:
             raise EditToolError(f"edits[{index}].old_text must not be empty in {path}")
         occurrences = content.count(edit.old_text)
@@ -83,6 +94,32 @@ def _prepare_edits(content: str, edits: Sequence[Edit], path: Path) -> str:
                 replacement=edit.new_text,
             )
         )
+    return matches
+
+
+def _prepare_edits(content: str, edits: Sequence[Edit], path: Path) -> str:
+    if not edits:
+        raise EditToolError("Edit operation requires at least one replacement")
+
+    normalized_edits = [
+        Edit(
+            old_text=_normalize_newlines(edit.old_text),
+            new_text=_normalize_newlines(edit.new_text),
+        )
+        for edit in edits
+    ]
+    try:
+        matches = _locate(content, normalized_edits, path)
+        base = content
+    except EditToolError:
+        # Fuzzy fallback: work entirely in normalized space (NFKC, smart
+        # quotes/dashes to ASCII, trailing whitespace stripped per line).
+        base = _normalize_fuzzy(content)
+        fuzzy_edits = [
+            Edit(old_text=_normalize_fuzzy(edit.old_text), new_text=edit.new_text)
+            for edit in normalized_edits
+        ]
+        matches = _locate(base, fuzzy_edits, path)
 
     matches.sort(key=lambda match: match.start)
     for previous, current in zip(matches, matches[1:], strict=False):
@@ -91,10 +128,10 @@ def _prepare_edits(content: str, edits: Sequence[Edit], path: Path) -> str:
                 f"edits[{previous.edit_index}] and edits[{current.edit_index}] overlap in {path}"
             )
 
-    result = content
+    result = base
     for match in reversed(matches):
         result = result[: match.start] + match.replacement + result[match.end :]
-    if result == content:
+    if result == base:
         raise EditToolError(f"No changes made to {path}")
     return result
 
