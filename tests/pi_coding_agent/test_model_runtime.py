@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from pi_ai import Context, FakeProvider, fake_assistant_message
+from pi_ai import Context, FakeProvider, fake_assistant_message, fake_model
 from pi_ai.providers.deepseek import DeepSeekProvider
 from pi_coding_agent.model_runtime import (
     ModelCapabilityError,
@@ -72,3 +72,61 @@ def test_stream_validates_model_ownership_and_delegates_canonical_model() -> Non
     assert call_count == 2
     assert stop_reason == "stop"
     assert used_canonical_model
+
+
+def test_extension_provider_registration_selects_and_streams_canonical_model() -> None:
+    class OtherProvider(FakeProvider):
+        @property
+        def id(self) -> str:
+            return "other"
+
+        @property
+        def models(self):
+            return (replace(fake_model(), provider="other", id="other-model"),)
+
+    primary = FakeProvider()
+    other = OtherProvider([fake_assistant_message("other answer")])
+    runtime = ModelRuntime(provider=primary, model=primary.models[0])
+
+    runtime.register_provider(other)
+    selected = runtime.select_model("other-model", provider_id="other")
+
+    assert runtime.provider is other
+    assert selected.provider == "other"
+
+    async def stream() -> None:
+        await runtime.stream(selected, Context(messages=())).result()
+
+    asyncio.run(stream())
+    assert other.call_count == 1
+    with pytest.raises(ValueError, match="active"):
+        runtime.unregister_provider("other")
+
+
+def test_create_model_runtime_accepts_provider_model_prefix() -> None:
+    runtime = create_model_runtime(
+        credential_resolver=StaticResolver(),
+        model_id="deepseek/deepseek-v4-flash",
+    )
+
+    assert runtime.provider.id == "deepseek"
+    assert runtime.model.id == "deepseek-v4-flash"
+
+
+def test_create_model_runtime_prefix_may_override_default_provider() -> None:
+    runtime = create_model_runtime(
+        credential_resolver=StaticResolver(),
+        provider_id="deepseek",
+        model_id="deepseek/deepseek-v4-pro",
+    )
+
+    assert runtime.provider.id == "deepseek"
+    assert runtime.model.id == "deepseek-v4-pro"
+
+
+def test_create_model_runtime_rejects_unknown_prefixed_provider() -> None:
+    with pytest.raises(UnknownProviderError):
+        create_model_runtime(
+            credential_resolver=StaticResolver(),
+            model_id="openai/gpt-x",
+        )

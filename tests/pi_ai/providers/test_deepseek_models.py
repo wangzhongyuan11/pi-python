@@ -53,3 +53,21 @@ def test_unknown_model_is_rejected() -> None:
         assert error.args == ("deepseek-v4-flash-vision-exp",)
     else:
         raise AssertionError("unknown DeepSeek model was accepted")
+
+
+def test_deepseek_thinking_clamp_matches_upstream_thinkinglevelmap() -> None:
+    """Upstream pi maps minimal/low/medium to null in thinkingLevelMap, which removes
+    them from supported levels and clamps them to "high"; xhigh clamps to "max"."""
+    from pi_ai.models import clamp_thinking_level, get_supported_thinking_levels
+    from pi_ai.providers.deepseek import DEFAULT_DEEPSEEK_MODEL
+
+    assert get_supported_thinking_levels(DEFAULT_DEEPSEEK_MODEL) == ("off", "high", "max")
+    assert [
+        clamp_thinking_level(DEFAULT_DEEPSEEK_MODEL, level)
+        for level in ("minimal", "low", "medium")
+    ] == [
+        "high",
+        "high",
+        "high",
+    ]
+    assert clamp_thinking_level(DEFAULT_DEEPSEEK_MODEL, "xhigh") == "max"

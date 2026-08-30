@@ -40,6 +40,32 @@ def _python_path(environment: Path) -> Path:
     return environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
+def verify_wheel_sources(root: str | Path, wheel: str | Path) -> None:
+    repository = Path(root).resolve()
+    source_root = repository / "src"
+    source_files = {
+        source.relative_to(source_root).as_posix(): source
+        for package in source_root.glob("pi_*")
+        if package.is_dir()
+        for source in package.rglob("*.py")
+    }
+    with zipfile.ZipFile(wheel) as archive:
+        wheel_files = {
+            name
+            for name in archive.namelist()
+            if name.endswith(".py") and name.split("/", 1)[0].startswith("pi_")
+        }
+        missing = sorted(source_files.keys() - wheel_files)
+        extra = sorted(wheel_files - source_files.keys())
+        if missing or extra:
+            raise CheckpointError(
+                f"wheel source inventory does not match checkout: missing={missing}, extra={extra}"
+            )
+        for name, source in source_files.items():
+            if archive.read(name) != source.read_bytes():
+                raise CheckpointError(f"wheel source {name} does not match checkout")
+
+
 def verify_checkpoint(root: str | Path, version: str) -> None:
     repository = Path(root).resolve()
     actual = project_version(repository / "pyproject.toml")
@@ -55,6 +81,7 @@ def verify_checkpoint(root: str | Path, version: str) -> None:
         metadata = archive.read(metadata_names[0]).decode("utf-8")
         if f"Version: {version}\n" not in metadata:
             raise CheckpointError("wheel metadata version does not match")
+    verify_wheel_sources(repository, wheel)
 
     with tempfile.TemporaryDirectory(prefix="pi-python-checkpoint-") as temporary_name:
         temporary = Path(temporary_name).resolve()

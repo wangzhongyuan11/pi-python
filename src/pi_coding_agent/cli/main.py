@@ -20,6 +20,7 @@ from ..deepseek_credentials import DeepSeekCredentialResolver
 from ..model_runtime import ModelRuntime, UnknownModelError
 from ..providers import UnknownProviderError
 from ..session.errors import SessionError
+from ..tui.runner import InteractiveOptions, run_interactive
 from .import_session import run_import_session
 from .parser import create_parser, create_run_parser
 from .run import HeadlessOptions, run_headless
@@ -148,13 +149,37 @@ def main(
             stderr=errors,
         )
     messages = cast("list[str]", arguments.messages)
-    if not messages:
-        parser.print_help(output)
-        return 0
     session_dir = None
     if arguments.session_dir:
         candidate = Path(arguments.session_dir)
         session_dir = (candidate if candidate.is_absolute() else runtime_cwd / candidate).resolve()
+    if not messages:
+        if arguments.print_mode or arguments.mode == "json":
+            parser.print_help(output)
+            return 0
+        resolver = _resolver(arguments, cwd=runtime_cwd, environ=runtime_environ)
+        try:
+            return asyncio.run(
+                run_interactive(
+                    InteractiveOptions(
+                        cwd=runtime_cwd,
+                        credential_resolver=resolver,
+                        provider_id=arguments.provider,
+                        model_id=arguments.model,
+                        thinking_level=arguments.thinking,
+                        no_session=arguments.no_session,
+                        session=arguments.session,
+                        resume=arguments.resume or arguments.continue_session,
+                        session_dir=session_dir,
+                        model_runtime=model_runtime,
+                        tui_mode=arguments.tui_mode,
+                    ),
+                    stdout=output,
+                    stderr=errors,
+                )
+            )
+        except KeyboardInterrupt:
+            return 130
     resolver = _resolver(arguments, cwd=runtime_cwd, environ=runtime_environ)
     try:
         return asyncio.run(

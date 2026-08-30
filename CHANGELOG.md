@@ -4,6 +4,65 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Phase 11 gap closure
+
+- Surface compaction activity as product events: `compaction_start` and `compaction_end`
+  now flow through the `AgentSessionEvent` stream, the JSON presenter, and the interactive
+  status line.
+- Skip extension slash commands that conflict with product commands at startup, reporting
+  the skipped names on stderr instead of failing to launch.
+- Add `/copy` to copy the last reply to the terminal clipboard over OSC-52, with a raw
+  command outcome channel that bypasses the sanitized transcript.
+- Add `/attach <path>` for file and image attachments on the next prompt; image support
+  is derived from the selected model's input capabilities instead of a manual flag.
+- Bind session navigation into the interactive loop: `/sessions` lists saved sessions and
+  switches by number, `/fork` forks the current session into a new child file; both
+  rebuild the renderer around the runtime's replacement session while preserving the
+  transcript.
+- Drive the Windows smoke through a real OS subprocess running the product loop, and make
+  the platform-specific checks skip cleanly outside Windows.
+
+## 0.5.0 - 2026-08-26
+
+### Phase 11
+
+- Add the interactive coding agent TUI on `pi_tui`: assistant message stream rendering,
+  in-place tool lifecycle rows, retry and compaction status lines, session selector with
+  real runtime switch/fork actions, persisted provider-qualified model and thinking
+  selection, slash command dispatch backed by extension registrations, isolated extension
+  dialogs, regular/fullscreen terminal modes, paste and attachment contracts, the frozen
+  product action registry, and width-safe rendering verified by a Windows smoke test.
+
+## 0.4.0 - 2026-08-25
+
+### Phase 9–10
+
+- Add the generic `pi_tui` package: prompt_toolkit terminal adapters, in-memory test
+  terminal, foundational Text/Stack/Box/Status components, a reusable editor with
+  unicode-safe cursor ops, undo, and input history, modal dialogs and overlay stacks,
+  clean streaming/resize rendering, display-width handling for CJK and ANSI, a frozen
+  action/keybinding registry with documentation, and bracketed paste plus word
+  completion with an empty `pi_*` import allowlist.
+- Add the extension and package foundation: trust-gated two-phase extension loading,
+  isolated hook execution, conflict-detecting capability registry, UI/auth bridge
+  ports with renderers and session actions, local/Git/PyPI package resolution with
+  ref-drift detection, managed environments with atomic lockfiles and rollback,
+  npm data ingestion without script execution, the default resource loader, and a
+  reload-safe lifecycle.
+
+## 0.3.0 - 2026-08-24
+
+### Phase 7–8
+
+- Add layered settings loading, canonical Python configuration paths with legacy
+  environment compatibility, project trust gating, deterministic resource precedence,
+  read-only `.pi` compatibility mounts, context/system prompt assembly, and lazy
+  prompt/skill/theme resources.
+- Add AgentSession product event layering, bounded whole-turn retries with observable
+  attempt metadata, isolated context overflow recovery, safe compaction cutpoints,
+  incremental compaction summaries, divergent branch diffs, branch file operation
+  tracking, persisted branch summaries, and session state/tree view restoration.
+
 ## 0.2.0 - 2026-08-24
 
 ### Phase 4–6

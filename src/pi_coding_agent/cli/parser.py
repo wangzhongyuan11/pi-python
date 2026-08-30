@@ -46,6 +46,7 @@ def create_run_parser(*, version: str) -> argparse.ArgumentParser:
     _add_common(parser, version=version)
     parser.add_argument("--mode", choices=("text", "json"), default="text")
     parser.add_argument("--print", "-p", action="store_true", dest="print_mode")
+    parser.add_argument("--tui-mode", choices=("regular", "fullscreen"), default="regular")
     parser.add_argument("--provider", default="deepseek")
     parser.add_argument("--model")
     parser.add_argument(

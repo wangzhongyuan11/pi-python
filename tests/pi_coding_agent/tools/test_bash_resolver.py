@@ -60,6 +60,24 @@ def test_windows_prefers_git_bash_before_path() -> None:
     assert config.executable == git_bash
 
 
+def test_windows_discovers_nonstandard_git_bash_from_git_on_path() -> None:
+    git_bash = r"D:\Git\bin\bash.exe"
+    config = resolve_bash(
+        platform="win32",
+        environment={"PATH": r"C:\Windows\System32;D:\Git\cmd"},
+        exists=_exists(git_bash, r"C:\Windows\System32\bash.exe"),
+        which=_which(
+            {
+                "git.exe": r"D:\Git\cmd\git.exe",
+                "bash.exe": r"C:\Windows\System32\bash.exe",
+            }
+        ),
+    )
+
+    assert config.executable == git_bash
+    assert config.arguments == ("-c",)
+
+
 def test_windows_legacy_wsl_bash_uses_stdin_transport() -> None:
     legacy = r"C:\Windows\System32\bash.exe"
     config = resolve_bash(

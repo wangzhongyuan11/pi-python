@@ -8,7 +8,11 @@ from typing import Any, cast
 from pi_ai import Context, DoneEvent, ErrorEvent, StreamOptions, UserMessage
 from pi_ai.events import AssistantMessageEvent
 from pi_ai.providers.deepseek.models import DEFAULT_DEEPSEEK_MODEL
-from pi_ai.providers.deepseek.provider import DeepSeekProvider, create_deepseek_client
+from pi_ai.providers.deepseek.provider import (
+    DeepSeekClientPort,
+    DeepSeekProvider,
+    create_deepseek_client,
+)
 
 
 class StaticCredentialResolver:
@@ -213,3 +217,31 @@ def test_abort_interrupts_an_idle_open_stream() -> None:
     assert [event.type for event in events] == ["start", "error"]
     assert isinstance(events[-1], ErrorEvent)
     assert events[-1].reason == "aborted"
+
+
+def _unused_client_factory(api_key: str, base_url: str, timeout: float) -> DeepSeekClientPort:
+    """Never called: the provider fails before a client is created."""
+    return cast("DeepSeekClientPort", None)
+
+
+def test_missing_credential_yields_actionable_error_message() -> None:
+    class NoneResolver:
+        async def resolve(self, provider: str) -> str | None:
+            return None
+
+    provider = DeepSeekProvider(
+        credential_resolver=NoneResolver(),
+        client_factory=_unused_client_factory,
+        timestamp_ms=lambda: 123,
+    )
+
+    async def scenario() -> str:
+        context = Context(messages=(UserMessage(content="hello", timestamp=1),))
+        events = [event async for event in provider.stream(DEFAULT_DEEPSEEK_MODEL, context)]
+        error_events = [event for event in events if isinstance(event, ErrorEvent)]
+        assert error_events, "expected an error event"
+        return error_events[-1].error.error_message or ""
+
+    message = asyncio.run(scenario())
+    assert "DEEPSEEK_API_KEY" in message
+    assert message != "DeepSeek request failed"

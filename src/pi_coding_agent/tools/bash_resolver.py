@@ -73,6 +73,12 @@ def resolve_bash(
             if exists(candidate):
                 return _config(candidate)
 
+        git = which("git.exe", selected_environment.get("PATH"))
+        if git is not None:
+            git_bash = str(PureWindowsPath(git).parent.parent / "bin" / "bash.exe")
+            if exists(git_bash):
+                return _config(git_bash)
+
         discovered = which("bash.exe", selected_environment.get("PATH"))
         if discovered is not None and exists(discovered):
             return _config(discovered)
