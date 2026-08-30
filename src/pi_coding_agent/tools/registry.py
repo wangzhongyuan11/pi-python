@@ -144,6 +144,7 @@ def create_all_tools(
     mutation_queue: FileMutationQueue | None = None,
     session_environment_provider: Callable[[], dict[str, str] | None] | None = None,
     command_prefix: str | None = None,
+    bin_dir: Path | None = None,
     tool_names: tuple[str, ...] = ALL_TOOL_NAMES,
 ) -> tuple[AgentTool[Any, Any], ...]:
     unknown = tuple(name for name in tool_names if name not in ALL_TOOL_NAMES)
@@ -215,6 +216,7 @@ def create_all_tools(
                 session_environment_provider() if session_environment_provider else None
             ),
             command_prefix=command_prefix,
+            bin_dir=bin_dir,
             timeout=params.timeout,
             abort_event=abort_event,
             on_update=update if on_update is not None else None,

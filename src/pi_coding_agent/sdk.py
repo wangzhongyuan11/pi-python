@@ -33,6 +33,7 @@ from .session.importer import import_pi_session as _import_pi_session
 from .session.manager import SessionManager
 from .session.models import ImportResult
 from .session.tree import SessionTree
+from .tools.binaries import default_binary_cache_dir
 from .tools.registry import ALL_TOOL_NAMES, DEFAULT_CODING_TOOL_NAMES, create_all_tools
 
 
@@ -264,6 +265,7 @@ async def create_agent_session(
                 tool_names=builtin_names,
                 session_environment_provider=session_environment,
                 command_prefix=shell_command_prefix,
+                bin_dir=default_binary_cache_dir(),
             )
         )
         extension_tools = services.extensions.tools

@@ -147,6 +147,18 @@ def _validate_timeout(timeout: float | None) -> None:
         raise BashToolError("Invalid timeout: must be a finite positive number of seconds")
 
 
+def _prepend_bin_dir(environment: dict[str, str] | None, bin_dir: Path) -> dict[str, str]:
+    """Prepend the agent binary cache dir to PATH without duplicating entries."""
+    merged = dict(environment) if environment is not None else {}
+    path_key = next((key for key in merged if key.upper() == "PATH"), "PATH")
+    current = merged.get(path_key, "")
+    entries = [entry for entry in current.split(os.pathsep) if entry]
+    text = str(bin_dir)
+    if not any(entry.casefold() == text.casefold() for entry in entries):
+        merged[path_key] = os.pathsep.join([text, *entries])
+    return merged
+
+
 async def execute_bash(
     command: str,
     *,
@@ -157,6 +169,8 @@ async def execute_bash(
     environment: Mapping[str, str] | None = None,
     session_environment: Mapping[str, str] | None = None,
     command_prefix: str | None = None,
+    bin_dir: Path | None = None,
+    update_throttle_seconds: float = 0.1,
     timeout: float | None = None,
     abort_event: asyncio.Event | None = None,
     on_update: UpdateSink | None = None,
@@ -182,6 +196,8 @@ async def execute_bash(
         merged_environment = dict(environment) if environment is not None else {}
         if session_environment is not None:
             merged_environment.update(session_environment)
+    if bin_dir is not None:
+        merged_environment = _prepend_bin_dir(merged_environment, bin_dir)
 
     accumulator = OutputAccumulator(
         max_lines=max_lines,
@@ -189,13 +205,29 @@ async def execute_bash(
         temp_dir=temp_dir,
     )
     accepting_output = True
+    pending_update = False
+    last_update_at = 0.0
+
+    loop = asyncio.get_running_loop()
+
+    async def emit_update() -> None:
+        nonlocal pending_update, last_update_at
+        pending_update = False
+        last_update_at = loop.time()
+        if on_update is not None:
+            await on_update(accumulator.snapshot().content)
 
     async def accept(data: bytes) -> None:
+        nonlocal pending_update, last_update_at
         if not accepting_output:
             return
         accumulator.append(data)
-        if on_update is not None:
-            await on_update(accumulator.snapshot().content)
+        if on_update is None:
+            return
+        pending_update = True
+        elapsed = loop.time() - last_update_at
+        if elapsed >= update_throttle_seconds:
+            await emit_update()
 
     exit_code: int | None = None
     aborted = False
