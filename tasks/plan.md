@@ -273,6 +273,33 @@ flowchart TD
 
 验收：完整 FakeProvider 交互；stream/tool/compaction/switch/dialog；中文/CJK/emoji；Windows 真终端 smoke；独立 checkpoint 任务更新版本与 changelog、仓库外 wheel smoke，用户确认后才 tag/release `0.5.0`。
 
+### Phase 11.5：产品级补全（Codex / Claude Code / 上游 Pi 对齐）
+
+依据 `docs/current-agent-validation.md` §18–§20 的源码与真实运行差距审计，在进入 Phase 12 前补齐已确认的产品级缺口。能力组到原子任务的映射（能力组不并入单个提交）：
+
+| 能力组 | 原子任务 |
+|---|---|
+| grep/find/ls 生产接线与 readonly 工具集 | P11.5-T01、P11.5-T02 |
+| CLI 工具 allowlist/denylist/default/disable 开关 | P11.5-T03、P11.5-T04 |
+| token 估算、threshold 自动压缩、/compact 与 JSON compaction 事件 | P11.5-T05、P11.5-T06（JSON compaction 事件已在 Phase 11 修复中落地） |
+| read 图片、vision 模型、附件端到端和相关 ADR | P11.5-T07、P11.5-T08、P11.5-T09 |
+| edit diff/patch/firstChangedLine、分级模糊匹配和 TUI diff 摘要 | P11.5-T10、P11.5-T11、P11.5-T12 |
+| bash PI_* 环境、commandPrefix、binDir PATH、流节流 | P11.5-T13、P11.5-T14 |
+| Session 命名、修复、打开即创建 | P11.5-T15、P11.5-T16、P11.5-T17 |
+| 工具描述截断说明 | P11.5-T18 |
+| 真实 API、ConPTY、Session、二进制下载验收 | P11.5-T19（阶段验收轮） |
+
+差距项分类裁决（逐项，不以"与 Codex/Claude Code 完全相同"为标准，以冻结上游 Pi 表面 + surface matrix 为准）：
+
+- **1.0 必须实现**：grep/find/ls 生产接线、readonly 工具集、工具开关 flags、`defaultTools`、threshold 自动压缩、`/compact`、vision 模型目录 + read 图片 + 附件端到端、edit diff/模糊匹配/TUI diff 摘要、bash PI_* 与 shellCommandPrefix、binDir PATH、流节流、`--name`、session repair、打开即创建、工具描述截断说明。
+- **Intentional divergence**（记录于 ADR/矩阵既有行）：核心沙箱与逐工具审批（TOOL-010 既有行，与上游一致，permission gate 默认关闭扩展已随包）；bash `spawnHook` 选项（Python 等价能力由 EXT-005 tool_execution hooks 提供，不复制该构造参数）；`app.clipboard.pasteImage` 图形剪贴板二进制读取（P11-T06 已定 divergence：附件走文件路径契约，OSC-52 只写不读）；鼠标支持（上游 alt-screen 有 mouse，冻结矩阵无 mouse action 行，pi_tui 不做鼠标）；`lastChangelogVersion`/`collapseChangelog` 键（settings 读取层已兼容接受，无上游自动更新 UI 行为）；Session 大文件 O(n·depth) 全量校验（可接受边界，见下）。
+- **Post-v1**（明确范围）：MCP client、subagent、后台任务、web 搜索工具（均非冻结上游 Pi 表面，非矩阵行）；`@`-mention 文件补全 UI（`@file` 数据路径由 P12-T02 提供，交互补全 UI 延后）；constrained sampling。
+- **误报**（上游/源码证据）：持久输入历史（上游 editor 历史同样仅在内存，无持久化文件）；图片粘贴缺失（附件契约与 `/attach` 图片路径已存在，缺的是 vision 模型目录，由 P11.5-T07/T08 补齐）。
+
+Session 审计边界补充：catalog cwd 过滤在 Windows 盘符大小写与目录改名场景的行为、UNC/相对 cwd 编码，在 P11.5-T17 一并以测试固定；大 Session 全量载入 + 双重校验的成本边界记录于 ADR 0003 附录，不做流式重写。
+
+验收：Phase 11.5 全部任务原子提交；真实验收轮（P11.5-T19）覆盖 `--tools all` 真实 grep/find/ls、降低阈值自动压缩、vision 读真实截图、智能引号/NFKC edit、撕裂行 repair、ripgrep/fd pinned 下载 SHA256 校验、DeepSeek headless、JSON、regular TUI 多轮。
+
 ### Phase 12：完整稳定产品面
 
 关闭所有 1.0 Supported surface；完整 CLI、`@file`、package/offline/trust/export；明确 `--approve` 只表示项目资源信任；安全 HTML export；本地 JSONL RPC 与 RpcClient；所有入口复用 bootstrap；Darwin 清晰拒绝。
