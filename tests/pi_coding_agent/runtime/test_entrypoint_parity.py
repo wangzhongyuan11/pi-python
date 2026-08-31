@@ -104,7 +104,7 @@ def test_cli_forwards_the_same_factory_and_service_graph_to_both_modes(
 
     assert (
         main(
-            ["--print", "hello"],
+            ["--approve", "--print", "hello"],
             cwd=tmp_path,
             stdout=StringIO(),
             stderr=StringIO(),
@@ -117,7 +117,7 @@ def test_cli_forwards_the_same_factory_and_service_graph_to_both_modes(
     )
     assert (
         main(
-            [],
+            ["--approve"],
             cwd=tmp_path,
             stdout=StringIO(),
             stderr=StringIO(),
@@ -132,3 +132,4 @@ def test_cli_forwards_the_same_factory_and_service_graph_to_both_modes(
     assert len(calls) == 2
     assert all(item.service_overrides is overrides for item in calls)
     assert all(item.runtime_factory is factory for item in calls)
+    assert all(item.project_trusted for item in calls)

@@ -315,6 +315,7 @@ class InteractiveOptions:
     name: str | None = None
     service_overrides: ServiceOverrides = field(default_factory=ServiceOverrides)
     runtime_factory: AgentSessionFactory | None = None
+    project_trusted: bool = False
 
 
 class _StreamTerminal:
@@ -508,6 +509,7 @@ async def run_interactive(
         CreateAgentSessionOptions(
             cwd=options.cwd,
             service_overrides=options.service_overrides,
+            project_trusted=options.project_trusted,
             credential_resolver=options.credential_resolver,
             model_runtime=runtime,
             session_manager=manager,

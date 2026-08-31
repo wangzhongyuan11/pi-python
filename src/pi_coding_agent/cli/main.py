@@ -202,6 +202,9 @@ def main(
         )
         return 1
     tool_selection = tool_selection_from_arguments(arguments)
+    project_trusted = bool(
+        getattr(arguments, "approve", False) and not getattr(arguments, "no_approve", False)
+    )
     session_name: str | None = None
     raw_name = getattr(arguments, "name", None)
     if raw_name is not None:
@@ -239,6 +242,7 @@ def main(
                             ServiceOverrides() if service_overrides is None else service_overrides
                         ),
                         runtime_factory=runtime_factory,
+                        project_trusted=project_trusted,
                     ),
                     stdout=output,
                     stderr=errors,
@@ -269,6 +273,7 @@ def main(
                         ServiceOverrides() if service_overrides is None else service_overrides
                     ),
                     runtime_factory=runtime_factory,
+                    project_trusted=project_trusted,
                 ),
                 stdout=output,
                 stderr=errors,

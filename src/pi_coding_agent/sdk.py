@@ -107,6 +107,7 @@ class ToolSelection:
 class CreateAgentSessionOptions:
     cwd: Path = field(default_factory=Path.cwd)
     service_overrides: ServiceOverrides = field(default_factory=ServiceOverrides)
+    project_trusted: bool = False
     model_runtime: ModelRuntime | None = None
     credential_resolver: CredentialResolver | None = None
     session_manager: SessionManager | None = None
@@ -233,6 +234,8 @@ async def create_agent_session(
             if target.generation == 0
             else create_product_services(target.cwd, selected.service_overrides)
         )
+        if selected.project_trusted:
+            services.reload_project_trust(True)
         if extension_provider_ids:
             if model_runtime.provider.id in extension_provider_ids:
                 model_runtime.select_model(base_model_id, provider_id=base_provider_id)

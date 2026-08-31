@@ -46,6 +46,7 @@ class HeadlessOptions:
     name: str | None = None
     service_overrides: ServiceOverrides = field(default_factory=ServiceOverrides)
     runtime_factory: AgentSessionFactory | None = None
+    project_trusted: bool = False
 
 
 def resolve_session_manager(options: HeadlessOptions) -> SessionManager | None:
@@ -91,6 +92,7 @@ async def run_headless(options: HeadlessOptions, *, stdout: TextIO, stderr: Text
         CreateAgentSessionOptions(
             cwd=options.cwd,
             service_overrides=options.service_overrides,
+            project_trusted=options.project_trusted,
             model_runtime=runtime,
             session_manager=resolve_session_manager(options),
             thinking_level=thinking,
