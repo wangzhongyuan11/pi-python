@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import uuid
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -13,13 +15,22 @@ from pi_coding_agent.config.settings import SettingsManager
 from pi_coding_agent.ports import ConfiguredPackage, PackageScope, ResourceRoot
 
 from .manifest import PackageManifestError, read_package_manifest
+from .resolver import resolve_source
+from .spec import parse_package_spec
 
 _INSTALL_METADATA = ".pi-python-install.json"
+type CommandRunner = Callable[[Sequence[str]], str]
 
 
 class DefaultPackageManager:
-    def __init__(self, *, settings: SettingsManager) -> None:
+    def __init__(
+        self,
+        *,
+        settings: SettingsManager,
+        command_runner: CommandRunner | None = None,
+    ) -> None:
         self._settings = settings
+        self._command_runner = command_runner or _run_command
 
     def add_source(self, source: str, *, scope: PackageScope = "user") -> bool:
         _validate_source(source)
@@ -65,15 +76,46 @@ class DefaultPackageManager:
         _validate_local_tree(source_root)
         packages_root = self._packages_root(scope)
         packages_root.mkdir(parents=True, exist_ok=True)
+        staging = packages_root / f".{source_root.name}.{uuid.uuid4().hex}.staging"
+        shutil.copytree(source_root, staging)
+        return self._activate_staging(staging, str(source_root), scope)
+
+    def install_git(self, source: str, *, scope: PackageScope = "user") -> tuple[ResourceRoot, ...]:
+        spec = parse_package_spec(source)
+        if spec.kind != "git":
+            raise ValueError(f"expected a git package source: {source}")
+        resolved = resolve_source(spec, runner=self._command_runner)
+        assert resolved.commit is not None
+        packages_root = self._packages_root(scope)
+        packages_root.mkdir(parents=True, exist_ok=True)
+        staging = packages_root / f".git.{uuid.uuid4().hex}.staging"
+        try:
+            self._command_runner(("git", "clone", "--quiet", resolved.location, str(staging)))
+            self._command_runner(
+                ("git", "-C", str(staging), "checkout", "--quiet", resolved.commit)
+            )
+            _validate_local_tree(staging)
+            return self._activate_staging(staging, source, scope)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+
+    def update_git(self, source: str, *, scope: PackageScope = "user") -> tuple[ResourceRoot, ...]:
+        if not any(_source_text(item) == source for item in self._settings.package_sources(scope)):
+            raise ValueError(f"No matching package found for {source}")
+        return self.install_git(source, scope=scope)
+
+    def _activate_staging(
+        self, staging: Path, source: str, scope: PackageScope
+    ) -> tuple[ResourceRoot, ...]:
+        packages_root = self._packages_root(scope)
         nonce = uuid.uuid4().hex
-        staging = packages_root / f".{source_root.name}.{nonce}.staging"
         backup: Path | None = None
         target: Path | None = None
         try:
-            shutil.copytree(source_root, staging)
             staged_manifest = read_package_manifest(staging)
             (staging / _INSTALL_METADATA).write_text(
-                json.dumps({"source": str(source_root), "scope": scope}), encoding="utf-8"
+                json.dumps({"source": source, "scope": scope}), encoding="utf-8"
             )
             target = packages_root / staged_manifest.name
             backup = packages_root / f".{staged_manifest.name}.{nonce}.backup"
@@ -81,7 +123,7 @@ class DefaultPackageManager:
                 target.rename(backup)
             staging.rename(target)
             try:
-                self.add_source(str(source_root), scope=scope)
+                self.add_source(source, scope=scope)
             except BaseException:
                 shutil.rmtree(target, ignore_errors=True)
                 if backup.exists():
@@ -213,6 +255,18 @@ def _validate_local_tree(source: Path) -> None:
     for path in source.rglob("*"):
         if path.is_symlink() or path.is_junction():
             raise PackageManifestError(f"local package contains a link: {path}")
+
+
+def _run_command(command: Sequence[str]) -> str:
+    completed = subprocess.run(
+        list(command),
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+    return completed.stdout
 
 
 __all__ = ["DefaultPackageManager"]
