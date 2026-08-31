@@ -1,6 +1,6 @@
 """Extension package management for the coding agent."""
 
-from .environment import EnvironmentInstallError, ManagedEnvironment
+from .environment import EnvironmentInstallError, ManagedEnvironment, install_requirement
 from .lockfile import LockEntry, LockfileError, LockfileWriteError, load_entries, save_entries
 from .manager import DefaultPackageManager
 from .manifest import PackageManifest, PackageManifestError, read_package_manifest
@@ -42,6 +42,7 @@ __all__ = [
     "ResolvedSource",
     "build_tarball",
     "extract_npm_data",
+    "install_requirement",
     "load_entries",
     "parse_package_spec",
     "resolve_source",

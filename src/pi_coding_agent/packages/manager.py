@@ -14,6 +14,7 @@ from pi_coding_agent.config.models import PackageSource
 from pi_coding_agent.config.settings import SettingsManager
 from pi_coding_agent.ports import ConfiguredPackage, PackageScope, ResourceRoot
 
+from .environment import Installer, install_requirement
 from .manifest import PackageManifestError, read_package_manifest
 from .resolver import resolve_source
 from .spec import parse_package_spec
@@ -28,9 +29,11 @@ class DefaultPackageManager:
         *,
         settings: SettingsManager,
         command_runner: CommandRunner | None = None,
+        pypi_installer: Installer | None = None,
     ) -> None:
         self._settings = settings
         self._command_runner = command_runner or _run_command
+        self._pypi_installer = pypi_installer or install_requirement
 
     def add_source(self, source: str, *, scope: PackageScope = "user") -> bool:
         _validate_source(source)
@@ -104,6 +107,29 @@ class DefaultPackageManager:
         if not any(_source_text(item) == source for item in self._settings.package_sources(scope)):
             raise ValueError(f"No matching package found for {source}")
         return self.install_git(source, scope=scope)
+
+    def install_pypi(
+        self, source: str, *, scope: PackageScope = "user"
+    ) -> tuple[ResourceRoot, ...]:
+        spec = parse_package_spec(source)
+        if spec.kind != "pypi":
+            raise ValueError(f"expected a PyPI package source: {source}")
+        requirement = spec.location if spec.rev is None else f"{spec.location}=={spec.rev}"
+        packages_root = self._packages_root(scope)
+        packages_root.mkdir(parents=True, exist_ok=True)
+        staging = packages_root / f".pypi.{uuid.uuid4().hex}.staging"
+        try:
+            self._pypi_installer(requirement, staging)
+            _validate_local_tree(staging)
+            return self._activate_staging(staging, source, scope)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+
+    def update_pypi(self, source: str, *, scope: PackageScope = "user") -> tuple[ResourceRoot, ...]:
+        if not any(_source_text(item) == source for item in self._settings.package_sources(scope)):
+            raise ValueError(f"No matching package found for {source}")
+        return self.install_pypi(source, scope=scope)
 
     def _activate_staging(
         self, staging: Path, source: str, scope: PackageScope
