@@ -1,0 +1,8 @@
+{
+  "name": "golden-package",
+  "pi": {
+    "skills": ["skills"],
+    "prompts": ["prompts"],
+    "themes": ["themes"]
+  }
+}

@@ -9,6 +9,7 @@ from typing import TextIO
 
 from ..config.settings import SettingsManager
 from ..packages.manager import DefaultPackageManager
+from ..packages.spec import parse_package_spec
 
 
 def run_package_command(
@@ -40,6 +41,30 @@ def run_package_command(
             project_trusted=trusted,
         )
     )
+    if command == "install":
+        source = getattr(arguments, "source", "")
+        try:
+            if source.startswith("npm:"):
+                manager.install_npm_data(source, scope=scope)
+                installed_source = source
+            else:
+                spec = parse_package_spec(source)
+                if spec.kind == "local":
+                    path = Path(spec.location).expanduser()
+                    resolved = (path if path.is_absolute() else runtime_cwd / path).resolve()
+                    manager.install_local(resolved, scope=scope)
+                    installed_source = str(resolved)
+                elif spec.kind == "git":
+                    manager.install_git(source, scope=scope)
+                    installed_source = source
+                else:
+                    manager.install_pypi(source, scope=scope)
+                    installed_source = source
+        except Exception as error:
+            stderr.write(f"{error}\n")
+            return 1
+        stdout.write(f"Installed {installed_source}\n")
+        return 0
     if command == "list":
         packages = manager.list_configured_packages()
         if not packages:
