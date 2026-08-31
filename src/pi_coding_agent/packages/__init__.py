@@ -3,6 +3,7 @@
 from .environment import EnvironmentInstallError, ManagedEnvironment
 from .lockfile import LockEntry, LockfileError, LockfileWriteError, load_entries, save_entries
 from .manager import DefaultPackageManager
+from .manifest import PackageManifest, PackageManifestError, read_package_manifest
 from .npm_data import (
     NpmDataError,
     NpmDataExtraction,
@@ -33,6 +34,8 @@ __all__ = [
     "NpmOfflineError",
     "OfflineResolutionError",
     "PackageResolutionError",
+    "PackageManifest",
+    "PackageManifestError",
     "PackageSpec",
     "PackageSpecError",
     "RefDriftError",
@@ -42,5 +45,6 @@ __all__ = [
     "load_entries",
     "parse_package_spec",
     "resolve_source",
+    "read_package_manifest",
     "save_entries",
 ]

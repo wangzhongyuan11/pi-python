@@ -147,6 +147,14 @@ class SettingsManager:
     def project_trusted(self) -> bool:
         return self._project_trusted
 
+    @property
+    def agent_dir(self) -> Path:
+        return self._agent_dir
+
+    @property
+    def cwd(self) -> Path:
+        return self._cwd
+
     def reload(self, *, project_trusted: bool | None = None) -> None:
         """Atomically reload file layers while preserving this manager's identity."""
         next_trust = self._project_trusted if project_trusted is None else project_trusted
