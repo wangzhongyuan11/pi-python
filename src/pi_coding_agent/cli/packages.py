@@ -66,6 +66,18 @@ def run_package_command(
             return 1
         stdout.write(f"Removed {source}\n")
         return 0
+    if command == "update":
+        source = getattr(arguments, "source", None)
+        try:
+            updated = manager.update(source, offline=bool(getattr(arguments, "offline", False)))
+        except ValueError as error:
+            stderr.write(f"{error}\n")
+            return 1
+        for item in updated:
+            stdout.write(f"Updated {item}\n")
+        if not updated:
+            stdout.write("No packages updated.\n")
+        return 0
     stderr.write(
         f"package command {command!r} is not available in this build; "
         "package management lands in Phase 13\n"

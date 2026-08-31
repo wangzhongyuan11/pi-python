@@ -165,6 +165,44 @@ class DefaultPackageManager:
             shutil.rmtree(staging, ignore_errors=True)
             raise
 
+    def update(self, source: str | None = None, *, offline: bool = False) -> tuple[str, ...]:
+        configured = self.list_configured_packages()
+        selected = (
+            tuple(item for item in configured if item.source == source)
+            if source is not None
+            else configured
+        )
+        if source is not None and not selected:
+            available = ", ".join(item.source for item in configured) or "none"
+            raise ValueError(
+                f"No matching package found for {source}; configured packages: {available}"
+            )
+        updated: list[str] = []
+        seen: set[tuple[PackageScope, str]] = set()
+        for item in selected:
+            identity = (item.scope, item.source)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            if item.source.startswith("git+"):
+                if offline:
+                    continue
+                self.update_git(item.source, scope=item.scope)
+            elif item.source.startswith("npm:"):
+                if offline:
+                    continue
+                self.install_npm_data(item.source, scope=item.scope)
+            else:
+                spec = parse_package_spec(item.source)
+                if spec.kind == "local":
+                    self.install_local(spec.location, scope=item.scope)
+                elif not offline:
+                    self.update_pypi(item.source, scope=item.scope)
+                else:
+                    continue
+            updated.append(item.source)
+        return tuple(updated)
+
     def _activate_staging(
         self, staging: Path, source: str, scope: PackageScope
     ) -> tuple[ResourceRoot, ...]:

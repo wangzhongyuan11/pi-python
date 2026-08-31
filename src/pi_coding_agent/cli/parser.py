@@ -45,6 +45,7 @@ def _add_package_commands(
     update.add_argument("--all", action="store_true")
     update.add_argument("--extension", action="append")
     update.add_argument("--force", action="store_true")
+    update.add_argument("--offline", action="store_true")
 
     commands.add_parser("list", help="list installed packages")
     config = commands.add_parser("config", parents=[approve], help="toggle package resources")
