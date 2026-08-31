@@ -41,10 +41,10 @@ G19 uv run --frozen pytest tests/pi_coding_agent/child_agent tests/pi_coding_age
 G20 uv run --frozen pytest tests/pi_coding_agent/worktrees tests/pi_coding_agent/e2e/test_worktree_tasks.py -m "not live_provider and not network"
 G21 先运行 G0-FINAL，再运行 `uv run --frozen pytest --cov --cov-branch tests -m "not live_provider and not network"`
 
-G12-LIVE（每次运行前单独批准）
-  PowerShell: `$env:PI_PYTHON_ALLOW_LIVE_PROVIDER_TESTS='1'; $env:PI_PYTHON_ALLOW_NETWORK_TESTS='1'; $env:PI_PYTHON_RUN_LIVE_DEEPSEEK='1'; uv run --frozen pytest tests/live/test_agent_product.py -m "live_provider and network"`
-G13-LIVE（每次运行前单独批准）
-  PowerShell: `$env:PI_PYTHON_ALLOW_LIVE_PROVIDER_TESTS='1'; $env:PI_PYTHON_ALLOW_NETWORK_TESTS='1'; $env:PI_PYTHON_RUN_LIVE_DEEPSEEK='1'; uv run --frozen pytest tests/live/test_package_product.py -m "live_provider and network"`
+G12-LIVE（DeepSeek 持续授权；测试内强制请求/费用/时间上限）
+  PowerShell: `$env:PI_PYTHON_ALLOW_LIVE_PROVIDER_TESTS='1'; $env:PI_PYTHON_ALLOW_NETWORK_TESTS='1'; $env:PI_PYTHON_RUN_LIVE_AGENT_PRODUCT='1'; uv run --frozen pytest tests/live/test_agent_product.py -m "live_provider and network"`
+G13-LIVE（DeepSeek 持续授权；测试内强制请求/费用/时间上限）
+  PowerShell: `$env:PI_PYTHON_ALLOW_LIVE_PROVIDER_TESTS='1'; $env:PI_PYTHON_ALLOW_NETWORK_TESTS='1'; $env:PI_PYTHON_RUN_LIVE_PACKAGE_PRODUCT='1'; uv run --frozen pytest tests/live/test_package_product.py -m "live_provider and network"`
 ```
 
 路径中的上游证据均相对 `D:\pi` 冻结提交；Python 文件均相对本仓库。
@@ -279,7 +279,7 @@ G13-LIVE（每次运行前单独批准）
 | [x] P12-T04 | CLI/SDK/headless/TUI 创建输入；输出同一 runtime factory 与相同默认工具/资源 | `sdk.ts:L171-L400`, `main.ts:L719-L852`; P12-T03 | `src/pi_coding_agent/bootstrap.py`, `src/pi_coding_agent/sdk.py`, `src/pi_coding_agent/cli/main.py`, `src/pi_coding_agent/tui/runner.py`, `tests/pi_coding_agent/runtime/test_entrypoint_parity.py` | 入口默认值分叉红测 → 共享 factory | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/runtime/test_entrypoint_parity.py` / G12 | `P12-T04: share one product runtime factory` |
 | [x] P12-T05 | new/resume/fork/switch 到相同或不同 cwd 输入；输出旧 generation 关闭且所有 cwd-bound 服务重建 | `agent-session-runtime.ts:L74-L250`; P12-T04 | `src/pi_coding_agent/agent_session_runtime.py`, `src/pi_coding_agent/bootstrap.py`, `tests/pi_coding_agent/runtime/test_replacement_services.py` | 旧资源/Extension 泄漏红测 → generation-scoped replacement | Supported | `uv run --frozen pytest tests/pi_coding_agent/runtime/test_replacement_services.py` / G12 | `P12-T05: rebuild cwd-bound services on session replacement` |
 | [x] P12-T06 | 一个 fixture project 经 SDK、headless、TUI 输入；输出相同 Settings、资源、工具和 Extension descriptors | Phase 12 主链；P12-T05 | `tests/pi_coding_agent/e2e/test_bootstrap_parity.py`, `tests/fixtures/product_project/*` | 三入口结果不一致红测 → 只修组合差异 | Supported | `uv run --frozen pytest tests/pi_coding_agent/e2e/test_bootstrap_parity.py` / G12 | `P12-T06: prove bootstrap parity end to end` |
-| [x] P12-T07 | 经本次批准的真实 DeepSeek + 一次性 Git 项目输入；输出多轮 inspect→edit→test→follow-up 修正、Session 延续与请求/成本上限证据 | live 验收轨；P12-T06 | `tests/live/test_agent_product.py`, `tests/live/scenarios.py` | FakeProvider 先固定任务判据 → opt-in 真 API 验证真实产物与测试，不记录密钥/自然语言 | Intentional divergence | `uv run --frozen pytest tests/live/test_agent_product.py -m "live_provider and network"` / G12-LIVE | `P12-T07: validate a real multi-turn agent task` |
+| [x] P12-T07 | 持续授权的真实 DeepSeek + 一次性 Git 项目输入；输出多轮 inspect→edit→test→follow-up 修正、Session 延续与请求/成本上限证据 | live 验收轨；P12-T06 | `tests/live/test_agent_product.py`, `tests/live/scenarios.py` | FakeProvider 先固定任务判据 → opt-in 真 API 验证真实产物与测试，不记录密钥/自然语言 | Intentional divergence | `uv run --frozen pytest tests/live/test_agent_product.py -m "live_provider and network"` / G12-LIVE | `P12-T07: validate a real multi-turn agent task` |
 
 ## Phase 13：Pi Package 与资源闭环
 
@@ -293,7 +293,7 @@ G13-LIVE（每次运行前单独批准）
 | [ ] P13-T06 | npm 纯数据 Package 输入；输出 Skill/Prompt/Theme roots 且不加载代码 | `package-manager.ts`, EXT-021; P13-T02 | `src/pi_coding_agent/packages/manager.py`, `src/pi_coding_agent/packages/npm_data.py`, `tests/pi_coding_agent/packages/test_npm_package_integration.py` | 解压成功但资源不可用红测 → data package adapter | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/packages/test_npm_package_integration.py` / G13 | `P13-T06: integrate npm data packages` |
 | [ ] P13-T07 | online/offline 与全部/单包 update 输入；输出缺包诊断、缓存复用和确定更新集合 | `main.ts:L917-L925`, `package-manager.ts:L103-L109`; P13-T04..T06 | `src/pi_coding_agent/packages/manager.py`, `src/pi_coding_agent/cli/packages.py`, `tests/pi_coding_agent/packages/test_update_offline.py` | offline 仍联网/update 范围漂移红测 → 统一策略 | Supported | `uv run --frozen pytest tests/pi_coding_agent/packages/test_update_offline.py` / G13 | `P13-T07: make package updates offline aware` |
 | [ ] P13-T08 | CLI install/list/config/update/remove 与进程重启输入；输出黄金 Package 资源完整生命周期 | `package-manager-cli.ts`; P13-T03..T07 | `src/pi_coding_agent/cli/packages.py`, `tests/pi_coding_agent/cli/test_packages_e2e.py`, `tests/fixtures/golden_package/*` | 命令只返回 stub 红测 → 真实 subprocess 闭环 | Supported | `uv run --frozen pytest tests/pi_coding_agent/cli/test_packages_e2e.py` / G13 | `P13-T08: complete package cli end to end` |
-| [ ] P13-T09 | 经本次批准的真实 DeepSeek + 已安装黄金资源 Package 输入；输出重启后 Skill/Prompt/Theme 被真实 Agent 使用并完成多轮任务 | live 验收轨；P13-T08 | `tests/live/test_package_product.py`, `tests/live/scenarios.py`, `tests/fixtures/golden_package/*` | FakeProvider 先证明资源进入请求 → opt-in 真 API 验证产物/Session/测试 | Intentional divergence | `uv run --frozen pytest tests/live/test_package_product.py -m "live_provider and network"` / G13-LIVE | `P13-T09: validate packaged resources with a real agent` |
+| [ ] P13-T09 | 持续授权的真实 DeepSeek + 已安装黄金资源 Package 输入；输出重启后 Skill/Prompt/Theme 被真实 Agent 使用并完成多轮任务 | live 验收轨；P13-T08 | `tests/live/test_package_product.py`, `tests/live/scenarios.py`, `tests/fixtures/golden_package/*` | FakeProvider 先证明资源进入请求 → opt-in 真 API 验证产物/Session/测试 | Intentional divergence | `uv run --frozen pytest tests/live/test_package_product.py -m "live_provider and network"` / G13-LIVE | `P13-T09: validate packaged resources with a real agent` |
 
 ## Phase 14：Python Extension 完整运行时
 

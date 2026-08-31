@@ -22,7 +22,7 @@
 - Python 3.12+，Hatchling、uv、Ruff、Pyright strict、pytest。
 - 所有默认测试离线运行；清空 API key、HOME、用户配置、缓存和 Git 全局影响。
 - Provider/Agent/CLI 测试优先使用 FakeProvider、FakeTool、FakeClock、临时 workspace 和 isolated home。
-- 真实 DeepSeek smoke 使用独立 marker；每一次运行前都需用户明确批准。
+- 真实 DeepSeek smoke 使用独立 marker、显式环境开关和请求/token/超时/费用硬上限；用户已授予持续运行权限，不再逐次询问。其他真实 Provider 仍需每次明确批准。
 - 关键 wire 使用 golden/round-trip 测试；关键行为使用冻结 TypeScript fixture/oracle 的规范化差分测试。
 
 ### 上游 oracle 规则

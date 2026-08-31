@@ -384,7 +384,7 @@ worktree 必须在 SessionManager、ResourceLoader、ExtensionRuntime 和工具�
 
 - 在 test collection 前隔离 HOME、cwd、API Key、用户配置、缓存和 Git 全局影响。
 - 默认阻断 Python socket/DNS、Python child process 与常见 Python 网络客户端，并设置 offline proxy/env；这是可测试的 Python 进程边界，不宣称提供 OS 级任意原生进程防火墙。
-- `network`/真实 Provider 测试必须同时显式 env opt-in、使用独立 marker，并在每次运行前获得用户批准。
+- `network`/真实 Provider 测试必须同时显式 env opt-in 并使用独立 marker。DeepSeek 已获用户持续授权；其他真实 Provider 每次运行前仍需批准。
 - 固定时钟、ID、随机数。
 - 使用 FakeProvider 驱动 Agent/Session/CLI，避免 mock 内部实现细节。
 - 对 API Key、Authorization header、`.env` 与错误 repr 做泄漏测试。
@@ -394,7 +394,7 @@ worktree 必须在 SessionManager、ResourceLoader、ExtensionRuntime 和工具�
 真实 Provider 验收轨（不属于默认测试门）：
 
 - 测试位于 `tests/live/`，同时使用 `live_provider` 与 `network` marker，并要求 `PI_PYTHON_ALLOW_LIVE_PROVIDER_TESTS=1`、`PI_PYTHON_ALLOW_NETWORK_TESTS=1` 和 Provider 专用执行开关。
-- 每一次真实运行仍需获得对“本次命令”的明确批准；测试代码存在不代表可永久、无限额调用。
+- DeepSeek 真实运行使用用户持续授权，不再逐次询问，但每项测试必须内建请求数、token、超时和总成本硬上限；其他真实 Provider 仍需对本次命令明确批准。
 - 凭据只从进程环境或显式 `--env-file` 读取，不打印、不写报告、不复制到 fixture；失败输出也必须通过泄漏检查。
 - 使用临时 HOME 和一次性 Git 项目，设置请求数、max tokens、超时和总成本上限；验证真实文件、测试结果、Session 记录和多轮行为，不断言模型自然语言完全一致。
 - Phase 12 live 验收覆盖共享 bootstrap、真实工具调用、Session 延续和跟进修正；Phase 13 live 验收再覆盖 Package 安装后 Skill/Prompt/Theme 对真实 Agent 的可观察影响。Extension Tool 的真实调用留到 Phase 14 live 验收。
@@ -431,4 +431,4 @@ Phase 21 正式发布阻断场景（不阻塞 Phase 17 Pi 功能完整验收）�
 - `.env` 默认只读 cwd，可用 `--env-file` 指定。
 - Windows/Linux 正式支持；macOS 拒绝。
 - local RPC 属于 1.0；远程协议属于 Post-1.0。
-- 任何 live API 测试都必须在当次运行前获得用户批准。
+- DeepSeek live API 测试使用持续授权和硬预算；其他 live API 测试必须在当次运行前获得用户批准。
