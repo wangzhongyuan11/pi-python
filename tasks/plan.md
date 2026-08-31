@@ -328,13 +328,13 @@ Session 审计边界补充：catalog cwd 过滤在 Windows 盘符大小写与目
 
 按纵向切片实现 Package，而不是先铺满所有来源。顺序为：本地 Package 安装并持久化 → Package 内 Skill/Prompt/Theme 被 ResourceLoader 发现 → list/config/remove → Git/PyPI → npm 纯数据 → update/offline → CLI 完整命令。Package 是资源分发层；一次安装必须能够在重启后影响真实 Agent/TUI，而不仅是生成锁文件。
 
-验收：一个本地黄金 Package 可被 `install`，重启后 Skill/Prompt/Theme 仍可用，config 可启停，update 可替换，remove 后不再发现；Git/PyPI/npm 与 offline 分别有确定性 fixture；失败安装不破坏旧版本。
+验收：一个本地黄金 Package 可被 `install`，重启后 Skill/Prompt/Theme 仍可用，config 可启停，update 可替换，remove 后不再发现；Git/PyPI/npm 与 offline 分别有确定性 fixture；失败安装不破坏旧版本；最终通过真实 DeepSeek API 和真实 TUI 进程完成多轮资源驱动任务，而不是以 SDK/AgentSession 代替 TUI。
 
 ### Phase 14：Python Extension 完整运行时
 
 把已有 loader、registry、HookRunner、UI/Auth ports 和 lifecycle 接进 AgentSession。显式 CLI Extension 与用户主动安装的全局 Package 直接按用户意图加载；项目 Extension 只受 project trust 控制，避免再建立一套没有产品入口的临时 `grant_trust()` 状态。先完成 Tool/Command/Provider 的正常产品路径，再分组接入 Agent/Turn/Message、Tool、Context/Provider、Session 事件与 actions，最后接动态 flags、shortcuts、UI、renderers、reload 和 stale-context 处理。纳入最新 Pi 增量：`ui_prompt_start`/`ui_prompt_end`、全量工具注册表与 active tool 集合、纯增量动态工具激活、deferred-tool 元数据及普通 Provider 回退；Extension 创建的长生命周期资源必须登记 teardown。
 
-验收：黄金 Extension 通过正常 CLI/Package 路径注册 Tool、Command、Provider、Flag、Skill 和 hook；Agent 实际调用扩展 Tool，TUI 执行扩展 Command，Provider 可选；new/fork/switch/reload 后旧 generation teardown 且事件不再触发，失败 Extension 不影响其他 Extension。
+验收：黄金 Extension 通过正常 CLI/Package 路径注册 Tool、Command、Provider、Flag、Skill 和 hook；Agent 实际调用扩展 Tool，TUI 执行扩展 Command，Provider 可选；new/fork/switch/reload 后旧 generation teardown 且事件不再触发，失败 Extension 不影响其他 Extension；最终使用真实 DeepSeek API 驱动真实 TUI 进程调用扩展能力并完成多轮任务。
 
 ### Phase 15：CLI、TUI 与本地 RPC 完整产品模式
 
@@ -397,7 +397,7 @@ worktree 必须在 SessionManager、ResourceLoader、ExtensionRuntime 和工具�
 - DeepSeek 真实运行使用用户持续授权，不再逐次询问，但每项测试必须内建请求数、token、超时和总成本硬上限；其他真实 Provider 仍需对本次命令明确批准。
 - 凭据只从进程环境或显式 `--env-file` 读取，不打印、不写报告、不复制到 fixture；失败输出也必须通过泄漏检查。
 - 使用临时 HOME 和一次性 Git 项目，设置请求数、max tokens、超时和总成本上限；验证真实文件、测试结果、Session 记录和多轮行为，不断言模型自然语言完全一致。
-- Phase 12 live 验收覆盖共享 bootstrap、真实工具调用、Session 延续和跟进修正；Phase 13 live 验收再覆盖 Package 安装后 Skill/Prompt/Theme 对真实 Agent 的可观察影响。Extension Tool 的真实调用留到 Phase 14 live 验收。
+- Phase 12 live 验收覆盖共享 bootstrap、真实工具调用、Session 延续和跟进修正；Phase 13 live 验收覆盖 Package 安装后 Skill/Prompt/Theme 在真实 TUI 进程中的多轮行为；Phase 14 live 验收覆盖 Extension Tool/Command/hook 在真实 TUI 中的调用。SDK/AgentSession 直连测试不能替代 Phase 13/14 的 TUI 验收。
 
 Phase 21 正式发布阻断场景（不阻塞 Phase 17 Pi 功能完整验收）：
 
