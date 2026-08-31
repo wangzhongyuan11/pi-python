@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import uuid
 from pathlib import Path
+from typing import cast
 
 from pi_coding_agent.config.models import PackageSource
 from pi_coding_agent.config.settings import SettingsManager
 from pi_coding_agent.ports import ConfiguredPackage, PackageScope, ResourceRoot
 
 from .manifest import PackageManifestError, read_package_manifest
+
+_INSTALL_METADATA = ".pi-python-install.json"
 
 
 class DefaultPackageManager:
@@ -36,13 +40,20 @@ class DefaultPackageManager:
 
     def list_configured_packages(self) -> tuple[ConfiguredPackage, ...]:
         configured: list[ConfiguredPackage] = []
-        for scope in ("user", "project"):
+        scopes: tuple[PackageScope, ...] = (
+            ("user", "project") if self._settings.project_trusted else ("user",)
+        )
+        for scope in scopes:
+            installed = self._installed_packages(scope)
             for source in self._settings.package_sources(scope):
+                text = _source_text(source)
                 configured.append(
                     ConfiguredPackage(
-                        source=_source_text(source),
+                        source=text,
                         scope=scope,
                         filtered=isinstance(source, PackageSource),
+                        enabled=not isinstance(source, PackageSource) or source.autoload,
+                        installed_path=installed.get(text),
                     )
                 )
         return tuple(configured)
@@ -61,6 +72,9 @@ class DefaultPackageManager:
         try:
             shutil.copytree(source_root, staging)
             staged_manifest = read_package_manifest(staging)
+            (staging / _INSTALL_METADATA).write_text(
+                json.dumps({"source": str(source_root), "scope": scope}), encoding="utf-8"
+            )
             target = packages_root / staged_manifest.name
             backup = packages_root / f".{staged_manifest.name}.{nonce}.backup"
             if target.exists():
@@ -93,13 +107,88 @@ class DefaultPackageManager:
             ("user", "project") if self._settings.project_trusted else ("user",)
         )
         for scope in scopes:
-            packages_root = self._packages_root(scope)
-            if not packages_root.is_dir():
-                continue
-            for package_root in sorted(packages_root.iterdir()):
-                if package_root.is_dir() and not package_root.name.startswith("."):
+            installed = self._installed_packages(scope)
+            for configured in self._settings.package_sources(scope):
+                if isinstance(configured, PackageSource) and not configured.autoload:
+                    continue
+                package_root = installed.get(_source_text(configured))
+                if package_root is not None:
                     roots.extend(read_package_manifest(package_root).resources)
         return tuple(roots)
+
+    def set_enabled(self, source: str, enabled: bool, *, scope: PackageScope = "user") -> bool:
+        current = self._settings.package_sources(scope)
+        changed = False
+        updated: list[str | PackageSource] = []
+        for configured in current:
+            if _source_text(configured) != source:
+                updated.append(configured)
+                continue
+            current_enabled = not isinstance(configured, PackageSource) or configured.autoload
+            if current_enabled == enabled:
+                updated.append(configured)
+                continue
+            changed = True
+            if (
+                enabled
+                and isinstance(configured, PackageSource)
+                and not any(
+                    (
+                        configured.extensions,
+                        configured.skills,
+                        configured.prompts,
+                        configured.themes,
+                    )
+                )
+            ):
+                updated.append(configured.source)
+            elif isinstance(configured, PackageSource):
+                updated.append(configured.model_copy(update={"autoload": enabled}))
+            else:
+                updated.append(PackageSource(source=configured, autoload=enabled))
+        if changed:
+            self._settings.set_package_sources(tuple(updated), scope=scope)
+        return changed
+
+    def remove_installed(self, source: str, *, scope: PackageScope = "user") -> bool:
+        installed = self._installed_packages(scope).get(source)
+        current = self._settings.package_sources(scope)
+        if not any(_source_text(item) == source for item in current):
+            return False
+        backup: Path | None = None
+        if installed is not None:
+            backup = installed.parent / f".{installed.name}.{uuid.uuid4().hex}.backup"
+            installed.rename(backup)
+        try:
+            removed = self.remove_source(source, scope=scope)
+        except BaseException:
+            if backup is not None and backup.exists():
+                assert installed is not None
+                backup.rename(installed)
+            raise
+        if backup is not None:
+            shutil.rmtree(backup, ignore_errors=True)
+        return removed
+
+    def _installed_packages(self, scope: PackageScope) -> dict[str, Path]:
+        packages_root = self._packages_root(scope)
+        if not packages_root.is_dir():
+            return {}
+        installed: dict[str, Path] = {}
+        for package_root in sorted(packages_root.iterdir()):
+            metadata = package_root / _INSTALL_METADATA
+            if package_root.name.startswith(".") or not metadata.is_file():
+                continue
+            try:
+                raw: object = json.loads(metadata.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            if isinstance(raw, dict):
+                payload = cast(dict[str, object], raw)
+                source = payload.get("source")
+                if isinstance(source, str):
+                    installed[source] = package_root.resolve()
+        return installed
 
     def _packages_root(self, scope: PackageScope) -> Path:
         if scope == "user":

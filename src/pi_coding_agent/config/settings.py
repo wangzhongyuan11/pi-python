@@ -184,6 +184,8 @@ class SettingsManager:
         return snapshot
 
     def package_sources(self, scope: str) -> tuple[str | PackageSource, ...]:
+        if scope == "project" and not self._project_trusted:
+            return ()
         path, label = self._package_settings_path(scope)
         payload = _read(path, label)
         try:
@@ -199,6 +201,8 @@ class SettingsManager:
         *,
         scope: str,
     ) -> None:
+        if scope == "project" and not self._project_trusted:
+            raise PermissionError("project trust is required to change project packages")
         path, label = self._package_settings_path(scope)
         validated = SettingsValues.model_validate({"packages": sources}).packages
         payload = _read(path, label)
@@ -214,8 +218,6 @@ class SettingsManager:
         if scope == "user":
             return self._agent_dir / "settings.json", "global"
         if scope == "project":
-            if not self._project_trusted:
-                raise PermissionError("project trust is required to change project packages")
             return self._cwd / ".pi-python" / "settings.json", "project"
         raise ValueError(f"unsupported package scope: {scope}")
 

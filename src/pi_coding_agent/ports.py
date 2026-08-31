@@ -25,6 +25,8 @@ class ConfiguredPackage:
     source: str
     scope: PackageScope
     filtered: bool
+    enabled: bool = True
+    installed_path: Path | None = None
 
 
 @runtime_checkable
@@ -40,6 +42,10 @@ class PackageManager(Protocol):
     ) -> tuple[ResourceRoot, ...]: ...
 
     def resource_roots(self) -> tuple[ResourceRoot, ...]: ...
+
+    def set_enabled(self, source: str, enabled: bool, *, scope: PackageScope = "user") -> bool: ...
+
+    def remove_installed(self, source: str, *, scope: PackageScope = "user") -> bool: ...
 
 
 class Settings(Protocol):

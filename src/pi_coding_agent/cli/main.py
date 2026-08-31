@@ -193,7 +193,13 @@ def main(
             stderr=errors,
         )
     if command_mode and arguments.command in _PACKAGE_COMMANDS:
-        return run_package_command(arguments, stdout=output, stderr=errors)
+        return run_package_command(
+            arguments,
+            stdout=output,
+            stderr=errors,
+            cwd=runtime_cwd,
+            environ=runtime_environ,
+        )
     messages = cast("list[str]", arguments.messages)
     if arguments.mode == "rpc":
         errors.write(

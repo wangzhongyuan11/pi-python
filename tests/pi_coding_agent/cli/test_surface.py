@@ -177,8 +177,8 @@ class TestCommandRouting:
             environ={},
         )
 
-        assert code == 1
-        assert "package command 'list' is not available" in errors.getvalue()
+        assert code == 0
+        assert errors.getvalue() == ""
 
     def test_mode_rpc_reports_clean_error(self, tmp_path: Path) -> None:
         from io import StringIO

@@ -80,7 +80,7 @@ def test_filtered_sources_are_listed_without_losing_their_configuration(
     manager = _load_manager(agent_dir, project)
 
     assert manager.list_configured_packages() == (
-        ConfiguredPackage(source="filtered-package", scope="user", filtered=True),
+        ConfiguredPackage(source="filtered-package", scope="user", filtered=True, enabled=False),
     )
     assert manager.add_source("filtered-package") is False
     assert manager.remove_source("filtered-package") is True
