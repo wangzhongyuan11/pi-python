@@ -279,7 +279,7 @@ G13-LIVE（每次运行前单独批准）
 | [x] P12-T04 | CLI/SDK/headless/TUI 创建输入；输出同一 runtime factory 与相同默认工具/资源 | `sdk.ts:L171-L400`, `main.ts:L719-L852`; P12-T03 | `src/pi_coding_agent/bootstrap.py`, `src/pi_coding_agent/sdk.py`, `src/pi_coding_agent/cli/main.py`, `src/pi_coding_agent/tui/runner.py`, `tests/pi_coding_agent/runtime/test_entrypoint_parity.py` | 入口默认值分叉红测 → 共享 factory | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/runtime/test_entrypoint_parity.py` / G12 | `P12-T04: share one product runtime factory` |
 | [x] P12-T05 | new/resume/fork/switch 到相同或不同 cwd 输入；输出旧 generation 关闭且所有 cwd-bound 服务重建 | `agent-session-runtime.ts:L74-L250`; P12-T04 | `src/pi_coding_agent/agent_session_runtime.py`, `src/pi_coding_agent/bootstrap.py`, `tests/pi_coding_agent/runtime/test_replacement_services.py` | 旧资源/Extension 泄漏红测 → generation-scoped replacement | Supported | `uv run --frozen pytest tests/pi_coding_agent/runtime/test_replacement_services.py` / G12 | `P12-T05: rebuild cwd-bound services on session replacement` |
 | [x] P12-T06 | 一个 fixture project 经 SDK、headless、TUI 输入；输出相同 Settings、资源、工具和 Extension descriptors | Phase 12 主链；P12-T05 | `tests/pi_coding_agent/e2e/test_bootstrap_parity.py`, `tests/fixtures/product_project/*` | 三入口结果不一致红测 → 只修组合差异 | Supported | `uv run --frozen pytest tests/pi_coding_agent/e2e/test_bootstrap_parity.py` / G12 | `P12-T06: prove bootstrap parity end to end` |
-| [ ] P12-T07 | 经本次批准的真实 DeepSeek + 一次性 Git 项目输入；输出多轮 inspect→edit→test→follow-up 修正、Session 延续与请求/成本上限证据 | live 验收轨；P12-T06 | `tests/live/test_agent_product.py`, `tests/live/scenarios.py` | FakeProvider 先固定任务判据 → opt-in 真 API 验证真实产物与测试，不记录密钥/自然语言 | Intentional divergence | `uv run --frozen pytest tests/live/test_agent_product.py -m "live_provider and network"` / G12-LIVE | `P12-T07: validate a real multi-turn agent task` |
+| [x] P12-T07 | 经本次批准的真实 DeepSeek + 一次性 Git 项目输入；输出多轮 inspect→edit→test→follow-up 修正、Session 延续与请求/成本上限证据 | live 验收轨；P12-T06 | `tests/live/test_agent_product.py`, `tests/live/scenarios.py` | FakeProvider 先固定任务判据 → opt-in 真 API 验证真实产物与测试，不记录密钥/自然语言 | Intentional divergence | `uv run --frozen pytest tests/live/test_agent_product.py -m "live_provider and network"` / G12-LIVE | `P12-T07: validate a real multi-turn agent task` |
 
 ## Phase 13：Pi Package 与资源闭环
 
@@ -385,4 +385,4 @@ G13-LIVE（每次运行前单独批准）
 
 ## 当前停止点
 
-Phase 11.5 与 P12-T01..T06 已完成；下一项严格进入 P12-T07。Phase 12–17 先完成 Pi 产品闭环，Phase 18–20 再完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。Phase 12 与 Phase 13 各自完成后必须按 plan 停止并等待用户验收。
+Phase 11.5 与 Phase 12 已完成；按 plan 先等待用户验收，再进入 P13-T01。Phase 12–17 先完成 Pi 产品闭环，Phase 18–20 再完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。Phase 12 与 Phase 13 各自完成后必须按 plan 停止并等待用户验收。
