@@ -30,7 +30,7 @@ G8  uv run --frozen pytest tests/pi_coding_agent/session tests/pi_coding_agent/a
 G9  uv run --frozen pytest tests/pi_tui
 G10 uv run --frozen pytest tests/pi_coding_agent/extensions tests/pi_coding_agent/packages
 G11 uv run --frozen pytest tests/pi_coding_agent/tui
-G12 uv run --frozen pytest tests/pi_coding_agent/cli tests/pi_coding_agent/sdk tests/pi_coding_agent/runtime tests/pi_coding_agent/resources -m "not live_provider and not network"
+G12 uv run --frozen pytest tests/pi_coding_agent -m "not live_provider and not network"
 G13 uv run --frozen pytest tests/pi_coding_agent/packages tests/pi_coding_agent/resources tests/pi_coding_agent/cli/test_packages_e2e.py -m "not network"
 G14 uv run --frozen pytest tests/pi_coding_agent/extensions tests/pi_coding_agent/agent_session tests/pi_coding_agent/tui/test_commands.py
 G15 uv run --frozen pytest tests/pi_coding_agent/cli tests/pi_coding_agent/rpc tests/pi_coding_agent/tui
@@ -273,7 +273,7 @@ G13-LIVE（每次运行前单独批准）
 
 | 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
 |---|---|---|---|---|---|---|---|
-| [ ] P12-T01 | surface matrix 静态 argv 输入；输出 flags/subcommands 与未认领 Extension flags 的两阶段解析 | `cli/args.ts:L77-L308`, `package-manager-cli.ts`; P11.5-T19 | `src/pi_coding_agent/cli/parser.py`, `src/pi_coding_agent/cli/surface.py`, `src/pi_coding_agent/cli/packages.py`, `tests/pi_coding_agent/cli/test_surface.py` | help/alias/subcommand/未知 flag 快照红测 → 只完成解析和路由，不伪装命令已实现 | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/cli/test_surface.py` / G12 | `P12-T01: parse the complete static cli surface` |
+| [x] P12-T01 | surface matrix 静态 argv 输入；输出 flags/subcommands 与未认领 Extension flags 的两阶段解析 | `cli/args.ts:L77-L308`, `package-manager-cli.ts`; P11.5-T19 | `src/pi_coding_agent/cli/parser.py`, `src/pi_coding_agent/cli/surface.py`, `src/pi_coding_agent/cli/packages.py`, `tests/pi_coding_agent/cli/test_surface.py` | help/alias/subcommand/未知 flag 快照红测 → 只完成解析和路由，不伪装命令已实现 | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/cli/test_surface.py` / G12 | `P12-T01: parse the complete static cli surface` |
 | [ ] P12-T02 | cwd/trust 输入；输出同一 SettingsManager 的 bootstrap 非信任加载与决定后 reload | `main.ts:L706-L782`, `resource-loader.ts:L379-L403`; P12-T01 | `src/pi_coding_agent/services.py`, `src/pi_coding_agent/config/settings.py`, `src/pi_coding_agent/resources/default_loader.py`, `tests/pi_coding_agent/runtime/test_trusted_reload.py` | trusted project settings 永不生效红测 → 两阶段 reload | Supported | `uv run --frozen pytest tests/pi_coding_agent/runtime/test_trusted_reload.py` / G12 | `P12-T02: reload product settings after project trust` |
 | [ ] P12-T03 | Settings/package/显式路径输入；输出 ResourceLoader 与 ExtensionRuntime 共享 resolved roots | `resource-loader.ts:L253-L300,L403-L465`; P12-T02 | `src/pi_coding_agent/services.py`, `src/pi_coding_agent/resources/default_loader.py`, `src/pi_coding_agent/ports.py`, `tests/pi_coding_agent/runtime/test_service_composition.py` | package/extension roots 丢失红测 → 单一服务组合 | Supported | `uv run --frozen pytest tests/pi_coding_agent/runtime/test_service_composition.py` / G12 | `P12-T03: compose resource and extension roots` |
 | [ ] P12-T04 | CLI/SDK/headless/TUI 创建输入；输出同一 runtime factory 与相同默认工具/资源 | `sdk.ts:L171-L400`, `main.ts:L719-L852`; P12-T03 | `src/pi_coding_agent/bootstrap.py`, `src/pi_coding_agent/sdk.py`, `src/pi_coding_agent/cli/main.py`, `src/pi_coding_agent/tui/runner.py`, `tests/pi_coding_agent/runtime/test_entrypoint_parity.py` | 入口默认值分叉红测 → 共享 factory | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/runtime/test_entrypoint_parity.py` / G12 | `P12-T04: share one product runtime factory` |
@@ -385,4 +385,4 @@ G13-LIVE（每次运行前单独批准）
 
 ## 当前停止点
 
-Phase 11.5 已完成。当前分支存在未完成的 P12-T01 源码和测试修改；继续工作时只完成 P12-T01 的“静态解析与路由”边界，验证并原子提交后再进入 P12-T02。Phase 12–17 先完成 Pi 产品闭环，Phase 18–20 再完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。Phase 12 与 Phase 13 各自完成后必须按 plan 停止并等待用户验收。
+Phase 11.5 与 P12-T01 已完成；下一项严格进入 P12-T02。Phase 12–17 先完成 Pi 产品闭环，Phase 18–20 再完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。Phase 12 与 Phase 13 各自完成后必须按 plan 停止并等待用户验收。

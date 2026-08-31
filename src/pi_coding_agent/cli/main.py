@@ -23,11 +23,15 @@ from ..sdk import ToolSelection
 from ..session.errors import SessionError
 from ..tui.runner import InteractiveOptions, run_interactive
 from .import_session import run_import_session
-from .parser import create_parser, create_run_parser
+from .packages import run_package_command
+from .parser import create_parser, create_run_parser, parse_run_arguments
 from .run import HeadlessOptions, run_headless
 from .session_repair import run_session_repair
+from .surface import UnknownFlagError
 
 _GLOBAL_VALUE_OPTIONS = {"--api-key", "--env-file"}
+_PACKAGE_COMMANDS = frozenset({"install", "remove", "uninstall", "update", "list", "config"})
+_COMMANDS = frozenset({"auth", "import-pi-session", "session"}) | _PACKAGE_COMMANDS
 
 
 def tool_selection_from_arguments(arguments: argparse.Namespace) -> ToolSelection:
@@ -57,7 +61,7 @@ def _uses_command_parser(arguments: Sequence[str]) -> bool:
         if value in _GLOBAL_VALUE_OPTIONS:
             index += 2
             continue
-        return value in {"auth", "import-pi-session", "session"}
+        return value in _COMMANDS
     return False
 
 
@@ -144,11 +148,23 @@ def main(
         if command_mode
         else create_run_parser(version=version("pi-python"))
     )
+    extras: dict[str, bool | str] = {}
     try:
         with redirect_stdout(output), redirect_stderr(errors):
-            arguments = parser.parse_args(raw_arguments)
+            if command_mode:
+                arguments = parser.parse_args(raw_arguments)
+            else:
+                arguments, extras = parse_run_arguments(parser, raw_arguments)
+    except UnknownFlagError as error:
+        errors.write(f"Error: {error}\n")
+        return 2
     except SystemExit as error:
         return error.code if isinstance(error.code, int) else int(error.code is not None)
+    if not command_mode and extras:
+        # Extension-registered flags will claim these in a later phase; until
+        # then the frozen Phase 6 contract rejects unknown arguments.
+        errors.write(f"Error: unrecognized arguments: --{next(iter(extras))}\n")
+        return 2
 
     if arguments.list_models is not None:
         return _list_models(arguments.list_models, output)
@@ -173,7 +189,15 @@ def main(
             stdout=output,
             stderr=errors,
         )
+    if command_mode and arguments.command in _PACKAGE_COMMANDS:
+        return run_package_command(arguments, stdout=output, stderr=errors)
     messages = cast("list[str]", arguments.messages)
+    if arguments.mode == "rpc":
+        errors.write(
+            "Error: RPC mode is not wired in this build; "
+            "the local stdio RPC server lands in Phase 15\n"
+        )
+        return 1
     tool_selection = tool_selection_from_arguments(arguments)
     session_name: str | None = None
     raw_name = getattr(arguments, "name", None)
