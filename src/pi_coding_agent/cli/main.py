@@ -19,7 +19,8 @@ from pi_ai.providers.deepseek import DEEPSEEK_MODELS, DEFAULT_DEEPSEEK_MODEL
 from ..deepseek_credentials import DeepSeekCredentialResolver
 from ..model_runtime import ModelRuntime, UnknownModelError
 from ..providers import UnknownProviderError
-from ..sdk import ToolSelection
+from ..sdk import AgentSessionFactory, ToolSelection
+from ..services import ServiceOverrides
 from ..session.errors import SessionError
 from ..tui.runner import InteractiveOptions, run_interactive
 from .import_session import run_import_session
@@ -136,6 +137,8 @@ def main(
     cwd: Path | None = None,
     environ: Mapping[str, str] | None = None,
     model_runtime: ModelRuntime | None = None,
+    service_overrides: ServiceOverrides | None = None,
+    runtime_factory: AgentSessionFactory | None = None,
 ) -> int:
     output = sys.stdout if stdout is None else stdout
     errors = sys.stderr if stderr is None else stderr
@@ -232,6 +235,10 @@ def main(
                         tui_mode=arguments.tui_mode,
                         tool_selection=tool_selection,
                         name=session_name,
+                        service_overrides=(
+                            ServiceOverrides() if service_overrides is None else service_overrides
+                        ),
+                        runtime_factory=runtime_factory,
                     ),
                     stdout=output,
                     stderr=errors,
@@ -258,6 +265,10 @@ def main(
                     model_runtime=model_runtime,
                     tool_selection=tool_selection,
                     name=session_name,
+                    service_overrides=(
+                        ServiceOverrides() if service_overrides is None else service_overrides
+                    ),
+                    runtime_factory=runtime_factory,
                 ),
                 stdout=output,
                 stderr=errors,

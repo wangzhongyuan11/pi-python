@@ -9,7 +9,7 @@ import shutil
 import sys
 import time
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol, TextIO, cast, runtime_checkable
@@ -42,11 +42,13 @@ from ..cli.run import HeadlessOptions, resolve_session_manager
 from ..extensions.registry import CapabilityRegistry
 from ..model_runtime import ModelRuntime, create_model_runtime, match_model_argument
 from ..sdk import (
+    AgentSessionFactory,
     CreateAgentSessionOptions,
     ToolSelection,
     create_agent_session,
     default_session_dir,
 )
+from ..services import ServiceOverrides
 from ..session.catalog import SessionSummary, list_sessions
 from ..session.errors import SessionNotFoundError
 from .commands import CommandDispatcher, CommandOutcome, CommandSpec
@@ -311,6 +313,8 @@ class InteractiveOptions:
     tui_mode: Literal["regular", "fullscreen"] = "regular"
     tool_selection: ToolSelection | None = None
     name: str | None = None
+    service_overrides: ServiceOverrides = field(default_factory=ServiceOverrides)
+    runtime_factory: AgentSessionFactory | None = None
 
 
 class _StreamTerminal:
@@ -499,9 +503,11 @@ async def run_interactive(
         stderr.flush()
         manager = None
     selection = options.tool_selection or ToolSelection()
-    created = await create_agent_session(
+    runtime_factory = options.runtime_factory or create_agent_session
+    created = await runtime_factory(
         CreateAgentSessionOptions(
             cwd=options.cwd,
+            service_overrides=options.service_overrides,
             credential_resolver=options.credential_resolver,
             model_runtime=runtime,
             session_manager=manager,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, TextIO
@@ -12,7 +12,13 @@ from pi_ai import AssistantMessage, CredentialResolver, ModelThinkingLevel, clam
 
 from ..model_runtime import ModelRuntime, create_model_runtime
 from ..presenters import JsonEventPresenter, assistant_text
-from ..sdk import CreateAgentSessionOptions, ToolSelection, create_agent_session
+from ..sdk import (
+    AgentSessionFactory,
+    CreateAgentSessionOptions,
+    ToolSelection,
+    create_agent_session,
+)
+from ..services import ServiceOverrides
 from ..session.catalog import list_sessions, open_session
 from ..session.errors import SessionNotFoundError
 from ..session.manager import SessionManager
@@ -38,6 +44,8 @@ class HeadlessOptions:
     model_runtime: ModelRuntime | None = None
     tool_selection: ToolSelection | None = None
     name: str | None = None
+    service_overrides: ServiceOverrides = field(default_factory=ServiceOverrides)
+    runtime_factory: AgentSessionFactory | None = None
 
 
 def resolve_session_manager(options: HeadlessOptions) -> SessionManager | None:
@@ -78,9 +86,11 @@ async def run_headless(options: HeadlessOptions, *, stdout: TextIO, stderr: Text
         runtime.select_model(options.model_id)
     thinking = clamp_thinking_level(runtime.model, options.thinking_level)
     selection = options.tool_selection or ToolSelection()
-    created = await create_agent_session(
+    runtime_factory = options.runtime_factory or create_agent_session
+    created = await runtime_factory(
         CreateAgentSessionOptions(
             cwd=options.cwd,
+            service_overrides=options.service_overrides,
             model_runtime=runtime,
             session_manager=resolve_session_manager(options),
             thinking_level=thinking,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -182,6 +182,9 @@ class CreatedAgentSession:
     ) -> None:
         del exception_type, exception, traceback
         await self.close()
+
+
+type AgentSessionFactory = Callable[[CreateAgentSessionOptions], Awaitable[CreatedAgentSession]]
 
 
 async def create_agent_session(
@@ -384,6 +387,7 @@ def import_pi_session(
 
 
 __all__ = [
+    "AgentSessionFactory",
     "CreateAgentSessionOptions",
     "CreatedAgentSession",
     "create_agent_session",
