@@ -10,7 +10,7 @@ from typing import Any, cast
 from pi_agent import AgentTool
 from pi_ai import Provider
 
-from ..ports import ResourceDescriptor, ResourceSource
+from ..ports import ResourceDescriptor
 from ..resources.default_loader import DefaultResourceLoader
 from .api import ExtensionAPI
 from .lifecycle import ExtensionLifecycle
@@ -84,7 +84,7 @@ class DefaultExtensionRuntime:
                 kind="extension",
                 name=metadata.name,
                 path=metadata.path,
-                source=_extension_source(metadata.path, self._cwd, self._resources.agent_dir),
+                source=self._resources.source_for("extension", metadata.path),
             )
             for metadata in result.extensions
         )
@@ -123,14 +123,6 @@ class DefaultExtensionRuntime:
 
 def _as_teardown(handler: Callable[..., object]) -> Callable[[], object]:
     return lambda: handler()
-
-
-def _extension_source(path: Path, cwd: Path, agent_dir: Path) -> ResourceSource:
-    if path.is_relative_to(cwd / ".pi-python" / "extensions"):
-        return "project"
-    if path.is_relative_to(agent_dir / "extensions"):
-        return "global"
-    return "explicit"
 
 
 __all__ = ["DefaultExtensionRuntime"]

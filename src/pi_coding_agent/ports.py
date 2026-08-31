@@ -50,6 +50,15 @@ class ResourceDescriptor:
     metadata: Mapping[str, JsonValue] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ResourceRoot:
+    """One already-resolved resource input shared by discovery and extensions."""
+
+    kind: ResourceKind
+    path: Path
+    source: Literal["explicit", "package"]
+
+
 class ResourceLoader(Protocol):
     def discover(self, cwd: Path) -> tuple[ResourceDescriptor, ...]: ...
 
@@ -121,6 +130,7 @@ __all__ = [
     "ResourceDescriptor",
     "ResourceKind",
     "ResourceLoader",
+    "ResourceRoot",
     "ResourceSource",
     "SessionExporter",
     "SessionImporter",

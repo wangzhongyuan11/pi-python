@@ -9,11 +9,15 @@ from pathlib import Path
 from typing import Protocol
 
 from ..extensions.loader import discover_extensions
-from ..extensions.metadata import ExtensionMetadata
-from ..ports import ResourceDescriptor, ResourceKind
+from ..extensions.metadata import (
+    MANIFEST_NAME,
+    ExtensionManifestError,
+    ExtensionMetadata,
+    read_manifest,
+)
+from ..ports import ResourceDescriptor, ResourceKind, ResourceRoot, ResourceSource
 from ..prompts.system import build_system_prompt, discover_prompt_files
 from .context_files import load_context_files
-from .descriptors import ResourceSource  # re-exported type value guard
 from .discovery import DiscoveryInputs, discover_resources
 from .skills import format_skills_for_prompt, load_skill_descriptors
 from .trust import TrustDecision, TrustStoreError
@@ -44,6 +48,7 @@ class DefaultResourceLoader:
         "_last_result",
         "_package_roots",
         "_project_trust_overrides",
+        "_resource_roots",
         "_trust_store",
     )
 
@@ -53,13 +58,24 @@ class DefaultResourceLoader:
         trust_store: _TrustReader | None = None,
         package_roots: Mapping[ResourceKind, Sequence[Path]] | None = None,
         extension_roots: Sequence[Path] = (),
+        resource_roots: Sequence[ResourceRoot] = (),
         agent_dir: Path | None = None,
     ) -> None:
         self._trust_store = trust_store
-        self._package_roots: dict[ResourceKind, tuple[Path, ...]] = {
-            kind: tuple(roots) for kind, roots in (package_roots or {}).items()
-        }
-        self._extension_roots = tuple(extension_roots)
+        legacy_package_roots = tuple(
+            ResourceRoot(kind=kind, path=root, source="package")
+            for kind, roots in (package_roots or {}).items()
+            for root in roots
+        )
+        legacy_extension_roots = tuple(
+            ResourceRoot(kind="extension", path=root, source="explicit") for root in extension_roots
+        )
+        self._resource_roots = _resolve_roots(
+            (*resource_roots, *legacy_package_roots, *legacy_extension_roots)
+        )
+        self._package_roots: dict[ResourceKind, tuple[Path, ...]] = {}
+        self._extension_roots: tuple[Path, ...] = ()
+        self._index_roots()
         self._agent_dir = (agent_dir or _default_agent_dir()).expanduser().resolve()
         self._project_trust_overrides: dict[Path, bool] = {}
         self._last_cwd: Path | None = None
@@ -75,12 +91,29 @@ class DefaultResourceLoader:
             raise RuntimeError("resources have not been discovered yet")
         return self._last_result
 
+    @property
+    def resolved_roots(self) -> tuple[ResourceRoot, ...]:
+        return self._resource_roots
+
     def discover(self, cwd: Path) -> tuple[ResourceDescriptor, ...]:
         return self.load(cwd=cwd, agent_dir=self._agent_dir).descriptors
 
     def set_project_trusted(self, cwd: Path, trusted: bool) -> None:
         """Set the resolved trust decision for one runtime cwd."""
         self._project_trust_overrides[cwd.resolve()] = trusted
+
+    def set_resource_roots(self, roots: Sequence[ResourceRoot]) -> None:
+        self._resource_roots = _resolve_roots(roots)
+        self._index_roots()
+
+    def source_for(self, kind: ResourceKind, path: Path) -> ResourceSource:
+        resolved = path.resolve()
+        for root in self._resource_roots:
+            if root.kind == kind and (resolved == root.path or resolved.is_relative_to(root.path)):
+                return root.source
+        if resolved.is_relative_to(self._agent_dir / f"{kind}s"):
+            return "global"
+        return "project"
 
     def load(self, *, cwd: Path, agent_dir: Path) -> ResourceLoadResult:
         diagnostics: list[str] = []
@@ -97,6 +130,7 @@ class DefaultResourceLoader:
                     cwd=resolved_cwd,
                     agent_dir=agent_dir.resolve(),
                     project_trusted=project_trusted,
+                    explicit=self._explicit_paths(),
                 )
             )
         )
@@ -147,11 +181,32 @@ class DefaultResourceLoader:
             context_files=context_files,
         )
 
+    def _index_roots(self) -> None:
+        package_roots: dict[ResourceKind, list[Path]] = {}
+        extension_roots: list[Path] = []
+        for root in self._resource_roots:
+            if root.source == "package":
+                package_roots.setdefault(root.kind, []).append(root.path)
+            if root.kind == "extension":
+                extension_roots.append(root.path)
+        self._package_roots = {kind: tuple(paths) for kind, paths in package_roots.items()}
+        self._extension_roots = tuple(extension_roots)
+
+    def _explicit_paths(self) -> dict[ResourceKind, tuple[Path, ...]]:
+        paths: dict[ResourceKind, list[Path]] = {}
+        for root in self._resource_roots:
+            if root.source != "explicit" or root.kind == "extension":
+                continue
+            paths.setdefault(root.kind, []).extend(_resource_files(root.path, root.kind))
+        return {kind: tuple(items) for kind, items in paths.items()}
+
     def _collect_package_layer(self, diagnostics: list[str]) -> list[tuple[ResourceKind, Path]]:
         collected: list[tuple[ResourceKind, Path]] = []
         for kind, roots in self._package_roots.items():
+            if kind == "extension":
+                continue
             for root in roots:
-                directory = root / kind if root.name != kind else root
+                directory = root / kind if root.name not in {kind, f"{kind}s"} else root
                 if not directory.is_dir():
                     diagnostics.append(f"package resource root missing: {root}")
                     continue
@@ -215,8 +270,44 @@ def _collect_extensions(
         seen.add(resolved)
         if not root.is_dir():
             continue
+        if (root / MANIFEST_NAME).is_file():
+            try:
+                discovered.append(read_manifest(root))
+            except ExtensionManifestError:
+                pass
+            continue
         discovered.extend(discover_extensions(root))
     return tuple(discovered)
+
+
+def _resolve_roots(roots: Sequence[ResourceRoot]) -> tuple[ResourceRoot, ...]:
+    resolved: list[ResourceRoot] = []
+    seen: set[tuple[ResourceKind, Path, str]] = set()
+    for root in roots:
+        item = ResourceRoot(
+            kind=root.kind,
+            path=root.path.expanduser().resolve(),
+            source=root.source,
+        )
+        identity = (item.kind, item.path, item.source)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        resolved.append(item)
+    return tuple(resolved)
+
+
+def _resource_files(root: Path, kind: ResourceKind) -> tuple[Path, ...]:
+    if root.is_file():
+        return (root,)
+    if not root.is_dir():
+        return ()
+    if kind == "skill" and (root / "SKILL.md").is_file():
+        return (root / "SKILL.md",)
+    files = [item for item in root.iterdir() if item.is_file()]
+    if kind == "skill":
+        files.extend(item / "SKILL.md" for item in root.iterdir() if (item / "SKILL.md").is_file())
+    return tuple(sorted(files))
 
 
 def _default_agent_dir() -> Path:
