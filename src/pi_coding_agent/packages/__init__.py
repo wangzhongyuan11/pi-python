@@ -2,6 +2,7 @@
 
 from .environment import EnvironmentInstallError, ManagedEnvironment
 from .lockfile import LockEntry, LockfileError, LockfileWriteError, load_entries, save_entries
+from .manager import DefaultPackageManager
 from .npm_data import (
     NpmDataError,
     NpmDataExtraction,
@@ -21,6 +22,7 @@ from .spec import PackageSpec, PackageSpecError, parse_package_spec
 
 __all__ = [
     "EnvironmentInstallError",
+    "DefaultPackageManager",
     "LockEntry",
     "LockfileError",
     "LockfileWriteError",

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pi_agent import AgentTool
 from pi_ai import JsonValue, Provider
@@ -17,6 +17,23 @@ type ResourceKind = Literal["context", "extension", "prompt", "skill", "theme"]
 type ResourceSource = Literal[
     "builtin", "compatibility", "explicit", "global", "package", "project"
 ]
+type PackageScope = Literal["user", "project"]
+
+
+@dataclass(frozen=True, slots=True)
+class ConfiguredPackage:
+    source: str
+    scope: PackageScope
+    filtered: bool
+
+
+@runtime_checkable
+class PackageManager(Protocol):
+    def add_source(self, source: str, *, scope: PackageScope = "user") -> bool: ...
+
+    def remove_source(self, source: str, *, scope: PackageScope = "user") -> bool: ...
+
+    def list_configured_packages(self) -> tuple[ConfiguredPackage, ...]: ...
 
 
 class Settings(Protocol):
@@ -121,12 +138,15 @@ class DefaultSessionImporter:
 
 
 __all__ = [
+    "ConfiguredPackage",
     "DefaultSessionImporter",
     "ExtensionRuntime",
     "InMemorySettings",
     "NoopExtensionRuntime",
     "NoopResourceLoader",
     "NoopSessionExporter",
+    "PackageManager",
+    "PackageScope",
     "ResourceDescriptor",
     "ResourceKind",
     "ResourceLoader",

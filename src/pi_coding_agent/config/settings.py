@@ -11,9 +11,11 @@ from typing import Any, cast
 from pydantic import ValidationError
 
 from pi_ai import JsonValue
+from pi_coding_agent.session.atomic import atomic_write
 
 from .models import (
     KNOWN_SETTING_ALIASES,
+    PackageSource,
     SettingsValidationError,
     SettingsValues,
     settings_payload,
@@ -172,6 +174,42 @@ class SettingsManager:
         snapshot = cast(dict[str, JsonValue], settings_payload(self.values))
         snapshot.update(cast(dict[str, JsonValue], self.compatibility))
         return snapshot
+
+    def package_sources(self, scope: str) -> tuple[str | PackageSource, ...]:
+        path, label = self._package_settings_path(scope)
+        payload = _read(path, label)
+        try:
+            return SettingsValues.model_validate({"packages": payload.get("packages", [])}).packages
+        except ValidationError as error:
+            raise SettingsValidationError(
+                f"invalid {label} settings at {path}: {error.errors(include_input=False)}"
+            ) from error
+
+    def set_package_sources(
+        self,
+        sources: tuple[str | PackageSource, ...],
+        *,
+        scope: str,
+    ) -> None:
+        path, label = self._package_settings_path(scope)
+        validated = SettingsValues.model_validate({"packages": sources}).packages
+        payload = _read(path, label)
+        payload["packages"] = [
+            source if isinstance(source, str) else source.model_dump(by_alias=True, mode="json")
+            for source in validated
+        ]
+        data = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        atomic_write(path, data)
+        self.reload()
+
+    def _package_settings_path(self, scope: str) -> tuple[Path, str]:
+        if scope == "user":
+            return self._agent_dir / "settings.json", "global"
+        if scope == "project":
+            if not self._project_trusted:
+                raise PermissionError("project trust is required to change project packages")
+            return self._cwd / ".pi-python" / "settings.json", "project"
+        raise ValueError(f"unsupported package scope: {scope}")
 
     def resource_paths(self, kind: str) -> tuple[Path, ...]:
         if kind not in {"extensions", "skills", "prompts", "themes"}:
