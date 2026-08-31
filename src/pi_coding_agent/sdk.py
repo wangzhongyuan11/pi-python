@@ -159,6 +159,17 @@ class CreatedAgentSession:
     def product_bootstrap(self) -> ProductBootstrap:
         return self._bootstrap
 
+    async def new_session(self, manager: SessionManager) -> None:
+        await self._runtime.new_session(manager)
+
+    async def resume(
+        self,
+        manager: SessionManager,
+        *,
+        cwd_override: Path | None = None,
+    ) -> None:
+        await self._runtime.resume(manager, cwd_override=cwd_override)
+
     async def switch(self, manager: SessionManager) -> None:
         await self._runtime.switch(manager)
 
