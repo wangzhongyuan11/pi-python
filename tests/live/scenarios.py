@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -52,6 +54,121 @@ result, and report a concise final status. Do not change behavior if the tests p
 
 PROMPT_TIMEOUT_SECONDS = 240
 TOOL_TIMEOUT_SECONDS = 60
+
+TUI_MAX_REQUESTS = 12
+TUI_MAX_COST_USD = 0.50
+TUI_PROCESS_TIMEOUT_SECONDS = 300
+
+_TUI_CHILD = r"""
+import json
+import os
+import sys
+from pathlib import Path
+
+from pi_ai import AssistantMessage, FakeProvider, ToolCall, fake_assistant_message
+from pi_coding_agent.cli.main import main
+from pi_coding_agent.deepseek_credentials import DeepSeekCredentialResolver
+from pi_coding_agent.model_runtime import ModelRuntime, create_model_runtime
+from pi_coding_agent.session.agent_messages import parse_message_entry
+from pi_coding_agent.session.catalog import open_session
+from pi_coding_agent.session.models import MessageEntry
+from tests.live.scenarios import BudgetedProvider, TUI_MAX_REQUESTS
+
+project = Path(os.environ["PI_LIVE_TUI_PROJECT"])
+agent_dir = Path(os.environ["PI_PYTHON_AGENT_DIR"])
+session_dir = Path(os.environ["PI_LIVE_TUI_SESSION_DIR"])
+evidence_path = Path(os.environ["PI_LIVE_TUI_EVIDENCE"])
+
+if os.environ.get("PI_LIVE_TUI_FAKE") == "1":
+    skill = agent_dir / "packages" / "golden-package" / "skills" / "golden-skill.md"
+    first = "golden-package-skill-v1\n"
+    final = first + "golden-package-prompt-v2\n"
+    provider = FakeProvider([
+        fake_assistant_message(
+            ToolCall(id="read-skill", name="read", arguments={"path": str(skill)}),
+            stop_reason="toolUse",
+        ),
+        fake_assistant_message(
+            ToolCall(
+                id="write-proof",
+                name="write",
+                arguments={"path": "package-proof.txt", "content": first},
+            ),
+            stop_reason="toolUse",
+        ),
+        fake_assistant_message("Golden skill applied."),
+        fake_assistant_message(
+            ToolCall(id="read-proof", name="read", arguments={"path": "package-proof.txt"}),
+            stop_reason="toolUse",
+        ),
+        fake_assistant_message(
+            ToolCall(
+                id="edit-proof",
+                name="edit",
+                arguments={
+                    "path": "package-proof.txt",
+                    "edits": [{"oldText": first, "newText": final}],
+                },
+            ),
+            stop_reason="toolUse",
+        ),
+        fake_assistant_message("Golden prompt applied; both lines verified."),
+    ])
+    runtime = ModelRuntime(provider=provider, model=provider.models[0])
+else:
+    repository = Path(os.environ["PI_LIVE_TUI_REPOSITORY"])
+    resolver = DeepSeekCredentialResolver(
+        environ=os.environ,
+        env_file=repository / ".env",
+        cwd=project,
+    )
+    runtime = create_model_runtime(
+        credential_resolver=resolver,
+        model_id="deepseek-v4-flash",
+        thinking_level="off",
+        max_tokens=4096,
+        timeout_seconds=120,
+    )
+
+budgeted = BudgetedProvider(runtime.provider, max_requests=TUI_MAX_REQUESTS)
+runtime = ModelRuntime(provider=budgeted, model=runtime.model)
+exit_code = main(
+    [
+        "--provider", runtime.model.provider,
+        "--model", runtime.model.id,
+        "--thinking", "off",
+        "--session-dir", str(session_dir),
+        "--tools", "all",
+        "--approve",
+    ],
+    model_runtime=runtime,
+)
+
+session_files = tuple(session_dir.glob("*.jsonl"))
+if len(session_files) != 1:
+    raise AssertionError(f"expected one persisted TUI session, got {len(session_files)}")
+manager = open_session(session_files[0])
+messages = [
+    parse_message_entry(entry)
+    for entry in manager.active_path()
+    if isinstance(entry, MessageEntry)
+]
+total_cost = sum(
+    message.usage.cost.total for message in messages if isinstance(message, AssistantMessage)
+)
+evidence_path.write_text(
+    json.dumps(
+        {
+            "exit_code": exit_code,
+            "request_count": budgeted.request_count,
+            "session_path": str(session_files[0]),
+            "total_cost": total_cost,
+        }
+    ),
+    encoding="utf-8",
+)
+raise SystemExit(exit_code)
+"""
 
 
 def verification_command() -> str:
@@ -112,6 +229,14 @@ class ProductScenarioEvidence:
     changed_paths: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class TuiScenarioEvidence:
+    request_count: int
+    total_cost: float
+    session_path: Path
+    transcript: str
+
+
 def create_disposable_project(project: Path) -> None:
     project.mkdir(parents=True)
     (project / "README.md").write_text(
@@ -140,6 +265,78 @@ def create_disposable_project(project: Path) -> None:
         "--quiet",
         "-m",
         "fixture baseline",
+    )
+
+
+def run_packaged_tui_scenario(
+    *,
+    root: Path,
+    live: bool,
+) -> TuiScenarioEvidence:
+    repository = Path(__file__).resolve().parents[2]
+    project = root / "project"
+    agent_dir = root / "agent"
+    session_dir = root / "sessions"
+    evidence_path = root / "tui-evidence.json"
+    project.mkdir(parents=True)
+    (project / "task.md").write_text(
+        "Use the installed golden package resources to create package-proof.txt.\n",
+        encoding="utf-8",
+    )
+    entrypoint_name = "pi-python.exe" if os.name == "nt" else "pi-python"
+    entrypoint = Path(sys.executable).with_name(entrypoint_name)
+    environ = dict(os.environ)
+    environ.update(
+        {
+            "PI_LIVE_TUI_EVIDENCE": str(evidence_path),
+            "PI_LIVE_TUI_PROJECT": str(project),
+            "PI_LIVE_TUI_REPOSITORY": str(repository),
+            "PI_LIVE_TUI_SESSION_DIR": str(session_dir),
+            "PI_PYTHON_AGENT_DIR": str(agent_dir),
+            "PYTHONIOENCODING": "utf-8",
+        }
+    )
+    if not live:
+        environ["PI_LIVE_TUI_FAKE"] = "1"
+
+    installed = subprocess.run(
+        [entrypoint, "install", str(repository / "tests" / "fixtures" / "golden_package")],
+        cwd=project,
+        env=environ,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=False,
+    )
+    if installed.returncode != 0:
+        raise AssertionError(f"package install failed: {installed.stderr}")
+
+    completed = subprocess.run(
+        [sys.executable, "-c", _TUI_CHILD],
+        input=("/skill:golden-skill package-proof.txt\n/golden-prompt package-proof.txt\n/exit\n"),
+        cwd=project,
+        env=environ,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=TUI_PROCESS_TIMEOUT_SECONDS,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"TUI process failed with {completed.returncode}:\n"
+            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+        )
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    proof = (project / "package-proof.txt").read_text(encoding="utf-8")
+    if proof.splitlines() != ["golden-package-skill-v1", "golden-package-prompt-v2"]:
+        raise AssertionError(f"unexpected package proof: {proof!r}")
+    return TuiScenarioEvidence(
+        request_count=int(payload["request_count"]),
+        total_cost=float(payload["total_cost"]),
+        session_path=Path(payload["session_path"]),
+        transcript=completed.stdout,
     )
 
 

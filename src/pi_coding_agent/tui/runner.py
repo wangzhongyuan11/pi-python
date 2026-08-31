@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
+import re
+import shlex
 import shutil
 import sys
 import time
@@ -41,6 +43,8 @@ from ..attachments import (
 from ..cli.run import HeadlessOptions, resolve_session_manager
 from ..extensions.registry import CapabilityRegistry
 from ..model_runtime import ModelRuntime, create_model_runtime, match_model_argument
+from ..resources.prompts import PromptDescriptor, load_prompt_descriptors
+from ..resources.skills import SkillDescriptor, load_skill_descriptors
 from ..sdk import (
     AgentSessionFactory,
     CreateAgentSessionOptions,
@@ -437,6 +441,16 @@ class SlashCompleter(Completer):
 
 
 def _prompt_toolkit_reader() -> ReadLine:
+    if not sys.stdin.isatty():
+
+        async def read_pipe_line(_prompt: str) -> str | None:
+            raw = await asyncio.to_thread(sys.stdin.readline)
+            if not raw:
+                return None
+            return raw.rstrip("\r\n")
+
+        return read_pipe_line
+
     from prompt_toolkit import PromptSession
 
     session: PromptSession[str] = PromptSession(
@@ -451,6 +465,55 @@ def _prompt_toolkit_reader() -> ReadLine:
             return None
 
     return read_line
+
+
+_RESOURCE_COMMAND = re.compile(r"^/([^\s]+)(?:\s+([\s\S]*))?$")
+_PROMPT_ARGUMENT = re.compile(r"\$(ARGUMENTS|@|\d+)")
+
+
+def _resource_command_expander(
+    prompts: tuple[PromptDescriptor, ...],
+    skills: tuple[SkillDescriptor, ...],
+) -> Callable[[str], str]:
+    prompt_by_name = {prompt.name: prompt for prompt in prompts}
+    skill_by_name = {skill.name: skill for skill in skills}
+
+    def expand(line: str) -> str:
+        match = _RESOURCE_COMMAND.fullmatch(line)
+        if match is None:
+            return line
+        name = match.group(1)
+        raw_arguments = match.group(2) or ""
+        if name.startswith("skill:"):
+            skill = skill_by_name.get(name.removeprefix("skill:"))
+            if skill is None:
+                return line
+            body = skill.load_content().strip()
+            block = (
+                f'<skill name="{skill.name}" location="{skill.path.as_posix()}">\n'
+                f"References are relative to {skill.path.parent.as_posix()}.\n\n"
+                f"{body}\n</skill>"
+            )
+            return f"{block}\n\n{raw_arguments}" if raw_arguments else block
+        prompt = prompt_by_name.get(name)
+        if prompt is None:
+            return line
+        try:
+            arguments = shlex.split(raw_arguments)
+        except ValueError:
+            return line
+        all_arguments = " ".join(arguments)
+
+        def replace(argument: re.Match[str]) -> str:
+            token = argument.group(1)
+            if token in {"ARGUMENTS", "@"}:
+                return all_arguments
+            index = int(token) - 1
+            return arguments[index] if 0 <= index < len(arguments) else ""
+
+        return _PROMPT_ARGUMENT.sub(replace, prompt.load_content())
+
+    return expand
 
 
 async def run_interactive(
@@ -520,6 +583,17 @@ async def run_interactive(
         )
     )
     async with created:
+        descriptors = created.services.resources.discover(options.cwd)
+        prompt_paths = tuple(
+            item.path for item in descriptors if item.kind == "prompt" and item.path is not None
+        )
+        skill_paths = tuple(
+            item.path for item in descriptors if item.kind == "skill" and item.path is not None
+        )
+        expand_resource_command = _resource_command_expander(
+            load_prompt_descriptors(prompt_paths).prompts,
+            load_skill_descriptors(skill_paths).skills,
+        )
         if options.name:
             created.session.session_manager.append_session_info(
                 options.name,
@@ -809,7 +883,8 @@ async def run_interactive(
                 if not line.strip():
                     continue
                 try:
-                    await _drive_turn(app_holder[0], created.session, line, char_reader)
+                    expanded_line = expand_resource_command(line)
+                    await _drive_turn(app_holder[0], created.session, expanded_line, char_reader)
                 except Exception as error:
                     stderr.write(f"{error}\n")
                     stderr.flush()

@@ -9,6 +9,7 @@ from pi_tui import UI, NoopUI
 
 from .config.settings import SettingsManager
 from .extensions.runtime import DefaultExtensionRuntime
+from .packages.manager import DefaultPackageManager
 from .ports import (
     DefaultSessionImporter,
     ExtensionRuntime,
@@ -53,7 +54,11 @@ class ProductServices:
         self.settings.reload(project_trusted=trusted)
         if isinstance(self.resources, DefaultResourceLoader):
             self.resources.set_resource_roots(
-                (*self._static_resource_roots, *_settings_resource_roots(self.settings))
+                (
+                    *self._static_resource_roots,
+                    *_settings_resource_roots(self.settings),
+                    *_package_resource_roots(self.settings),
+                )
             )
             self.resources.set_project_trusted(self.cwd, trusted)
             self.resources.load(cwd=self.cwd, agent_dir=self.resources.agent_dir)
@@ -73,10 +78,11 @@ def create_product_services(
             project_trusted=False,
         )
     settings_roots = _settings_resource_roots(settings)
+    package_roots = _package_resource_roots(settings)
     default_resources = DefaultResourceLoader(
         trust_store=FileProjectTrustStore(_agent_dir() / "trust.json"),
         agent_dir=_agent_dir(),
-        resource_roots=(*selected.resource_roots, *settings_roots),
+        resource_roots=(*selected.resource_roots, *settings_roots, *package_roots),
     )
     default_resources.set_project_trusted(resolved_cwd, False)
     resources = selected.resources if selected.resources is not None else default_resources
@@ -112,6 +118,12 @@ def _settings_resource_roots(settings: Settings) -> tuple[ResourceRoot, ...]:
         for plural, kind in singular.items()
         for path in settings.resource_paths(plural)
     )
+
+
+def _package_resource_roots(settings: Settings) -> tuple[ResourceRoot, ...]:
+    if not isinstance(settings, SettingsManager):
+        return ()
+    return DefaultPackageManager(settings=settings).resource_roots()
 
 
 def _agent_dir() -> Path:
