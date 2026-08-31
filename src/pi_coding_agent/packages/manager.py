@@ -16,6 +16,7 @@ from pi_coding_agent.ports import ConfiguredPackage, PackageScope, ResourceRoot
 
 from .environment import Installer, install_requirement
 from .manifest import PackageManifestError, read_package_manifest
+from .npm_data import NpmPackRunner, build_tarball, extract_npm_data
 from .resolver import resolve_source
 from .spec import parse_package_spec
 
@@ -30,10 +31,12 @@ class DefaultPackageManager:
         settings: SettingsManager,
         command_runner: CommandRunner | None = None,
         pypi_installer: Installer | None = None,
+        npm_pack_runner: NpmPackRunner | None = None,
     ) -> None:
         self._settings = settings
         self._command_runner = command_runner or _run_command
         self._pypi_installer = pypi_installer or install_requirement
+        self._npm_pack_runner = npm_pack_runner
 
     def add_source(self, source: str, *, scope: PackageScope = "user") -> bool:
         _validate_source(source)
@@ -130,6 +133,37 @@ class DefaultPackageManager:
         if not any(_source_text(item) == source for item in self._settings.package_sources(scope)):
             raise ValueError(f"No matching package found for {source}")
         return self.install_pypi(source, scope=scope)
+
+    def install_npm_data(
+        self, source: str, *, scope: PackageScope = "user"
+    ) -> tuple[ResourceRoot, ...]:
+        if not source.startswith("npm:") or not source[4:].strip():
+            raise ValueError(f"expected an npm data package source: {source}")
+        packages_root = self._packages_root(scope)
+        packages_root.mkdir(parents=True, exist_ok=True)
+        cache_dir = self._settings.agent_dir / "package-cache" / "npm"
+        tarball = build_tarball(source[4:], cache_dir=cache_dir, runner=self._npm_pack_runner)
+        staging = packages_root / f".npm.{uuid.uuid4().hex}.staging"
+        try:
+            extracted = extract_npm_data(tarball, staging)
+            safe_name = extracted.name.lstrip("@").replace("/", "--")
+            (staging / "package.json").write_text(
+                json.dumps(
+                    {
+                        "name": safe_name,
+                        "pi": {
+                            "skills": ["skills"],
+                            "prompts": ["prompts"],
+                            "themes": ["themes"],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return self._activate_staging(staging, source, scope)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
 
     def _activate_staging(
         self, staging: Path, source: str, scope: PackageScope
