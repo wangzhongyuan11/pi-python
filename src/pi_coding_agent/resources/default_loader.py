@@ -43,6 +43,7 @@ class DefaultResourceLoader:
         "_last_cwd",
         "_last_result",
         "_package_roots",
+        "_project_trust_overrides",
         "_trust_store",
     )
 
@@ -60,6 +61,7 @@ class DefaultResourceLoader:
         }
         self._extension_roots = tuple(extension_roots)
         self._agent_dir = (agent_dir or _default_agent_dir()).expanduser().resolve()
+        self._project_trust_overrides: dict[Path, bool] = {}
         self._last_cwd: Path | None = None
         self._last_result: ResourceLoadResult | None = None
 
@@ -76,18 +78,23 @@ class DefaultResourceLoader:
     def discover(self, cwd: Path) -> tuple[ResourceDescriptor, ...]:
         return self.load(cwd=cwd, agent_dir=self._agent_dir).descriptors
 
+    def set_project_trusted(self, cwd: Path, trusted: bool) -> None:
+        """Set the resolved trust decision for one runtime cwd."""
+        self._project_trust_overrides[cwd.resolve()] = trusted
+
     def load(self, *, cwd: Path, agent_dir: Path) -> ResourceLoadResult:
         diagnostics: list[str] = []
-        project_trusted = False
-        if self._trust_store is not None:
+        resolved_cwd = cwd.resolve()
+        project_trusted = self._project_trust_overrides.get(resolved_cwd, False)
+        if resolved_cwd not in self._project_trust_overrides and self._trust_store is not None:
             decision = _decision_of(self._trust_store, cwd)
             project_trusted = decision == TrustDecision.TRUSTED
-            if not project_trusted:
-                diagnostics.append(f"project resources under {cwd} skipped (untrusted)")
+        if not project_trusted:
+            diagnostics.append(f"project resources under {cwd} skipped (untrusted)")
         descriptors = list(
             discover_resources(
                 DiscoveryInputs(
-                    cwd=cwd.resolve(),
+                    cwd=resolved_cwd,
                     agent_dir=agent_dir.resolve(),
                     project_trusted=project_trusted,
                 )
@@ -104,7 +111,7 @@ class DefaultResourceLoader:
             diagnostics=tuple(diagnostics),
             project_trusted=project_trusted,
         )
-        self._last_cwd = cwd.resolve()
+        self._last_cwd = resolved_cwd
         self._last_result = result
         return result
 

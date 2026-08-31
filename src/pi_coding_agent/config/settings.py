@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
 from pydantic import ValidationError
 
-from .models import KNOWN_SETTING_ALIASES, SettingsValidationError, SettingsValues
+from pi_ai import JsonValue
+
+from .models import (
+    KNOWN_SETTING_ALIASES,
+    SettingsValidationError,
+    SettingsValues,
+    settings_payload,
+)
 
 
 def _merge(base: dict[str, Any], overrides: Mapping[str, Any]) -> dict[str, Any]:
@@ -53,12 +60,18 @@ def _split_unknown(
     return known, unknown
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
+@dataclass(slots=True, kw_only=True)
 class SettingsManager:
     values: SettingsValues
     compatibility: dict[str, Any]
     warnings: tuple[str, ...]
     _resource_bases: dict[str, Path]
+    _agent_dir: Path
+    _cwd: Path
+    _project_trusted: bool
+    _environment_overrides: dict[str, Any]
+    _cli_overrides: dict[str, Any]
+    _runtime_overrides: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
 
     @classmethod
     def load(
@@ -121,7 +134,44 @@ class SettingsManager:
             compatibility=compatibility,
             warnings=tuple(warnings),
             _resource_bases=resource_bases,
+            _agent_dir=resolved_agent,
+            _cwd=resolved_cwd,
+            _project_trusted=project_trusted,
+            _environment_overrides=dict(environment_overrides or {}),
+            _cli_overrides=dict(cli_overrides or {}),
         )
+
+    @property
+    def project_trusted(self) -> bool:
+        return self._project_trusted
+
+    def reload(self, *, project_trusted: bool | None = None) -> None:
+        """Atomically reload file layers while preserving this manager's identity."""
+        next_trust = self._project_trusted if project_trusted is None else project_trusted
+        loaded = type(self).load(
+            agent_dir=self._agent_dir,
+            cwd=self._cwd,
+            project_trusted=next_trust,
+            environment_overrides=self._environment_overrides,
+            cli_overrides=_merge(self._cli_overrides, self._runtime_overrides),
+        )
+        self.values = loaded.values
+        self.compatibility = loaded.compatibility
+        self.warnings = loaded.warnings
+        self._resource_bases = loaded._resource_bases
+        self._project_trusted = next_trust
+
+    def get(self, key: str, default: JsonValue = None) -> JsonValue:
+        return self.snapshot().get(key, default)
+
+    def set(self, key: str, value: JsonValue) -> None:
+        self._runtime_overrides[key] = value
+        self.reload()
+
+    def snapshot(self) -> dict[str, JsonValue]:
+        snapshot = cast(dict[str, JsonValue], settings_payload(self.values))
+        snapshot.update(cast(dict[str, JsonValue], self.compatibility))
+        return snapshot
 
     def resource_paths(self, kind: str) -> tuple[Path, ...]:
         if kind not in {"extensions", "skills", "prompts", "themes"}:
