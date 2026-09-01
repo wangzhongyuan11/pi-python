@@ -802,7 +802,8 @@ async def run_interactive(
             if not 1 <= chosen <= len(items):
                 return CommandOutcome(kind="error", text=f"out of range 1..{len(items)}")
             summary = items[chosen - 1]
-            await switch_to(created, summary)
+            if await switch_to(created, summary):
+                return CommandOutcome(kind="message", text="session switch cancelled by extension")
             rebuild()
             app_holder[0].note(f"switched to {summary.id}")
             return CommandOutcome(kind="none")
@@ -814,7 +815,8 @@ async def run_interactive(
                     kind="error", text="cannot fork: the current session has no persisted turns"
                 )
             summary = _PathRef(path=manager.path)
-            await fork_from(created, summary)
+            if await fork_from(created, summary):
+                return CommandOutcome(kind="message", text="session fork cancelled by extension")
             rebuild()
             app_holder[0].note(f"forked to {created.session.session_manager.header.id}")
             return CommandOutcome(kind="none")

@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from typing import cast
 from uuid import uuid4
 
 from pi_agent import (
@@ -24,7 +25,7 @@ from pi_agent import (
     TurnEndEvent,
     TurnStartEvent,
 )
-from pi_ai import AssistantMessage, ToolResultMessage, UserMessage
+from pi_ai import AssistantMessage, JsonValue, ToolResultMessage, UserMessage
 from pi_ai.wire.messages import dump_message
 
 from .agent_session_events import (
@@ -62,6 +63,13 @@ from .extensions.events import (
     UiPromptEndEvent,
     UiPromptStartEvent,
 )
+from .extensions.session_context import (
+    SessionBeforeCompactEvent,
+    SessionBeforeTreeEvent,
+    SessionCompactEvent,
+    SessionTreeEvent,
+    TreePreparation,
+)
 from .file_tracking import FileOperations
 from .retry import RetryPolicy, Sleep, is_retryable_assistant_error
 from .services import ProductServices
@@ -80,6 +88,10 @@ def _timestamp() -> str:
 
 
 class AgentSessionClosedError(RuntimeError):
+    pass
+
+
+class SessionOperationCancelled(RuntimeError):
     pass
 
 
@@ -290,15 +302,59 @@ class AgentSession:
             # Upstream prepareCompaction returns undefined in this case: there is
             # nothing to summarize, so compacting would only drop live context.
             raise ValueError("nothing to compact: all recent entries are kept")
-        await self._emit(CompactionStartEvent(reason=reason), asyncio.Event())
-        entry = await self._compaction_service.compact(
-            entries,
-            cutpoint,
-            reason=reason,
-            tokens_before=sum(self._compaction_token_count(item) for item in entries),
-            previous_summary=previous_summary,
+        extension_values = _extension_values(
+            await self.services.extensions.emit(
+                SessionBeforeCompactEvent(
+                    preparation=cutpoint,
+                    branch_entries=tuple(entries),
+                    reason=reason,
+                    will_retry=reason == "overflow",
+                )
+            )
         )
+        if _cancelled(extension_values):
+            raise SessionOperationCancelled("compaction cancelled by extension")
+        await self._emit(CompactionStartEvent(reason=reason), asyncio.Event())
+        tokens_before = sum(self._compaction_token_count(item) for item in entries)
+        custom = _nested_mapping(extension_values, "compaction")
+        custom_summary = None if custom is None else custom.get("summary")
+        from_extension = isinstance(custom_summary, str)
+        if isinstance(custom_summary, str) and custom is not None:
+            first_kept = custom.get("first_kept_entry_id")
+            first_kept_id = (
+                first_kept if isinstance(first_kept, str) else entries[cutpoint.first_kept_index].id
+            )
+            if first_kept_id not in {item.id for item in entries}:
+                raise ValueError("extension compaction selected an unknown kept entry")
+            entry = CompactionEntry(
+                type="compaction",
+                id=self._entry_id_factory(),
+                parent_id=self.session_manager.leaf_id,
+                timestamp=self._timestamp_factory(),
+                summary=custom_summary,
+                first_kept_entry_id=first_kept_id,
+                tokens_before=tokens_before,
+                details=cast("JsonValue", custom.get("details")),
+                from_hook=True,
+            )
+            self.session_manager.append(entry)
+        else:
+            entry = await self._compaction_service.compact(
+                entries,
+                cutpoint,
+                reason=reason,
+                tokens_before=tokens_before,
+                previous_summary=previous_summary,
+            )
         self._restore_active_context()
+        await self.services.extensions.emit(
+            SessionCompactEvent(
+                compaction_entry=entry,
+                from_extension=from_extension,
+                reason=reason,
+                will_retry=reason == "overflow",
+            )
+        )
         await self._emit(
             CompactionEndEvent(reason=reason, tokens_before=entry.tokens_before),
             asyncio.Event(),
@@ -315,19 +371,73 @@ class AgentSession:
         self._ensure_open()
         tree = SessionTree.build(self.session_manager.entries)
         target_path = tree.active_path(target_id)
+        old_leaf_id = self.session_manager.leaf_id
+        diff = diff_branch_paths(self.session_manager.active_path(), target_path)
+        extension_values = _extension_values(
+            await self.services.extensions.emit(
+                SessionBeforeTreeEvent(
+                    preparation=TreePreparation(
+                        target_id=target_id,
+                        old_leaf_id=old_leaf_id,
+                        common_ancestor_id=diff.lca_id,
+                        entries_to_summarize=diff.from_entries,
+                        user_wants_summary=summarize,
+                    )
+                )
+            )
+        )
+        if _cancelled(extension_values):
+            raise SessionOperationCancelled("tree navigation cancelled by extension")
+        custom = _nested_mapping(extension_values, "summary") if summarize else None
+        custom_summary = None if custom is None else custom.get("summary")
         if not summarize:
             self.session_manager.branch(target_id)
             self._restore_active_context()
+            await self.services.extensions.emit(
+                SessionTreeEvent(
+                    new_leaf_id=self.session_manager.leaf_id,
+                    old_leaf_id=old_leaf_id,
+                )
+            )
             return None
+        if isinstance(custom_summary, str) and custom is not None and diff.from_entries:
+            self.session_manager.branch(target_id)
+            entry = BranchSummaryEntry(
+                type="branch_summary",
+                id=self._entry_id_factory(),
+                parent_id=target_id,
+                timestamp=self._timestamp_factory(),
+                from_id=diff.from_entries[-1].id,
+                summary=custom_summary,
+                details=cast("JsonValue", custom.get("details")),
+                from_hook=True,
+            )
+            self.session_manager.append(entry)
+            self._restore_active_context()
+            await self.services.extensions.emit(
+                SessionTreeEvent(
+                    new_leaf_id=self.session_manager.leaf_id,
+                    old_leaf_id=old_leaf_id,
+                    summary_entry=entry,
+                    from_extension=True,
+                )
+            )
+            return entry
         if self._branch_summary_service is None:
             raise RuntimeError("branch summarization is not configured for this AgentSession")
-        diff = diff_branch_paths(self.session_manager.active_path(), target_path)
         entry = await self._branch_summary_service.record(
             diff, target_id=target_id, file_ops=file_ops
         )
         if entry is None:
             self.session_manager.branch(target_id)
         self._restore_active_context()
+        await self.services.extensions.emit(
+            SessionTreeEvent(
+                new_leaf_id=self.session_manager.leaf_id,
+                old_leaf_id=old_leaf_id,
+                summary_entry=entry,
+            )
+        )
         return entry
 
     def abort(self) -> None:
@@ -471,7 +581,7 @@ class AgentSession:
     async def _compact_for_overflow(self) -> bool:
         try:
             await self.compact(reason="overflow")
-        except ValueError:
+        except (SessionOperationCancelled, ValueError):
             return False
         return True
 
@@ -487,7 +597,7 @@ class AgentSession:
             return
         try:
             await self.compact(reason="threshold")
-        except ValueError:
+        except (SessionOperationCancelled, ValueError):
             return
 
     def _context_tokens(self, message: AssistantMessage) -> int | None:
@@ -511,4 +621,31 @@ class AgentSession:
         self.agent.restore_messages(context.messages)
 
 
-__all__ = ["AgentSession", "AgentSessionClosedError"]
+def _extension_values(outcomes: Sequence[object]) -> tuple[object, ...]:
+    return tuple(
+        value for outcome in outcomes if (value := getattr(outcome, "value", None)) is not None
+    )
+
+
+def _cancelled(values: Sequence[object]) -> bool:
+    return any(
+        isinstance(value, Mapping) and cast("Mapping[str, object]", value).get("cancel") is True
+        for value in values
+    )
+
+
+def _nested_mapping(values: Sequence[object], key: str) -> Mapping[str, object] | None:
+    for value in values:
+        if not isinstance(value, Mapping):
+            continue
+        nested = cast("Mapping[str, object]", value).get(key)
+        if isinstance(nested, Mapping):
+            return cast("Mapping[str, object]", nested)
+    return None
+
+
+__all__ = [
+    "AgentSession",
+    "AgentSessionClosedError",
+    "SessionOperationCancelled",
+]

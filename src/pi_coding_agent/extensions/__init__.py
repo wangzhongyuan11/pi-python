@@ -43,6 +43,18 @@ from .registry import (
     RegistryInvalidNameError,
 )
 from .runtime import DefaultExtensionRuntime
+from .session_context import (
+    ExtensionSessionEvent,
+    SessionBeforeCompactEvent,
+    SessionBeforeForkEvent,
+    SessionBeforeSwitchEvent,
+    SessionBeforeTreeEvent,
+    SessionCompactEvent,
+    SessionShutdownEvent,
+    SessionStartEvent,
+    SessionTreeEvent,
+    TreePreparation,
+)
 from .ui_api import ExtensionUiApi, UiBridge, UiUnavailableError
 
 __all__ = [
@@ -72,6 +84,7 @@ __all__ = [
     "ExtensionToolExecutionStartEvent",
     "ExtensionToolExecutionUpdateEvent",
     "ExtensionNotTrustedError",
+    "ExtensionSessionEvent",
     "ExtensionTurnEndEvent",
     "ExtensionTurnStartEvent",
     "ExtensionUiApi",
@@ -83,10 +96,19 @@ __all__ = [
     "RegistryConflictError",
     "RegistryError",
     "RegistryInvalidNameError",
+    "SessionBeforeCompactEvent",
+    "SessionBeforeForkEvent",
+    "SessionBeforeSwitchEvent",
+    "SessionBeforeTreeEvent",
+    "SessionCompactEvent",
+    "SessionShutdownEvent",
+    "SessionStartEvent",
+    "SessionTreeEvent",
     "TeardownToken",
     "ToolCallEvent",
     "ToolCallEventResult",
     "ToolResultEvent",
+    "TreePreparation",
     "UiBridge",
     "UiPromptEndEvent",
     "UiPromptStartEvent",

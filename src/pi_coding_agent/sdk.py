@@ -36,7 +36,12 @@ from pi_ai import (
 )
 
 from .agent_session import AgentSession
-from .agent_session_runtime import AgentSessionRuntime, RuntimeComponents, RuntimeTarget
+from .agent_session_runtime import (
+    AgentSessionRuntime,
+    RuntimeComponents,
+    RuntimeEventSink,
+    RuntimeTarget,
+)
 from .bootstrap import BootstrapConfig, ProductBootstrap, bootstrap
 from .branch_summary import BranchSummarizer, BranchSummaryService
 from .builtin_extensions.permission_gate import PermissionGate
@@ -336,22 +341,22 @@ class CreatedAgentSession:
     def product_bootstrap(self) -> ProductBootstrap:
         return self._bootstrap
 
-    async def new_session(self, manager: SessionManager) -> None:
-        await self._runtime.new_session(manager)
+    async def new_session(self, manager: SessionManager) -> bool:
+        return await self._runtime.new_session(manager)
 
     async def resume(
         self,
         manager: SessionManager,
         *,
         cwd_override: Path | None = None,
-    ) -> None:
-        await self._runtime.resume(manager, cwd_override=cwd_override)
+    ) -> bool:
+        return await self._runtime.resume(manager, cwd_override=cwd_override)
 
-    async def switch(self, manager: SessionManager) -> None:
-        await self._runtime.switch(manager)
+    async def switch(self, manager: SessionManager) -> bool:
+        return await self._runtime.switch(manager)
 
-    async def fork(self, manager: SessionManager) -> None:
-        await self._runtime.fork(manager)
+    async def fork(self, manager: SessionManager) -> bool:
+        return await self._runtime.fork(manager)
 
     async def close(self) -> None:
         if self._closed:
@@ -565,7 +570,15 @@ async def create_agent_session(
             branch_summary_service=branch_summary_service,
             on_close=close_services,
         )
-        return RuntimeComponents(session=session, services=services)
+        return RuntimeComponents(
+            session=session,
+            services=services,
+            events=(
+                cast("RuntimeEventSink", services.extensions)
+                if callable(getattr(services.extensions, "emit", None))
+                else None
+            ),
+        )
 
     runtime = await AgentSessionRuntime[AgentSession, ProductServices].create(
         factory,
