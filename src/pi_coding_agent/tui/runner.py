@@ -10,7 +10,7 @@ import shlex
 import shutil
 import sys
 import time
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -56,7 +56,7 @@ from ..sdk import (
 from ..services import ServiceOverrides
 from ..session.catalog import SessionSummary, list_sessions
 from ..session.errors import SessionNotFoundError
-from .commands import CommandDispatcher, CommandOutcome, CommandSpec
+from .commands import CommandDispatcher, CommandOutcome, CommandSpec, ShortcutDispatcher
 from .config_ui import ModelSettingsController
 from .main import InteractiveApp
 from .render_messages import render_replay_lines
@@ -70,6 +70,10 @@ _MAX_IMAGE_BYTES = 10 * 1024 * 1024
 _KEY_POLL_INTERVAL_SECONDS = 0.02
 
 _WIN32_ENABLE_PROCESSED_INPUT = 0x0001
+
+
+def _empty_flags() -> dict[str, bool | str]:
+    return {}
 
 
 def _disable_console_interrupt() -> Callable[[], None] | None:
@@ -327,6 +331,7 @@ class InteractiveOptions:
     service_overrides: ServiceOverrides = field(default_factory=ServiceOverrides)
     runtime_factory: AgentSessionFactory | None = None
     project_trusted: bool = False
+    extension_flags: Mapping[str, bool | str] = field(default_factory=_empty_flags)
 
 
 class _StreamTerminal:
@@ -447,7 +452,26 @@ class SlashCompleter(Completer):
                     )
 
 
-def _prompt_toolkit_reader() -> ReadLine:
+def _prompt_toolkit_keys(name: str) -> tuple[str, ...] | None:
+    parts = name.casefold().split("+")
+    key = parts[-1]
+    modifiers = set(parts[:-1])
+    if "ctrl" in modifiers:
+        key = f"c-{key}"
+    if "alt" in modifiers or "meta" in modifiers:
+        return ("escape", key)
+    if modifiers - {"ctrl", "shift"}:
+        return None
+    if modifiers == {"shift"}:
+        key = {"tab": "s-tab"}.get(key, key.upper())
+    return (key,)
+
+
+def _prompt_toolkit_reader(
+    *,
+    shortcuts: ShortcutDispatcher | None = None,
+    commands: tuple[tuple[str, str], ...] = _TUI_COMMANDS,
+) -> ReadLine:
     if not sys.stdin.isatty():
 
         async def read_pipe_line(_prompt: str) -> str | None:
@@ -459,10 +483,28 @@ def _prompt_toolkit_reader() -> ReadLine:
         return read_pipe_line
 
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.key_binding.key_processor import KeyPressEvent
+
+    bindings = KeyBindings()
+    if shortcuts is not None:
+        for shortcut_name in shortcuts.names:
+            keys = _prompt_toolkit_keys(shortcut_name)
+            if keys is None:
+                continue
+
+            def invoke(event: KeyPressEvent, name: str = shortcut_name) -> None:
+                async def run_shortcut() -> None:
+                    await shortcuts.dispatch(name)
+
+                event.app.create_background_task(run_shortcut())
+
+            bindings.add(*keys)(invoke)
 
     session: PromptSession[str] = PromptSession(
-        completer=SlashCompleter(),
+        completer=SlashCompleter(commands=commands),
         complete_while_typing=True,
+        key_bindings=bindings,
     )
 
     async def read_line(prompt: str) -> str | None:
@@ -580,6 +622,7 @@ async def run_interactive(
             cwd=options.cwd,
             service_overrides=options.service_overrides,
             project_trusted=options.project_trusted,
+            extension_flags=options.extension_flags,
             credential_resolver=options.credential_resolver,
             model_runtime=runtime,
             session_manager=manager,
@@ -607,8 +650,9 @@ async def run_interactive(
                 entry_id_factory=lambda: uuid4().hex,
                 timestamp_factory=_utc_timestamp,
             )
-        dispatcher = CommandDispatcher()
-        reader_fn = read_line or _prompt_toolkit_reader()
+        extensions = created.services.extensions
+        extension_context = extensions.actions if isinstance(extensions, _HasActions) else None
+        dispatcher = CommandDispatcher(context=extension_context)
         app_holder: list[InteractiveApp] = []
         controller_holder: list[ModelSettingsController] = []
 
@@ -710,27 +754,30 @@ async def run_interactive(
             payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
             return CommandOutcome(kind="raw", text=f"\x1b]52;c;{payload}\x07")
 
+        def show_help(_args: str) -> CommandOutcome:
+            return CommandOutcome(
+                kind="message",
+                text=(
+                    "/help  show commands\n"
+                    "/model [provider/model]  show or switch model (partial match ok)\n"
+                    "/thinking [level]  show or set thinking level\n"
+                    "/attach <path>  attach a file or image to the next prompt\n"
+                    "/copy  copy the last reply to the terminal clipboard (OSC-52)\n"
+                    "/compact  summarize the conversation so far into a checkpoint\n"
+                    "/sessions  list saved sessions and switch by number\n"
+                    "/fork  fork the current session and switch to the copy\n"
+                    "/exit  leave the session\n"
+                    "\n"
+                    "keys: Esc/Ctrl+C cancels the running turn; a line typed during\n"
+                    "a turn steers it; Ctrl+C while idle exits on the second press"
+                ),
+            )
+
         dispatcher.register(
             CommandSpec(
                 name="help",
                 source="builtin",
-                handler=lambda _args: CommandOutcome(
-                    kind="message",
-                    text=(
-                        "/help  show commands\n"
-                        "/model [provider/model]  show or switch model (partial match ok)\n"
-                        "/thinking [level]  show or set thinking level\n"
-                        "/attach <path>  attach a file or image to the next prompt\n"
-                        "/copy  copy the last reply to the terminal clipboard (OSC-52)\n"
-                        "/compact  summarize the conversation so far into a checkpoint\n"
-                        "/sessions  list saved sessions and switch by number\n"
-                        "/fork  fork the current session and switch to the copy\n"
-                        "/exit  leave the session\n"
-                        "\n"
-                        "keys: Esc/Ctrl+C cancels the running turn; a line typed during\n"
-                        "a turn steers it; Ctrl+C while idle exits on the second press"
-                    ),
-                ),
+                handler=show_help,
             )
         )
         dispatcher.register(CommandSpec(name="model", source="builtin", handler=select_model))
@@ -856,7 +903,8 @@ async def run_interactive(
         dispatcher.register(
             CommandSpec(name="fork", source="builtin", handler=fork_current_session)
         )
-        extensions = created.services.extensions
+        shortcuts: ShortcutDispatcher | None = None
+        extension_commands: tuple[tuple[str, str], ...] = ()
         if isinstance(extensions, _HasRegistry):
             skipped = dispatcher.register_registry(extensions.registry)
             if skipped:
@@ -865,6 +913,18 @@ async def run_interactive(
                     f"skipped extension commands already provided by the product: {names}\n"
                 )
                 stderr.flush()
+            shortcuts = ShortcutDispatcher.from_registry(
+                extensions.registry, context=extension_context
+            )
+            extension_commands = tuple(
+                (f"/{item.name}", f"extension: {item.source}")
+                for item in extensions.registry.registrations("command")
+                if item.name not in skipped
+            )
+        reader_fn = read_line or _prompt_toolkit_reader(
+            shortcuts=shortcuts,
+            commands=(*_TUI_COMMANDS, *extension_commands),
+        )
         fullscreen = options.tui_mode == "fullscreen"
         terminal = _StreamTerminal(stdout, fullscreen=fullscreen)
         renderer = ScreenRenderer(terminal) if fullscreen else InlineRenderer(terminal)

@@ -44,6 +44,7 @@ from .loader import (
 from .metadata import ExtensionManifestError, ExtensionMetadata, read_manifest
 from .registry import (
     CapabilityRegistry,
+    ExtensionFlagError,
     FlagState,
     Registration,
     RegistryConflictError,
@@ -84,6 +85,7 @@ __all__ = [
     "ExtensionContextUnavailableError",
     "ExtensionContextUsage",
     "ExtensionExecResult",
+    "ExtensionFlagError",
     "ExtensionToolInfo",
     "ExtensionIdentity",
     "ExtensionLifecycle",

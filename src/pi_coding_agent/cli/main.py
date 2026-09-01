@@ -17,6 +17,7 @@ from pi_ai.credentials import CredentialResolutionError
 from pi_ai.providers.deepseek import DEEPSEEK_MODELS, DEFAULT_DEEPSEEK_MODEL
 
 from ..deepseek_credentials import DeepSeekCredentialResolver
+from ..extensions.registry import ExtensionFlagError
 from ..model_runtime import ModelRuntime, UnknownModelError
 from ..providers import UnknownProviderError
 from ..sdk import AgentSessionFactory, ToolSelection
@@ -163,12 +164,6 @@ def main(
         return 2
     except SystemExit as error:
         return error.code if isinstance(error.code, int) else int(error.code is not None)
-    if not command_mode and extras:
-        # Extension-registered flags will claim these in a later phase; until
-        # then the frozen Phase 6 contract rejects unknown arguments.
-        errors.write(f"Error: unrecognized arguments: --{next(iter(extras))}\n")
-        return 2
-
     if arguments.list_models is not None:
         return _list_models(arguments.list_models, output)
     if command_mode and arguments.command == "auth":
@@ -249,6 +244,7 @@ def main(
                         ),
                         runtime_factory=runtime_factory,
                         project_trusted=project_trusted,
+                        extension_flags=extras,
                     ),
                     stdout=output,
                     stderr=errors,
@@ -256,6 +252,18 @@ def main(
             )
         except KeyboardInterrupt:
             return 130
+        except ExtensionFlagError as error:
+            errors.write(f"Error: {error}\n")
+            return 2
+        except (
+            CredentialResolutionError,
+            SessionError,
+            UnknownModelError,
+            UnknownProviderError,
+            ValueError,
+        ) as error:
+            errors.write(f"{error}\n")
+            return 1
     resolver = _resolver(arguments, cwd=runtime_cwd, environ=runtime_environ)
     try:
         return asyncio.run(
@@ -280,6 +288,7 @@ def main(
                     ),
                     runtime_factory=runtime_factory,
                     project_trusted=project_trusted,
+                    extension_flags=extras,
                 ),
                 stdout=output,
                 stderr=errors,
@@ -287,6 +296,9 @@ def main(
         )
     except KeyboardInterrupt:
         return 130
+    except ExtensionFlagError as error:
+        errors.write(f"Error: {error}\n")
+        return 2
     except (
         CredentialResolutionError,
         SessionError,

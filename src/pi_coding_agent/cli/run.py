@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,10 @@ def _timestamp() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _empty_flags() -> dict[str, bool | str]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class HeadlessOptions:
     cwd: Path
@@ -47,6 +52,7 @@ class HeadlessOptions:
     service_overrides: ServiceOverrides = field(default_factory=ServiceOverrides)
     runtime_factory: AgentSessionFactory | None = None
     project_trusted: bool = False
+    extension_flags: Mapping[str, bool | str] = field(default_factory=_empty_flags)
 
 
 def resolve_session_manager(options: HeadlessOptions) -> SessionManager | None:
@@ -93,6 +99,7 @@ async def run_headless(options: HeadlessOptions, *, stdout: TextIO, stderr: Text
             cwd=options.cwd,
             service_overrides=options.service_overrides,
             project_trusted=options.project_trusted,
+            extension_flags=options.extension_flags,
             model_runtime=runtime,
             session_manager=resolve_session_manager(options),
             thinking_level=thinking,

@@ -60,6 +60,7 @@ from .extensions.events import (
     ToolResultEvent,
 )
 from .extensions.hooks import HookOutcome
+from .extensions.registry import ExtensionFlagError
 from .model_runtime import ModelRuntime, create_model_runtime
 from .ports import ExtensionRuntime, Settings
 from .prompts.system import build_system_prompt
@@ -284,11 +285,16 @@ class ToolSelection:
     exclude_tools: tuple[str, ...] | None = None
 
 
+def _empty_extension_flags() -> dict[str, bool | str]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CreateAgentSessionOptions:
     cwd: Path = field(default_factory=Path.cwd)
     service_overrides: ServiceOverrides = field(default_factory=ServiceOverrides)
     project_trusted: bool = False
+    extension_flags: Mapping[str, bool | str] = field(default_factory=_empty_extension_flags)
     model_runtime: ModelRuntime | None = None
     credential_resolver: CredentialResolver | None = None
     session_manager: SessionManager | None = None
@@ -425,6 +431,17 @@ async def create_agent_session(
             extension_provider_ids.clear()
         services.resources.discover(target.cwd)
         await services.extensions.start()
+        if selected.extension_flags:
+            apply_flags = getattr(services.extensions, "apply_flags", None)
+            if not callable(apply_flags):
+                names = ", ".join(f"--{name}" for name in selected.extension_flags)
+                await services.extensions.close()
+                raise ExtensionFlagError(f"unrecognized arguments: {names}")
+            try:
+                apply_flags(dict(selected.extension_flags))
+            except Exception:
+                await services.extensions.close()
+                raise
         for provider in services.extensions.providers:
             model_runtime.register_provider(provider)
             extension_provider_ids.add(provider.id)

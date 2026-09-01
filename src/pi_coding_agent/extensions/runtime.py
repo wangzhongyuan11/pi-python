@@ -18,7 +18,7 @@ from .hooks import ApplyHookResult, HookOutcome, HookRunner
 from .lifecycle import ExtensionLifecycle
 from .loader import ExtensionLoader
 from .metadata import ExtensionMetadata
-from .registry import CapabilityRegistry
+from .registry import CapabilityRegistry, ExtensionFlagError, FlagState
 
 
 class DefaultExtensionRuntime:
@@ -105,6 +105,29 @@ class DefaultExtensionRuntime:
             ),
             project_trusted=self._resources.last_result.project_trusted,
         )
+
+    def apply_flags(self, values: dict[str, bool | str]) -> None:
+        """Apply only flags claimed by the activated extension registry."""
+
+        unknown: list[str] = []
+        errors: list[str] = []
+        for name, value in values.items():
+            flag_name = name if name.startswith("--") else f"--{name}"
+            registration = self._registry.lookup("flag", flag_name)
+            if registration is None or not isinstance(registration.payload, FlagState):
+                unknown.append(flag_name)
+                continue
+            state = registration.payload
+            if state.value_type == "boolean":
+                state.set(True)
+            elif isinstance(value, str):
+                state.set(value)
+            else:
+                errors.append(f'Extension flag "{flag_name}" requires a value')
+        if unknown:
+            errors.append(f"unrecognized arguments: {' '.join(unknown)}")
+        if errors:
+            raise ExtensionFlagError("; ".join(errors))
 
     async def emit(self, event: object) -> tuple[HookOutcome, ...]:
         event_name = getattr(event, "type", None)
