@@ -90,6 +90,11 @@ class DefaultExtensionRuntime:
         )
         self._diagnostics = list(result.diagnostics)
         for metadata in result.extensions:
+            source = self._resources.source_for("extension", metadata.path)
+            if source in {"explicit", "global", "package"} or (
+                source == "project" and result.project_trusted
+            ):
+                self._loader.grant_trust(metadata)
             if not self._loader.is_trusted(metadata):
                 continue
             await self._activate(metadata)

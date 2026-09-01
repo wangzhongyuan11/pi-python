@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pi_coding_agent.extensions.metadata import read_manifest
 from pi_coding_agent.extensions.runtime import DefaultExtensionRuntime
 from pi_coding_agent.resources.default_loader import DefaultResourceLoader
 
@@ -24,10 +23,10 @@ def _extension(root: Path, marker: Path) -> Path:
     return directory
 
 
-def test_runtime_enumerates_without_loading_until_identity_is_trusted(tmp_path: Path) -> None:
+def test_runtime_activates_an_explicit_extension_and_tears_it_down(tmp_path: Path) -> None:
     marker = tmp_path / "closed.txt"
     extensions = tmp_path / "extensions"
-    directory = _extension(extensions, marker)
+    _extension(extensions, marker)
     loader = DefaultResourceLoader(
         agent_dir=tmp_path / "agent",
         extension_roots=(extensions,),
@@ -38,11 +37,6 @@ def test_runtime_enumerates_without_loading_until_identity_is_trusted(tmp_path: 
 
     discovered = asyncio.run(runtime.start())
     assert [item.name for item in discovered] == ["example"]
-    assert runtime.registry.registrations() == ()
-
-    asyncio.run(runtime.close())
-    runtime.grant_trust(read_manifest(directory))
-    asyncio.run(runtime.start())
 
     command = runtime.registry.lookup("command", "hello")
     assert command is not None
