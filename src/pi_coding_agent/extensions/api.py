@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Literal
 
+from .hooks import Handler, HookRunner
 from .registry import CapabilityRegistry, FlagState, Registration, RegistrationKind
 
 
 class ExtensionAPI:
     """Registers capabilities on behalf of one extension into one registry."""
 
-    __slots__ = ("_name", "_registry")
+    __slots__ = ("_hooks", "_name", "_registry")
 
-    def __init__(self, name: str, *, registry: CapabilityRegistry | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        *,
+        registry: CapabilityRegistry | None = None,
+        hooks: HookRunner | None = None,
+    ) -> None:
         self._name = name
         self._registry = registry if registry is not None else CapabilityRegistry()
+        self._hooks = hooks if hooks is not None else HookRunner()
 
     @property
     def registry(self) -> CapabilityRegistry:
@@ -63,6 +72,10 @@ class ExtensionAPI:
 
     def define_shortcut(self, name: str, handler: object | None = None) -> Registration:
         return self._define("shortcut", name, handler)
+
+    def on(self, event: str, handler: Handler) -> Callable[[], None]:
+        """Register an ordered lifecycle handler for this extension generation."""
+        return self._hooks.register(event, handler)
 
 
 __all__ = ["ExtensionAPI"]

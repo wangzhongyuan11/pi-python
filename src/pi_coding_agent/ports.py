@@ -107,6 +107,8 @@ class ExtensionRuntime(Protocol):
     @property
     def providers(self) -> tuple[Provider, ...]: ...
 
+    async def emit(self, event: object) -> tuple[object, ...]: ...
+
     async def start(self) -> tuple[ResourceDescriptor, ...]: ...
 
     async def close(self) -> None: ...
@@ -119,6 +121,10 @@ class NoopExtensionRuntime:
 
     @property
     def providers(self) -> tuple[Provider, ...]:
+        return ()
+
+    async def emit(self, event: object) -> tuple[object, ...]:
+        del event
         return ()
 
     async def start(self) -> tuple[ResourceDescriptor, ...]:

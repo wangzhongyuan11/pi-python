@@ -2,6 +2,19 @@
 
 from .api import ExtensionAPI
 from .auth_api import CredentialStore, CredentialStoreUnavailableError, ExtensionAuthApi
+from .events import (
+    AgentSettledEvent,
+    ExtensionAgentEndEvent,
+    ExtensionAgentStartEvent,
+    ExtensionLifecycleEvent,
+    ExtensionMessageEndEvent,
+    ExtensionMessageStartEvent,
+    ExtensionMessageUpdateEvent,
+    ExtensionTurnEndEvent,
+    ExtensionTurnStartEvent,
+    UiPromptEndEvent,
+    UiPromptStartEvent,
+)
 from .hooks import HookOutcome, HookRunner, invoke_hook
 from .lifecycle import ExtensionLifecycle, LifecycleClosedError, TeardownToken
 from .loader import (
@@ -23,18 +36,27 @@ from .runtime import DefaultExtensionRuntime
 from .ui_api import ExtensionUiApi, UiBridge, UiUnavailableError
 
 __all__ = [
+    "AgentSettledEvent",
     "CapabilityRegistry",
     "CredentialStore",
     "CredentialStoreUnavailableError",
     "DefaultExtensionRuntime",
+    "ExtensionAgentEndEvent",
+    "ExtensionAgentStartEvent",
     "ExtensionAPI",
     "ExtensionAuthApi",
     "ExtensionIdentity",
     "ExtensionLifecycle",
+    "ExtensionLifecycleEvent",
     "ExtensionLoader",
     "ExtensionManifestError",
     "ExtensionMetadata",
+    "ExtensionMessageEndEvent",
+    "ExtensionMessageStartEvent",
+    "ExtensionMessageUpdateEvent",
     "ExtensionNotTrustedError",
+    "ExtensionTurnEndEvent",
+    "ExtensionTurnStartEvent",
     "ExtensionUiApi",
     "FlagState",
     "HookOutcome",
@@ -46,6 +68,8 @@ __all__ = [
     "RegistryInvalidNameError",
     "TeardownToken",
     "UiBridge",
+    "UiPromptEndEvent",
+    "UiPromptStartEvent",
     "UiUnavailableError",
     "discover_extensions",
     "invoke_hook",

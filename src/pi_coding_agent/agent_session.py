@@ -4,16 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from pi_agent import (
     Agent,
+    AgentEndEvent,
     AgentEvent,
     AgentMessage,
+    AgentStartEvent,
     AgentState,
     MessageEndEvent,
+    MessageStartEvent,
+    MessageUpdateEvent,
+    TurnEndEvent,
+    TurnStartEvent,
 )
 from pi_ai import AssistantMessage, ToolResultMessage, UserMessage
 from pi_ai.wire.messages import dump_message
@@ -37,6 +44,19 @@ from .compaction.cutpoint import (
 )
 from .compaction.service import CompactionReason, CompactionService
 from .context_overflow import OverflowRecovery, is_context_overflow
+from .extensions.events import (
+    AgentSettledEvent,
+    ExtensionAgentEndEvent,
+    ExtensionAgentStartEvent,
+    ExtensionLifecycleEvent,
+    ExtensionMessageEndEvent,
+    ExtensionMessageStartEvent,
+    ExtensionMessageUpdateEvent,
+    ExtensionTurnEndEvent,
+    ExtensionTurnStartEvent,
+    UiPromptEndEvent,
+    UiPromptStartEvent,
+)
 from .file_tracking import FileOperations
 from .retry import RetryPolicy, Sleep, is_retryable_assistant_error
 from .services import ProductServices
@@ -75,6 +95,7 @@ class AgentSession:
         "_retry_policy",
         "_sleep",
         "_timestamp_factory",
+        "_extension_turn_index",
         "_unsubscribe_agent",
         "agent",
         "services",
@@ -117,6 +138,7 @@ class AgentSession:
         self._compaction_token_count = compaction_token_count
         self._branch_summary_service = branch_summary_service
         self._listeners: list[AgentSessionEventListener] = []
+        self._extension_turn_index = 0
         self._closed = False
         self._unsubscribe_agent = agent.subscribe(self._handle_agent_event)
 
@@ -143,6 +165,15 @@ class AgentSession:
         return unsubscribe
 
     async def prompt(self, prompt: str | AgentMessage | Sequence[AgentMessage]) -> None:
+        self._ensure_open()
+        await self._emit_extension(UiPromptStartEvent(prompt=prompt))
+        try:
+            await self._run_prompt(prompt)
+            await self._emit_extension(AgentSettledEvent())
+        finally:
+            await self._emit_extension(UiPromptEndEvent(prompt=prompt))
+
+    async def _run_prompt(self, prompt: str | AgentMessage | Sequence[AgentMessage]) -> None:
         self._ensure_open()
         next_prompt: str | AgentMessage | Sequence[AgentMessage] = prompt
         self._retry_cancel = asyncio.Event()
@@ -315,12 +346,49 @@ class AgentSession:
                 await result
 
     async def _handle_agent_event(self, event: AgentEvent, signal: asyncio.Event) -> None:
+        await self._emit_agent_extension(event)
         entry: MessageEntry | None = None
         if isinstance(event, MessageEndEvent):
             entry = self._persist_message(event)
         await self._emit(event, signal)
         if entry is not None:
             await self._emit(EntryAppendedEvent(entry=entry), signal)
+
+    async def _emit_agent_extension(self, event: AgentEvent) -> None:
+        extension_event: ExtensionLifecycleEvent
+        if isinstance(event, AgentStartEvent):
+            self._extension_turn_index = 0
+            extension_event = ExtensionAgentStartEvent()
+        elif isinstance(event, AgentEndEvent):
+            extension_event = ExtensionAgentEndEvent(messages=event.messages)
+        elif isinstance(event, TurnStartEvent):
+            extension_event = ExtensionTurnStartEvent(
+                turn_index=self._extension_turn_index,
+                timestamp=time.time_ns() // 1_000_000,
+            )
+        elif isinstance(event, TurnEndEvent):
+            extension_event = ExtensionTurnEndEvent(
+                turn_index=self._extension_turn_index,
+                message=event.message,
+                tool_results=event.tool_results,
+            )
+        elif isinstance(event, MessageStartEvent):
+            extension_event = ExtensionMessageStartEvent(message=event.message)
+        elif isinstance(event, MessageUpdateEvent):
+            extension_event = ExtensionMessageUpdateEvent(
+                message=event.message,
+                assistant_message_event=event.assistant_message_event,
+            )
+        elif isinstance(event, MessageEndEvent):
+            extension_event = ExtensionMessageEndEvent(message=event.message)
+        else:
+            return
+        await self._emit_extension(extension_event)
+        if isinstance(event, TurnEndEvent):
+            self._extension_turn_index += 1
+
+    async def _emit_extension(self, event: ExtensionLifecycleEvent) -> None:
+        await self.services.extensions.emit(event)
 
     async def _emit(self, event: AgentSessionEvent, signal: asyncio.Event) -> None:
         for listener in tuple(self._listeners):

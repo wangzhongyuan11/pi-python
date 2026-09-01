@@ -13,6 +13,7 @@ from pi_ai import Provider
 from ..ports import ResourceDescriptor
 from ..resources.default_loader import DefaultResourceLoader
 from .api import ExtensionAPI
+from .hooks import HookOutcome, HookRunner
 from .lifecycle import ExtensionLifecycle
 from .loader import ExtensionLoader
 from .metadata import ExtensionMetadata
@@ -26,6 +27,7 @@ class DefaultExtensionRuntime:
         "_cwd",
         "_descriptors",
         "_diagnostics",
+        "_hooks",
         "_lifecycle",
         "_loader",
         "_registry",
@@ -38,6 +40,7 @@ class DefaultExtensionRuntime:
         self._resources = resources
         self._loader = ExtensionLoader()
         self._registry = CapabilityRegistry()
+        self._hooks = HookRunner()
         self._lifecycle = ExtensionLifecycle()
         self._descriptors: tuple[ResourceDescriptor, ...] = ()
         self._diagnostics: list[str] = []
@@ -72,12 +75,25 @@ class DefaultExtensionRuntime:
     def grant_trust(self, metadata: ExtensionMetadata) -> None:
         self._loader.grant_trust(metadata)
 
+    async def emit(self, event: object) -> tuple[HookOutcome, ...]:
+        event_name = getattr(event, "type", None)
+        if not isinstance(event_name, str):
+            raise TypeError("extension event must expose a string type")
+        outcomes = tuple(await self._hooks.emit(event_name, event))
+        self._diagnostics.extend(
+            f"{event_name} handler failed: {outcome.error}"
+            for outcome in outcomes
+            if outcome.error is not None
+        )
+        return outcomes
+
     async def start(self) -> tuple[ResourceDescriptor, ...]:
         if self._started:
             return self._descriptors
         if not self._lifecycle.active:
             self._lifecycle.begin_generation()
             self._registry = CapabilityRegistry()
+            self._hooks = HookRunner()
         result = self._resources.load(cwd=self._cwd, agent_dir=self._resources.agent_dir)
         self._descriptors = tuple(
             ResourceDescriptor(
@@ -114,7 +130,9 @@ class DefaultExtensionRuntime:
             factory = getattr(module, "activate", None)
             if not callable(factory):
                 raise TypeError("extension entry must define callable activate(api)")
-            teardown = factory(ExtensionAPI(metadata.name, registry=self._registry))
+            teardown = factory(
+                ExtensionAPI(metadata.name, registry=self._registry, hooks=self._hooks)
+            )
             if inspect.isawaitable(teardown):
                 teardown = await teardown
             if teardown is not None:
