@@ -39,7 +39,7 @@ class ModelRuntime:
 
     @property
     def models(self) -> tuple[Model, ...]:
-        return self._provider.models
+        return tuple(model for provider in self._providers.values() for model in provider.models)
 
     @property
     def model(self) -> Model:
