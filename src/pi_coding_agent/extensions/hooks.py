@@ -16,6 +16,7 @@ class HookOutcome:
 
 
 Handler = Callable[..., object]
+ApplyHookResult = Callable[[object, object], None]
 
 
 class HookRunner:
@@ -42,6 +43,21 @@ class HookRunner:
             outcomes.append(await invoke_hook(handler, *args, **kwargs))
         return outcomes
 
+    async def emit_chained(
+        self,
+        event: str,
+        value: object,
+        apply_result: ApplyHookResult,
+    ) -> list[HookOutcome]:
+        """Apply each successful result before the next ordered handler runs."""
+        outcomes: list[HookOutcome] = []
+        for handler in tuple(self._handlers.get(event, ())):
+            outcome = await invoke_hook(handler, value)
+            outcomes.append(outcome)
+            if outcome.ok and outcome.value is not None:
+                apply_result(value, outcome.value)
+        return outcomes
+
 
 async def invoke_hook(handler: Handler, /, *args: object, **kwargs: object) -> HookOutcome:
     try:
@@ -55,4 +71,4 @@ async def invoke_hook(handler: Handler, /, *args: object, **kwargs: object) -> H
     return HookOutcome(ok=True, value=result)
 
 
-__all__ = ["HookOutcome", "HookRunner", "invoke_hook"]
+__all__ = ["ApplyHookResult", "HookOutcome", "HookRunner", "invoke_hook"]

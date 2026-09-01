@@ -6,7 +6,14 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from pi_agent import AgentMessage
-from pi_ai import AssistantMessage, AssistantMessageEvent, ToolResultMessage
+from pi_ai import (
+    AssistantMessage,
+    AssistantMessageEvent,
+    ImageContent,
+    TextContent,
+    ToolResultMessage,
+    Usage,
+)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -71,6 +78,82 @@ class ExtensionMessageEndEvent:
     type: Literal["message_end"] = field(default="message_end", init=False)
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExtensionToolExecutionStartEvent:
+    tool_call_id: str
+    tool_name: str
+    args: object
+    type: Literal["tool_execution_start"] = field(default="tool_execution_start", init=False)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExtensionToolExecutionUpdateEvent:
+    tool_call_id: str
+    tool_name: str
+    args: object
+    partial_result: object
+    type: Literal["tool_execution_update"] = field(default="tool_execution_update", init=False)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExtensionToolExecutionEndEvent:
+    tool_call_id: str
+    tool_name: str
+    result: object
+    is_error: bool
+    type: Literal["tool_execution_end"] = field(default="tool_execution_end", init=False)
+
+
+@dataclass(slots=True, kw_only=True)
+class ContextEvent:
+    messages: tuple[AgentMessage, ...]
+    type: Literal["context"] = field(default="context", init=False)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContextEventResult:
+    messages: tuple[AgentMessage, ...] | None = None
+
+
+@dataclass(slots=True, kw_only=True)
+class BeforeProviderRequestEvent:
+    payload: object
+    type: Literal["before_provider_request"] = field(default="before_provider_request", init=False)
+
+
+@dataclass(slots=True, kw_only=True)
+class BeforeProviderHeadersEvent:
+    headers: dict[str, str | None]
+    type: Literal["before_provider_headers"] = field(default="before_provider_headers", init=False)
+
+
+@dataclass(slots=True, kw_only=True)
+class ToolCallEvent:
+    tool_call_id: str
+    tool_name: str
+    input: dict[str, object]
+    type: Literal["tool_call"] = field(default="tool_call", init=False)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ToolCallEventResult:
+    block: bool = False
+    reason: str | None = None
+    terminate: bool = False
+
+
+@dataclass(slots=True, kw_only=True)
+class ToolResultEvent:
+    tool_call_id: str
+    tool_name: str
+    input: dict[str, object]
+    content: tuple[TextContent | ImageContent, ...]
+    details: object
+    is_error: bool
+    usage: Usage | None
+    type: Literal["tool_result"] = field(default="tool_result", init=False)
+
+
 type ExtensionLifecycleEvent = (
     UiPromptStartEvent
     | UiPromptEndEvent
@@ -82,19 +165,44 @@ type ExtensionLifecycleEvent = (
     | ExtensionMessageStartEvent
     | ExtensionMessageUpdateEvent
     | ExtensionMessageEndEvent
+    | ExtensionToolExecutionStartEvent
+    | ExtensionToolExecutionUpdateEvent
+    | ExtensionToolExecutionEndEvent
 )
+
+type ExtensionControlEvent = (
+    ContextEvent
+    | BeforeProviderRequestEvent
+    | BeforeProviderHeadersEvent
+    | ToolCallEvent
+    | ToolResultEvent
+)
+
+type ExtensionEvent = ExtensionLifecycleEvent | ExtensionControlEvent
 
 
 __all__ = [
     "AgentSettledEvent",
+    "BeforeProviderHeadersEvent",
+    "BeforeProviderRequestEvent",
+    "ContextEvent",
+    "ContextEventResult",
     "ExtensionAgentEndEvent",
     "ExtensionAgentStartEvent",
+    "ExtensionControlEvent",
+    "ExtensionEvent",
     "ExtensionLifecycleEvent",
     "ExtensionMessageEndEvent",
     "ExtensionMessageStartEvent",
     "ExtensionMessageUpdateEvent",
+    "ExtensionToolExecutionEndEvent",
+    "ExtensionToolExecutionStartEvent",
+    "ExtensionToolExecutionUpdateEvent",
     "ExtensionTurnEndEvent",
     "ExtensionTurnStartEvent",
+    "ToolCallEvent",
+    "ToolCallEventResult",
+    "ToolResultEvent",
     "UiPromptEndEvent",
     "UiPromptStartEvent",
 ]

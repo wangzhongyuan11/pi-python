@@ -46,6 +46,7 @@ class BeforeToolCallResult:
     block: bool = False
     reason: str | None = None
     terminate: bool = False
+    arguments: object = _UNSET
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -154,6 +155,9 @@ async def execute_tool_call(
                         event_sink,
                         emit_message_events=_emit_message_events,
                     )
+                if before is not None and before.arguments is not _UNSET:
+                    prepared = tool.prepare_arguments(cast("Any", before.arguments))
+                    args = tool.validate_arguments(prepared)
             if abort_event is not None and abort_event.is_set():
                 return await _finalize_immediate(
                     tool_call,

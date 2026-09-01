@@ -166,6 +166,8 @@ def build_deepseek_request(
     }
     if thinking_level != "off":
         request["reasoning_effort"] = thinking_level
+    if model.headers:
+        request["extra_headers"] = dict(model.headers)
     tools = _convert_tools(context)
     if tools is not None:
         request["tools"] = tools

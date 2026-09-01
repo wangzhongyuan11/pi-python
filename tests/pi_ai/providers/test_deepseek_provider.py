@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
-from typing import Any
+from collections.abc import AsyncIterator, Mapping
+from typing import Any, cast
 
 import pi_ai
-from pi_ai import Context, DoneEvent, Provider, TextContent, UserMessage
+from pi_ai import Context, DoneEvent, Model, Provider, StreamOptions, TextContent, UserMessage
 from pi_ai.providers.deepseek import (
     DEFAULT_DEEPSEEK_MODEL,
     DeepSeekProvider,
@@ -82,6 +82,39 @@ def test_factory_defaults_to_pro_and_zero_request_retries() -> None:
     assert isinstance(provider, DeepSeekProvider)
     assert DEFAULT_DEEPSEEK_MODEL in provider.models
     assert provider.models[-1].id == "deepseek-v4-flash-vision-exp"
+
+
+def test_provider_applies_payload_and_header_hooks_to_the_http_request() -> None:
+    client = MockClient()
+    provider = DeepSeekProvider(
+        credential_resolver=StaticCredentialResolver(),
+        client_factory=lambda api_key, base_url, timeout: client,
+    )
+
+    async def on_payload(payload: object, _model: Model) -> object:
+        request = dict(cast("dict[str, object]", payload))
+        request["max_tokens"] = 17
+        return request
+
+    async def transform_headers(
+        headers: dict[str, str | None], _model: Model
+    ) -> Mapping[str, str | None]:
+        headers["X-Extension-Hook"] = "enabled"
+        return headers
+
+    async def run() -> None:
+        stream = provider.stream(
+            DEFAULT_DEEPSEEK_MODEL,
+            Context(messages=()),
+            StreamOptions(on_payload=on_payload, transform_headers=transform_headers),
+        )
+        await stream.result()
+
+    asyncio.run(run())
+
+    assert client.chat.completions.request is not None
+    assert client.chat.completions.request["max_tokens"] == 17
+    assert client.chat.completions.request["extra_headers"] == {"X-Extension-Hook": "enabled"}
 
 
 def test_deepseek_provider_is_exported_from_pi_ai() -> None:

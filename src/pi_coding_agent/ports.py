@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -109,6 +109,10 @@ class ExtensionRuntime(Protocol):
 
     async def emit(self, event: object) -> tuple[object, ...]: ...
 
+    async def emit_chained(
+        self, event: object, apply_result: Callable[[object, object], None]
+    ) -> tuple[object, ...]: ...
+
     async def start(self) -> tuple[ResourceDescriptor, ...]: ...
 
     async def close(self) -> None: ...
@@ -125,6 +129,12 @@ class NoopExtensionRuntime:
 
     async def emit(self, event: object) -> tuple[object, ...]:
         del event
+        return ()
+
+    async def emit_chained(
+        self, event: object, apply_result: Callable[[object, object], None]
+    ) -> tuple[object, ...]:
+        del event, apply_result
         return ()
 
     async def start(self) -> tuple[ResourceDescriptor, ...]:

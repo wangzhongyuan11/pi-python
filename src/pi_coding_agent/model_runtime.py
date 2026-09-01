@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from pi_ai import (
     AssistantStream,
     Context,
@@ -82,7 +84,12 @@ class ModelRuntime:
     ) -> AssistantStream:
         canonical_model = self._find_model(model)
         provider = self._find_provider(canonical_model.provider)
-        return provider.stream(canonical_model, context, options)
+        request_model = (
+            canonical_model
+            if model.headers == canonical_model.headers
+            else replace(canonical_model, headers=model.headers)
+        )
+        return provider.stream(request_model, context, options)
 
     def _find_model(self, model: Model) -> Model:
         provider = self._providers.get(model.provider)

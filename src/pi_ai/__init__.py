@@ -47,7 +47,14 @@ from .models import (
     get_supported_thinking_levels,
     models_are_equal,
 )
-from .provider import CredentialResolver, Provider, StreamFunction, StreamOptions
+from .provider import (
+    CredentialResolver,
+    Provider,
+    ProviderHeadersHook,
+    ProviderPayloadHook,
+    StreamFunction,
+    StreamOptions,
+)
 from .providers.deepseek import DeepSeekProvider, create_deepseek_provider
 from .stream import (
     AssistantStream,
@@ -104,6 +111,8 @@ __all__ = [
     "ModelInput",
     "ModelThinkingLevel",
     "Provider",
+    "ProviderHeadersHook",
+    "ProviderPayloadHook",
     "StopReason",
     "StreamConsumedError",
     "StreamFunction",

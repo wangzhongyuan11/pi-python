@@ -19,6 +19,8 @@ from pi_agent import (
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
+    ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
     TurnEndEvent,
     TurnStartEvent,
 )
@@ -52,6 +54,9 @@ from .extensions.events import (
     ExtensionMessageEndEvent,
     ExtensionMessageStartEvent,
     ExtensionMessageUpdateEvent,
+    ExtensionToolExecutionEndEvent,
+    ExtensionToolExecutionStartEvent,
+    ExtensionToolExecutionUpdateEvent,
     ExtensionTurnEndEvent,
     ExtensionTurnStartEvent,
     UiPromptEndEvent,
@@ -381,8 +386,26 @@ class AgentSession:
             )
         elif isinstance(event, MessageEndEvent):
             extension_event = ExtensionMessageEndEvent(message=event.message)
+        elif isinstance(event, ToolExecutionStartEvent):
+            extension_event = ExtensionToolExecutionStartEvent(
+                tool_call_id=event.tool_call_id,
+                tool_name=event.tool_name,
+                args=event.args,
+            )
+        elif isinstance(event, ToolExecutionUpdateEvent):
+            extension_event = ExtensionToolExecutionUpdateEvent(
+                tool_call_id=event.tool_call_id,
+                tool_name=event.tool_name,
+                args=event.args,
+                partial_result=event.partial_result,
+            )
         else:
-            return
+            extension_event = ExtensionToolExecutionEndEvent(
+                tool_call_id=event.tool_call_id,
+                tool_name=event.tool_name,
+                result=event.result,
+                is_error=event.is_error,
+            )
         await self._emit_extension(extension_event)
         if isinstance(event, TurnEndEvent):
             self._extension_turn_index += 1

@@ -3,16 +3,37 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal, Protocol, Self, cast, runtime_checkable
 from uuid import uuid4
 
-from pi_agent import Agent, AgentTool
-from pi_ai import CredentialResolver, ModelThinkingLevel, clamp_thinking_level
+from pydantic import BaseModel
+
+from pi_agent import (
+    AfterToolCallContext,
+    AfterToolCallResult,
+    Agent,
+    AgentMessage,
+    AgentTool,
+    BeforeToolCallContext,
+    BeforeToolCallResult,
+)
+from pi_ai import (
+    AssistantStream,
+    Context,
+    CredentialResolver,
+    ImageContent,
+    Model,
+    ModelThinkingLevel,
+    StreamOptions,
+    TextContent,
+    Usage,
+    clamp_thinking_level,
+)
 
 from .agent_session import AgentSession
 from .agent_session_runtime import AgentSessionRuntime, RuntimeComponents, RuntimeTarget
@@ -24,8 +45,18 @@ from .compaction.model_summarizer import ModelRuntimeSummarizer
 from .compaction.service import CompactionService
 from .compaction.summarizer import CompactionSummarizer
 from .deepseek_credentials import DeepSeekCredentialResolver
+from .extensions.events import (
+    BeforeProviderHeadersEvent,
+    BeforeProviderRequestEvent,
+    ContextEvent,
+    ContextEventResult,
+    ToolCallEvent,
+    ToolCallEventResult,
+    ToolResultEvent,
+)
+from .extensions.hooks import HookOutcome
 from .model_runtime import ModelRuntime, create_model_runtime
-from .ports import Settings
+from .ports import ExtensionRuntime, Settings
 from .prompts.system import build_system_prompt
 from .services import ProductServices, ServiceOverrides, create_product_services
 from .session.context import project_session_context
@@ -39,6 +70,151 @@ from .tools.registry import ALL_TOOL_NAMES, DEFAULT_CODING_TOOL_NAMES, create_al
 
 def _timestamp() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _hook_values(outcomes: Sequence[object]) -> tuple[object, ...]:
+    return tuple(
+        outcome.value
+        for outcome in outcomes
+        if isinstance(outcome, HookOutcome) and outcome.ok and outcome.value is not None
+    )
+
+
+async def _transform_extension_context(
+    extensions: ExtensionRuntime,
+    messages: Sequence[AgentMessage],
+) -> tuple[AgentMessage, ...]:
+    event = ContextEvent(messages=tuple(messages))
+
+    def apply_result(raw_event: object, value: object) -> None:
+        current_event = cast("ContextEvent", raw_event)
+        if isinstance(value, ContextEventResult) and value.messages is not None:
+            current_event.messages = value.messages
+        elif isinstance(value, Mapping):
+            mapping = cast("Mapping[str, object]", value)
+            replacement = mapping.get("messages")
+            if isinstance(replacement, Sequence):
+                current_event.messages = tuple(cast("Sequence[AgentMessage]", replacement))
+
+    await extensions.emit_chained(event, apply_result)
+    return event.messages
+
+
+def _stream_with_extension_hooks(
+    extensions: ExtensionRuntime,
+    model_runtime: ModelRuntime,
+    model: Model,
+    context: Context,
+    options: StreamOptions | None = None,
+) -> AssistantStream:
+    async def on_payload(payload: object, _model: Model) -> object:
+        request_event = BeforeProviderRequestEvent(payload=payload)
+
+        def apply_result(raw_event: object, value: object) -> None:
+            cast("BeforeProviderRequestEvent", raw_event).payload = value
+
+        await extensions.emit_chained(request_event, apply_result)
+        return request_event.payload
+
+    async def transform_headers(
+        headers: dict[str, str | None], _model: Model
+    ) -> Mapping[str, str | None]:
+        headers_event = BeforeProviderHeadersEvent(headers=headers)
+        await extensions.emit(headers_event)
+        return headers_event.headers
+
+    hooked_options = replace(
+        options or StreamOptions(),
+        on_payload=on_payload,
+        transform_headers=transform_headers,
+    )
+    return model_runtime.stream(model, context, hooked_options)
+
+
+async def _before_extension_tool_call(
+    extensions: ExtensionRuntime,
+    context: BeforeToolCallContext,
+) -> BeforeToolCallResult:
+    args = context.args
+    input_value: dict[str, object]
+    if isinstance(args, BaseModel):
+        input_value = cast("dict[str, object]", args.model_dump(mode="python"))
+    elif isinstance(args, Mapping):
+        input_value = dict(cast("Mapping[str, object]", args))
+    else:
+        input_value = {name: value for name, value in context.tool_call.arguments.items()}
+    event = ToolCallEvent(
+        tool_call_id=context.tool_call.id,
+        tool_name=context.tool_call.name,
+        input=input_value,
+    )
+    values = _hook_values(await extensions.emit(event))
+    block = False
+    reason: str | None = None
+    terminate = False
+    for value in values:
+        if isinstance(value, ToolCallEventResult):
+            block = block or value.block
+            reason = value.reason if value.reason is not None else reason
+            terminate = terminate or value.terminate
+        elif isinstance(value, Mapping):
+            mapping = cast("Mapping[str, object]", value)
+            block = block or mapping.get("block") is True
+            if isinstance(mapping.get("reason"), str):
+                reason = cast("str", mapping["reason"])
+            terminate = terminate or mapping.get("terminate") is True
+    return BeforeToolCallResult(
+        block=block,
+        reason=reason,
+        terminate=terminate,
+        arguments=event.input,
+    )
+
+
+async def _after_extension_tool_call(
+    extensions: ExtensionRuntime,
+    context: AfterToolCallContext,
+) -> AfterToolCallResult:
+    input_value: dict[str, object]
+    if isinstance(context.args, BaseModel):
+        input_value = cast("dict[str, object]", context.args.model_dump(mode="python"))
+    else:
+        input_value = {name: value for name, value in context.tool_call.arguments.items()}
+    event = ToolResultEvent(
+        tool_call_id=context.tool_call.id,
+        tool_name=context.tool_call.name,
+        input=input_value,
+        content=context.result.content,
+        details=context.result.details,
+        is_error=context.is_error,
+        usage=context.result.usage,
+    )
+
+    def apply_result(raw_event: object, value: object) -> None:
+        current_event = cast("ToolResultEvent", raw_event)
+        if not isinstance(value, Mapping):
+            return
+        mapping = cast("Mapping[str, object]", value)
+        content = mapping.get("content")
+        if isinstance(content, Sequence):
+            blocks = cast("Sequence[object]", content)
+            if all(isinstance(block, TextContent | ImageContent) for block in blocks):
+                current_event.content = tuple(cast("Sequence[TextContent | ImageContent]", blocks))
+        if "details" in mapping:
+            current_event.details = mapping["details"]
+        if isinstance(mapping.get("is_error"), bool):
+            current_event.is_error = cast("bool", mapping["is_error"])
+        usage = mapping.get("usage")
+        if isinstance(usage, Usage) or usage is None and "usage" in mapping:
+            current_event.usage = usage
+
+    await extensions.emit_chained(event, apply_result)
+    return AfterToolCallResult(
+        content=event.content,
+        details=event.details,
+        is_error=event.is_error,
+        usage=event.usage,
+    )
 
 
 def default_session_dir(cwd: Path) -> Path:
@@ -320,7 +496,9 @@ async def create_agent_session(
         )
         agent = Agent(
             model=agent_model,
-            stream_function=model_runtime.stream,
+            stream_function=lambda model, context, options=None: _stream_with_extension_hooks(
+                services.extensions, model_runtime, model, context, options
+            ),
             system_prompt=(
                 services.resources.build_system_prompt(target.cwd)
                 if selected.system_prompt is None
@@ -334,6 +512,15 @@ async def create_agent_session(
             thinking_level=thinking_level,
             tools=tools,
             messages=messages,
+            transform_context=lambda messages: _transform_extension_context(
+                services.extensions, messages
+            ),
+            before_tool_call=lambda context: _before_extension_tool_call(
+                services.extensions, context
+            ),
+            after_tool_call=lambda context: _after_extension_tool_call(
+                services.extensions, context
+            ),
             clock=selected.agent_clock,
         )
         compaction_service = CompactionService(
