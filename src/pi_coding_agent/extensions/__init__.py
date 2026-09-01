@@ -1,7 +1,12 @@
 """Python extension surface for the coding agent."""
 
 from .api import ExtensionAPI
-from .auth_api import CredentialStore, CredentialStoreUnavailableError, ExtensionAuthApi
+from .auth_api import (
+    CredentialStore,
+    CredentialStoreUnavailableError,
+    ExtensionAuthApi,
+    MemoryCredentialStore,
+)
 from .context import (
     ExtensionActions,
     ExtensionCommandInfo,
@@ -51,6 +56,7 @@ from .registry import (
     RegistryError,
     RegistryInvalidNameError,
 )
+from .renderers import ExtensionRendererRegistry
 from .runtime import DefaultExtensionRuntime
 from .session_context import (
     ExtensionSessionEvent,
@@ -96,6 +102,7 @@ __all__ = [
     "ExtensionMessageEndEvent",
     "ExtensionMessageStartEvent",
     "ExtensionMessageUpdateEvent",
+    "ExtensionRendererRegistry",
     "ExtensionToolExecutionEndEvent",
     "ExtensionToolExecutionStartEvent",
     "ExtensionToolExecutionUpdateEvent",
@@ -108,6 +115,7 @@ __all__ = [
     "HookOutcome",
     "HookRunner",
     "LifecycleClosedError",
+    "MemoryCredentialStore",
     "Registration",
     "RegistryConflictError",
     "RegistryError",

@@ -17,6 +17,21 @@ class CredentialStoreUnavailableError(RuntimeError):
     """A credential operation was requested while no store is configured."""
 
 
+class MemoryCredentialStore:
+    """Session-local credential storage owned by one extension generation."""
+
+    __slots__ = ("_values",)
+
+    def __init__(self) -> None:
+        self._values: dict[str, str] = {}
+
+    def get(self, provider: str) -> str | None:
+        return self._values.get(provider)
+
+    def set(self, provider: str, secret: str) -> None:
+        self._values[provider] = secret
+
+
 class ExtensionAuthApi:
     """Reads and stores provider credentials through the configured store."""
 
@@ -39,7 +54,7 @@ class ExtensionAuthApi:
         self._require_store().set(provider, secret)
 
     async def prompt_for_secret(self, provider: str, ui: ExtensionUiApi) -> str | None:
-        secret = ui.request_input(f"API key for {provider}:")
+        secret = await ui.input(f"API key for {provider}:")
         if secret:
             self.store_secret(provider, secret)
         return secret
@@ -49,4 +64,5 @@ __all__ = [
     "CredentialStore",
     "CredentialStoreUnavailableError",
     "ExtensionAuthApi",
+    "MemoryCredentialStore",
 ]

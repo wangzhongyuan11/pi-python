@@ -9,16 +9,20 @@ from typing import Any, cast
 
 from pi_agent import AgentTool
 from pi_ai import Provider
+from pi_tui import UI
 
 from ..ports import ResourceDescriptor
 from ..resources.default_loader import DefaultResourceLoader
 from .api import ExtensionAPI
+from .auth_api import ExtensionAuthApi, MemoryCredentialStore
 from .context import ExtensionActions, ExtensionCommandInfo
 from .hooks import ApplyHookResult, HookOutcome, HookRunner
 from .lifecycle import ExtensionLifecycle
 from .loader import ExtensionLoader
 from .metadata import ExtensionMetadata
 from .registry import CapabilityRegistry, ExtensionFlagError, FlagState
+from .renderers import ExtensionRendererRegistry
+from .ui_api import ExtensionUiApi
 
 
 class DefaultExtensionRuntime:
@@ -27,19 +31,27 @@ class DefaultExtensionRuntime:
     __slots__ = (
         "_cwd",
         "_actions",
+        "_auth_stores",
         "_descriptors",
         "_diagnostics",
         "_hooks",
         "_lifecycle",
         "_loader",
         "_registry",
+        "_renderers",
         "_resources",
         "_started",
+        "_ui",
     )
 
-    def __init__(self, *, cwd: Path, resources: DefaultResourceLoader) -> None:
+    def __init__(
+        self, *, cwd: Path, resources: DefaultResourceLoader, ui: UI | None = None
+    ) -> None:
         self._cwd = cwd.resolve()
         self._actions = ExtensionActions()
+        self._ui = ExtensionUiApi(product_ui=ui)
+        self._auth_stores: dict[str, MemoryCredentialStore] = {}
+        self._renderers = ExtensionRendererRegistry()
         self._resources = resources
         self._loader = ExtensionLoader()
         self._registry = CapabilityRegistry()
@@ -56,6 +68,10 @@ class DefaultExtensionRuntime:
     @property
     def diagnostics(self) -> tuple[str, ...]:
         return tuple(self._diagnostics)
+
+    @property
+    def renderers(self) -> ExtensionRendererRegistry:
+        return self._renderers
 
     @property
     def tools(self) -> tuple[AgentTool[Any, Any], ...]:
@@ -163,6 +179,7 @@ class DefaultExtensionRuntime:
             self._registry = CapabilityRegistry()
             self._hooks = HookRunner()
             self._actions = ExtensionActions()
+            self._renderers = ExtensionRendererRegistry()
         result = self._resources.load(cwd=self._cwd, agent_dir=self._resources.agent_dir)
         self._descriptors = tuple(
             ResourceDescriptor(
@@ -206,6 +223,11 @@ class DefaultExtensionRuntime:
                     registry=self._registry,
                     hooks=self._hooks,
                     actions=self._actions,
+                    ui=self._ui,
+                    auth=ExtensionAuthApi(
+                        store=self._auth_stores.setdefault(metadata.name, MemoryCredentialStore())
+                    ),
+                    renderers=self._renderers,
                 )
             )
             if inspect.isawaitable(teardown):
@@ -216,6 +238,7 @@ class DefaultExtensionRuntime:
                 self._lifecycle.register_teardown(_as_teardown(teardown))
         except Exception as error:
             self._registry.remove_source(metadata.name)
+            self._renderers.remove_source(metadata.name)
             self._diagnostics.append(f"extension {metadata.name!r} failed: {error}")
 
 

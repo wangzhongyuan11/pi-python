@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from pi_agent import (
     AgentMessage,
+    CustomMessage,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
@@ -26,6 +27,7 @@ from ..agent_session_events import (
     CompactionEndEvent,
     CompactionStartEvent,
 )
+from ..extensions.renderers import ExtensionRendererRegistry
 from .commands import CommandDispatcher
 from .render_messages import AssistantMessageView
 from .render_status import RetryStatusLine, SessionStatusLine
@@ -48,6 +50,7 @@ class InteractiveApp:
         "_counter",
         "_dispatcher",
         "_raw_sink",
+        "_renderers",
         "_retry",
         "_screen_sink",
         "_session",
@@ -69,12 +72,14 @@ class InteractiveApp:
         commit_sink: Callable[[], None] | None = None,
         raw_sink: Callable[[str], None] | None = None,
         compose_prompt: Callable[[str], AgentMessage | str] | None = None,
+        renderers: ExtensionRendererRegistry | None = None,
         initial_lines: tuple[str, ...] = (),
         width: int = 80,
     ) -> None:
         self._session = session
         self._dispatcher = dispatcher
         self._compose_prompt = compose_prompt
+        self._renderers = renderers
         self._width = width
         self._retry = RetryStatusLine()
         self._session_status = SessionStatusLine()
@@ -165,21 +170,51 @@ class InteractiveApp:
             self._active_message = None
         elif isinstance(event, MessageEndEvent) and isinstance(event.message, UserMessage):
             self._render_user(event.message)
+        elif isinstance(event, MessageEndEvent) and isinstance(event.message, CustomMessage):
+            self._render_custom(event.message)
         elif isinstance(event, ToolExecutionStartEvent):
             view = ToolExecutionView(event.tool_name)
             self._tools[event.tool_call_id] = view
-            self._set_block(f"tool:{event.tool_call_id}", view.render(self._width), live=True)
+            rendered = (
+                self._renderers.render_tool_call(event.tool_name, event.args)
+                if self._renderers is not None
+                else None
+            )
+            lines = (
+                self._render_text(rendered) if rendered is not None else view.render(self._width)
+            )
+            self._set_block(f"tool:{event.tool_call_id}", lines, live=True)
         elif isinstance(event, ToolExecutionUpdateEvent):
             view = self._tools.get(event.tool_call_id)
             if view is not None:
+                rendered = (
+                    self._renderers.render_tool_result(event.tool_name, event.partial_result)
+                    if self._renderers is not None
+                    else None
+                )
                 view.update(result_detail(event.partial_result))
-                self._set_block(f"tool:{event.tool_call_id}", view.render(self._width), live=True)
+                lines = (
+                    self._render_text(rendered)
+                    if rendered is not None
+                    else view.render(self._width)
+                )
+                self._set_block(f"tool:{event.tool_call_id}", lines, live=True)
         elif isinstance(event, ToolExecutionEndEvent):
             view = self._tools.get(event.tool_call_id)
             if view is not None:
+                rendered = (
+                    self._renderers.render_tool_result(event.tool_name, event.result)
+                    if self._renderers is not None
+                    else None
+                )
                 detail = result_detail(event.result, include_content=event.is_error)
                 (view.fail if event.is_error else view.complete)(detail)
-                self._set_block(f"tool:{event.tool_call_id}", view.render(self._width))
+                lines = (
+                    self._render_text(rendered)
+                    if rendered is not None
+                    else view.render(self._width)
+                )
+                self._set_block(f"tool:{event.tool_call_id}", lines)
         elif isinstance(event, AutoRetryStartEvent):
             self._retry.retry_started(
                 attempt=event.attempt,
@@ -212,7 +247,12 @@ class InteractiveApp:
         view = AssistantMessageView()
         for block in message.content:
             if isinstance(block, TextContent):
-                view.add_text_delta(block.text)
+                text = (
+                    self._renderers.transform_markdown(block.text)
+                    if self._renderers is not None
+                    else block.text
+                )
+                view.add_text_delta(text)
             elif isinstance(block, ThinkingContent):
                 view.add_thinking_delta(block.thinking)
         if message.stop_reason == "error":
@@ -235,6 +275,22 @@ class InteractiveApp:
                 label = "image" if image_count == 1 else f"{image_count} images"
                 text = f"{text} [{label}]".strip()
         self._append_text(f"> {text}")
+
+    def _render_custom(self, message: CustomMessage) -> None:
+        if not message.display:
+            return
+        rendered = (
+            self._renderers.render_message(message.custom_type, message)
+            if self._renderers is not None
+            else None
+        )
+        if rendered is None and isinstance(message.content, str):
+            rendered = message.content
+        if rendered:
+            self._append_text(rendered)
+
+    def _render_text(self, text: str) -> tuple[str, ...]:
+        return tuple(_pad(chunk, self._width) for chunk in wrap_text(text, self._width))
 
 
 def result_detail(result: object, *, include_content: bool = False) -> str | None:

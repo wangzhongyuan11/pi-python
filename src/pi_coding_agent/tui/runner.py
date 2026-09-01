@@ -43,6 +43,7 @@ from ..attachments import (
 from ..cli.run import HeadlessOptions, resolve_session_manager
 from ..extensions.context import ExtensionActions
 from ..extensions.registry import CapabilityRegistry
+from ..extensions.renderers import ExtensionRendererRegistry
 from ..model_runtime import ModelRuntime, create_model_runtime, match_model_argument
 from ..resources.prompts import PromptDescriptor, load_prompt_descriptors
 from ..resources.skills import SkillDescriptor, load_skill_descriptors
@@ -59,7 +60,7 @@ from ..session.errors import SessionNotFoundError
 from .commands import CommandDispatcher, CommandOutcome, CommandSpec, ShortcutDispatcher
 from .config_ui import ModelSettingsController
 from .main import InteractiveApp
-from .render_messages import render_replay_lines
+from .render_messages import render_extension_entry_lines, render_replay_lines
 from .session_ui import fork_from, switch_to
 
 type ReadLine = Callable[[str], Awaitable[str | None]]
@@ -286,6 +287,12 @@ class _HasRegistry(Protocol):
 class _HasActions(Protocol):
     @property
     def actions(self) -> ExtensionActions: ...
+
+
+@runtime_checkable
+class _HasRenderers(Protocol):
+    @property
+    def renderers(self) -> ExtensionRendererRegistry: ...
 
 
 class _RawOutput(Protocol):
@@ -652,6 +659,9 @@ async def run_interactive(
             )
         extensions = created.services.extensions
         extension_context = extensions.actions if isinstance(extensions, _HasActions) else None
+        extension_renderers = (
+            extensions.renderers if isinstance(extensions, _HasRenderers) else None
+        )
         dispatcher = CommandDispatcher(context=extension_context)
         app_holder: list[InteractiveApp] = []
         controller_holder: list[ModelSettingsController] = []
@@ -661,8 +671,18 @@ async def run_interactive(
             if options.tui_mode != "fullscreen":
                 replay_width = terminal.columns - 1
             previous_lines = tuple(app_holder[0].lines) if app_holder else ()
-            history_lines = render_replay_lines(
-                created.session.state.messages, max(1, replay_width)
+            width = max(1, replay_width)
+            history_lines = (
+                *render_replay_lines(
+                    created.session.state.messages,
+                    width,
+                    renderers=extension_renderers,
+                ),
+                *render_extension_entry_lines(
+                    created.session.session_manager.entries,
+                    width,
+                    renderers=extension_renderers,
+                ),
             )
             initial_lines = history_lines if history_lines else previous_lines
             controller_holder[:] = [
@@ -684,6 +704,7 @@ async def run_interactive(
                     screen_sink=lambda lines: renderer.render(list(lines[-terminal.rows :])),
                     raw_sink=terminal.write,
                     compose_prompt=compose,
+                    renderers=extension_renderers,
                     initial_lines=initial_lines,
                 )
             else:
@@ -700,6 +721,7 @@ async def run_interactive(
                     commit_sink=renderer.commit,
                     raw_sink=terminal.write,
                     compose_prompt=compose,
+                    renderers=extension_renderers,
                     initial_lines=initial_lines,
                 )
             app_holder[:] = [app]

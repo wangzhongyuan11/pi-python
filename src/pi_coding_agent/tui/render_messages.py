@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from pi_agent import AgentMessage
+from pi_agent import AgentMessage, CustomMessage
 from pi_ai import AssistantMessage, TextContent, ThinkingContent, ToolResultMessage, UserMessage
 from pi_tui.layout import wrap_text
 from pi_tui.width import sanitize_terminal_text, truncate_to_width, visible_width
+
+from ..extensions.renderers import ExtensionRendererRegistry
+from ..session.models import CustomEntry, SessionEntry
 
 
 class AssistantMessageView:
@@ -60,7 +63,12 @@ def _pad(line: str, width: int) -> str:
     return line + " " * max(0, width - visible_width(line))
 
 
-def render_replay_lines(messages: Sequence[AgentMessage], width: int) -> tuple[str, ...]:
+def render_replay_lines(
+    messages: Sequence[AgentMessage],
+    width: int,
+    *,
+    renderers: ExtensionRendererRegistry | None = None,
+) -> tuple[str, ...]:
     """Render persisted session messages as settled transcript lines.
 
     Used when the product TUI opens, resumes, or switches to a session so the
@@ -82,7 +90,12 @@ def render_replay_lines(messages: Sequence[AgentMessage], width: int) -> tuple[s
                 if isinstance(block, ThinkingContent):
                     view.add_thinking_delta(block.thinking)
                 elif isinstance(block, TextContent):
-                    view.add_text_delta(block.text)
+                    text = (
+                        renderers.transform_markdown(block.text)
+                        if renderers is not None
+                        else block.text
+                    )
+                    view.add_text_delta(text)
             if message.stop_reason in ("error", "aborted"):
                 view.fail(message.error_message or "provider error")
             lines.extend(view.render(width))
@@ -96,7 +109,34 @@ def render_replay_lines(messages: Sequence[AgentMessage], width: int) -> tuple[s
             if detail:
                 detail = f" ({truncate_to_width(detail, min(width, 120))})"
             lines.append(_pad(f"{message.tool_name}: {status}{detail}", width))
+        elif isinstance(message, CustomMessage) and message.display:
+            rendered = (
+                renderers.render_message(message.custom_type, message)
+                if renderers is not None
+                else None
+            )
+            if rendered is None:
+                rendered = message.content if isinstance(message.content, str) else ""
+            lines.extend(_pad(chunk, width) for chunk in wrap_text(rendered, width))
     return tuple(lines)
 
 
-__all__ = ["AssistantMessageView", "render_replay_lines"]
+def render_extension_entry_lines(
+    entries: Sequence[SessionEntry],
+    width: int,
+    *,
+    renderers: ExtensionRendererRegistry | None,
+) -> tuple[str, ...]:
+    if renderers is None:
+        return ()
+    lines: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, CustomEntry):
+            continue
+        rendered = renderers.render_entry(entry.custom_type, entry)
+        if rendered is not None:
+            lines.extend(_pad(chunk, width) for chunk in wrap_text(rendered, width))
+    return tuple(lines)
+
+
+__all__ = ["AssistantMessageView", "render_extension_entry_lines", "render_replay_lines"]

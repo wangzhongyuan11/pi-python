@@ -5,9 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Literal
 
+from .auth_api import ExtensionAuthApi
 from .context import ExtensionActions
 from .hooks import Handler, HookRunner
 from .registry import CapabilityRegistry, FlagState, Registration, RegistrationKind
+from .renderers import ExtensionRendererRegistry
+from .ui_api import ExtensionUiApi
 
 _ACTION_NAMES = frozenset(
     {
@@ -43,7 +46,7 @@ _ACTION_NAMES = frozenset(
 class ExtensionAPI:
     """Registers capabilities on behalf of one extension into one registry."""
 
-    __slots__ = ("_actions", "_hooks", "_name", "_registry")
+    __slots__ = ("_actions", "_auth", "_hooks", "_name", "_registry", "_renderers", "_ui")
 
     def __init__(
         self,
@@ -52,15 +55,29 @@ class ExtensionAPI:
         registry: CapabilityRegistry | None = None,
         hooks: HookRunner | None = None,
         actions: ExtensionActions | None = None,
+        ui: ExtensionUiApi | None = None,
+        auth: ExtensionAuthApi | None = None,
+        renderers: ExtensionRendererRegistry | None = None,
     ) -> None:
         self._name = name
         self._registry = registry if registry is not None else CapabilityRegistry()
         self._hooks = hooks if hooks is not None else HookRunner()
         self._actions = actions if actions is not None else ExtensionActions()
+        self._ui = ui if ui is not None else ExtensionUiApi()
+        self._auth = auth if auth is not None else ExtensionAuthApi()
+        self._renderers = renderers if renderers is not None else ExtensionRendererRegistry()
 
     @property
     def registry(self) -> CapabilityRegistry:
         return self._registry
+
+    @property
+    def ui(self) -> ExtensionUiApi:
+        return self._ui
+
+    @property
+    def auth(self) -> ExtensionAuthApi:
+        return self._auth
 
     def _define(
         self, kind: RegistrationKind, name: str, payload: object | None = None
@@ -105,6 +122,31 @@ class ExtensionAPI:
 
     def define_shortcut(self, name: str, handler: object | None = None) -> Registration:
         return self._define("shortcut", name, handler)
+
+    def define_message_renderer(
+        self, custom_type: str, renderer: Callable[[object], object]
+    ) -> None:
+        self._renderers.register_message(self._name, custom_type, renderer)
+
+    def define_entry_renderer(self, custom_type: str, renderer: Callable[[object], object]) -> None:
+        self._renderers.register_entry(self._name, custom_type, renderer)
+
+    def define_tool_renderer(
+        self,
+        tool_name: str,
+        *,
+        render_call: Callable[[object], object] | None = None,
+        render_result: Callable[[object], object] | None = None,
+    ) -> None:
+        self._renderers.register_tool(
+            self._name,
+            tool_name,
+            render_call=render_call,
+            render_result=render_result,
+        )
+
+    def define_markdown_transformer(self, transformer: Callable[[str], str]) -> None:
+        self._renderers.register_markdown(self._name, transformer)
 
     def on(self, event: str, handler: Handler) -> Callable[[], None]:
         """Register an ordered lifecycle handler for this extension generation."""

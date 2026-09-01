@@ -86,10 +86,11 @@ def create_product_services(
     )
     default_resources.set_project_trusted(resolved_cwd, False)
     resources = selected.resources if selected.resources is not None else default_resources
+    ui = selected.ui if selected.ui is not None else NoopUI()
     if selected.extensions is None:
         if not isinstance(resources, DefaultResourceLoader):
             raise ValueError("custom resource loader requires a matching extension runtime")
-        extensions: ExtensionRuntime = DefaultExtensionRuntime(cwd=cwd, resources=resources)
+        extensions: ExtensionRuntime = DefaultExtensionRuntime(cwd=cwd, resources=resources, ui=ui)
     else:
         extensions = selected.extensions
     return ProductServices(
@@ -99,7 +100,7 @@ def create_product_services(
         extensions=extensions,
         exporter=(selected.exporter if selected.exporter is not None else NoopSessionExporter()),
         importer=(selected.importer if selected.importer is not None else DefaultSessionImporter()),
-        ui=selected.ui if selected.ui is not None else NoopUI(),
+        ui=ui,
         _static_resource_roots=selected.resource_roots,
     )
 
