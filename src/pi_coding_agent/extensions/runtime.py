@@ -13,6 +13,7 @@ from pi_ai import Provider
 from ..ports import ResourceDescriptor
 from ..resources.default_loader import DefaultResourceLoader
 from .api import ExtensionAPI
+from .context import ExtensionActions, ExtensionCommandInfo
 from .hooks import ApplyHookResult, HookOutcome, HookRunner
 from .lifecycle import ExtensionLifecycle
 from .loader import ExtensionLoader
@@ -25,6 +26,7 @@ class DefaultExtensionRuntime:
 
     __slots__ = (
         "_cwd",
+        "_actions",
         "_descriptors",
         "_diagnostics",
         "_hooks",
@@ -37,6 +39,7 @@ class DefaultExtensionRuntime:
 
     def __init__(self, *, cwd: Path, resources: DefaultResourceLoader) -> None:
         self._cwd = cwd.resolve()
+        self._actions = ExtensionActions()
         self._resources = resources
         self._loader = ExtensionLoader()
         self._registry = CapabilityRegistry()
@@ -75,6 +78,34 @@ class DefaultExtensionRuntime:
     def grant_trust(self, metadata: ExtensionMetadata) -> None:
         self._loader.grant_trust(metadata)
 
+    @property
+    def actions(self) -> ExtensionActions:
+        return self._actions
+
+    def bind_session(
+        self,
+        *,
+        session: object,
+        model_runtime: object,
+        all_tools: tuple[AgentTool[Any, Any], ...],
+    ) -> None:
+        from ..agent_session import AgentSession
+        from ..model_runtime import ModelRuntime
+
+        if not isinstance(session, AgentSession) or not isinstance(model_runtime, ModelRuntime):
+            raise TypeError("extension actions require the product session and model runtime")
+        self._actions.bind(
+            session=session,
+            model_runtime=model_runtime,
+            all_tools=all_tools,
+            tool_sources={item.name: item.source for item in self._registry.registrations("tool")},
+            commands=tuple(
+                ExtensionCommandInfo(name=item.name, source=item.source)
+                for item in self._registry.registrations("command")
+            ),
+            project_trusted=self._resources.last_result.project_trusted,
+        )
+
     async def emit(self, event: object) -> tuple[HookOutcome, ...]:
         event_name = getattr(event, "type", None)
         if not isinstance(event_name, str):
@@ -108,6 +139,7 @@ class DefaultExtensionRuntime:
             self._lifecycle.begin_generation()
             self._registry = CapabilityRegistry()
             self._hooks = HookRunner()
+            self._actions = ExtensionActions()
         result = self._resources.load(cwd=self._cwd, agent_dir=self._resources.agent_dir)
         self._descriptors = tuple(
             ResourceDescriptor(
@@ -136,6 +168,7 @@ class DefaultExtensionRuntime:
             return
         errors = await self._lifecycle.teardown_async()
         self._diagnostics.extend(f"extension teardown failed: {error}" for error in errors)
+        self._actions.invalidate()
         self._started = False
 
     async def _activate(self, metadata: ExtensionMetadata) -> None:
@@ -145,7 +178,12 @@ class DefaultExtensionRuntime:
             if not callable(factory):
                 raise TypeError("extension entry must define callable activate(api)")
             teardown = factory(
-                ExtensionAPI(metadata.name, registry=self._registry, hooks=self._hooks)
+                ExtensionAPI(
+                    metadata.name,
+                    registry=self._registry,
+                    hooks=self._hooks,
+                    actions=self._actions,
+                )
             )
             if inspect.isawaitable(teardown):
                 teardown = await teardown

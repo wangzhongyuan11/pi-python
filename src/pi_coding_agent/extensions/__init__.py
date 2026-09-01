@@ -2,6 +2,14 @@
 
 from .api import ExtensionAPI
 from .auth_api import CredentialStore, CredentialStoreUnavailableError, ExtensionAuthApi
+from .context import (
+    ExtensionActions,
+    ExtensionCommandInfo,
+    ExtensionContextUnavailableError,
+    ExtensionContextUsage,
+    ExtensionExecResult,
+    ExtensionToolInfo,
+)
 from .events import (
     AgentSettledEvent,
     BeforeProviderHeadersEvent,
@@ -69,8 +77,14 @@ __all__ = [
     "DefaultExtensionRuntime",
     "ExtensionAgentEndEvent",
     "ExtensionAgentStartEvent",
+    "ExtensionActions",
     "ExtensionAPI",
     "ExtensionAuthApi",
+    "ExtensionCommandInfo",
+    "ExtensionContextUnavailableError",
+    "ExtensionContextUsage",
+    "ExtensionExecResult",
+    "ExtensionToolInfo",
     "ExtensionIdentity",
     "ExtensionLifecycle",
     "ExtensionLifecycleEvent",

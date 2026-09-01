@@ -461,44 +461,62 @@ async def create_agent_session(
         if shell_command_prefix is not None and not isinstance(shell_command_prefix, str):
             raise ValueError("shellCommandPrefix must be a string")
         session_manager = target.session_manager
+        agent: Agent | None = None
 
         def session_environment() -> dict[str, str]:
-            model = model_runtime.model
+            model = model_runtime.model if agent is None else agent.state.model
+            current_thinking = thinking_level if agent is None else agent.state.thinking_level
             environment = {
                 "PI_SESSION_ID": session_manager.header.id,
                 "PI_PROVIDER": model.provider,
                 "PI_MODEL": model.id,
-                "PI_REASONING_LEVEL": thinking_level,
+                "PI_REASONING_LEVEL": current_thinking,
             }
             if session_manager.path is not None:
                 environment["PI_SESSION_FILE"] = str(session_manager.path)
             return environment
 
-        configured_tools = (
-            selected.tools
-            if selected.tools is not None
-            else create_all_tools(
+        if selected.tools is not None:
+            all_configured_tools = selected.tools
+            configured_tools = selected.tools
+        else:
+            registry_builtin_names = (
+                ()
+                if selected.no_tools is not None
+                else (
+                    builtin_names
+                    if selected.tool_names is not None
+                    else tuple(name for name in ALL_TOOL_NAMES if name not in excluded_tools)
+                )
+            )
+            all_configured_tools = create_all_tools(
                 cwd=target.cwd,
                 custom_shell_path=shell_path,
-                tool_names=builtin_names,
+                tool_names=registry_builtin_names,
                 session_environment_provider=session_environment,
                 command_prefix=shell_command_prefix,
                 bin_dir=default_binary_cache_dir(),
             )
-        )
+            configured_by_name = {tool.name: tool for tool in all_configured_tools}
+            configured_tools = tuple(
+                configured_by_name[name] for name in builtin_names if name in configured_by_name
+            )
         extension_tools = services.extensions.tools
         if selected.no_tools == "all":
             extension_tools = ()
         extension_tools = tuple(tool for tool in extension_tools if tool.name not in excluded_tools)
-        registered_tools = (*configured_tools, *extension_tools)
-        tool_names = [tool.name for tool in registered_tools]
+        all_registered_tools = (*all_configured_tools, *extension_tools)
+        active_tool_names = tuple(tool.name for tool in (*configured_tools, *extension_tools))
+        tool_names = [tool.name for tool in all_registered_tools]
         if len(set(tool_names)) != len(tool_names):
             raise ValueError("duplicate tool names across configured and extension tools")
-        tools = (
-            registered_tools
+        all_tools = (
+            all_registered_tools
             if selected.permission_gate is None
-            else selected.permission_gate.wrap_tools(registered_tools)
+            else selected.permission_gate.wrap_tools(all_registered_tools)
         )
+        all_tools_by_name = {tool.name: tool for tool in all_tools}
+        tools = tuple(all_tools_by_name[name] for name in active_tool_names)
         agent = Agent(
             model=agent_model,
             stream_function=lambda model, context, options=None: _stream_with_extension_hooks(
@@ -516,6 +534,7 @@ async def create_agent_session(
             ),
             thinking_level=thinking_level,
             tools=tools,
+            all_tools=all_tools,
             messages=messages,
             transform_context=lambda messages: _transform_extension_context(
                 services.extensions, messages
@@ -570,6 +589,9 @@ async def create_agent_session(
             branch_summary_service=branch_summary_service,
             on_close=close_services,
         )
+        bind_session = getattr(services.extensions, "bind_session", None)
+        if callable(bind_session):
+            bind_session(session=session, model_runtime=model_runtime, all_tools=all_tools)
         return RuntimeComponents(
             session=session,
             services=services,

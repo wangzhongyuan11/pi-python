@@ -25,7 +25,14 @@ from pi_agent import (
     TurnEndEvent,
     TurnStartEvent,
 )
-from pi_ai import AssistantMessage, JsonValue, ToolResultMessage, UserMessage
+from pi_ai import (
+    AssistantMessage,
+    JsonValue,
+    Model,
+    ModelThinkingLevel,
+    ToolResultMessage,
+    UserMessage,
+)
 from pi_ai.wire.messages import dump_message
 
 from .agent_session_events import (
@@ -75,7 +82,16 @@ from .retry import RetryPolicy, Sleep, is_retryable_assistant_error
 from .services import ProductServices
 from .session.context import project_session_context
 from .session.manager import SessionManager
-from .session.models import BranchSummaryEntry, CompactionEntry, MessageEntry
+from .session.models import (
+    BranchSummaryEntry,
+    CompactionEntry,
+    CustomEntry,
+    CustomMessageEntry,
+    LabelEntry,
+    MessageEntry,
+    ModelChangeEntry,
+    ThinkingLevelChangeEntry,
+)
 from .session.tree import SessionTree
 
 
@@ -267,6 +283,101 @@ class AgentSession:
 
     def cancel_retry(self) -> None:
         self._retry_cancel.set()
+
+    def append_custom_entry(self, custom_type: str, data: JsonValue = None) -> str:
+        self._ensure_open()
+        entry = CustomEntry(
+            type="custom",
+            id=self._entry_id_factory(),
+            parent_id=self.session_manager.leaf_id,
+            timestamp=self._timestamp_factory(),
+            custom_type=custom_type,
+            data=data,
+        )
+        self.session_manager.append(entry)
+        return entry.id
+
+    def append_custom_message(
+        self,
+        custom_type: str,
+        content: str,
+        *,
+        display: bool = True,
+        details: JsonValue = None,
+    ) -> str:
+        self._ensure_open()
+        entry = CustomMessageEntry(
+            type="custom_message",
+            id=self._entry_id_factory(),
+            parent_id=self.session_manager.leaf_id,
+            timestamp=self._timestamp_factory(),
+            custom_type=custom_type,
+            content=content,
+            display=display,
+            details=details,
+        )
+        self.session_manager.append(entry)
+        if not self.state.is_streaming:
+            self._restore_active_context()
+        return entry.id
+
+    def set_session_name(self, name: str) -> str:
+        self._ensure_open()
+        return self.session_manager.append_session_info(
+            name,
+            entry_id_factory=self._entry_id_factory,
+            timestamp_factory=self._timestamp_factory,
+        )
+
+    def set_label(self, entry_id: str, label: str | None) -> str:
+        self._ensure_open()
+        if entry_id not in {entry.id for entry in self.session_manager.entries}:
+            raise LookupError(f"unknown session entry: {entry_id}")
+        entry = LabelEntry(
+            type="label",
+            id=self._entry_id_factory(),
+            parent_id=self.session_manager.leaf_id,
+            timestamp=self._timestamp_factory(),
+            target_id=entry_id,
+            label=label,
+        )
+        self.session_manager.append(entry)
+        return entry.id
+
+    def set_model(self, model: Model) -> None:
+        self._ensure_open()
+        if self.state.model == model:
+            return
+        if self.state.is_streaming:
+            raise RuntimeError("cannot change model while Agent is streaming")
+        self.session_manager.append(
+            ModelChangeEntry(
+                type="model_change",
+                id=self._entry_id_factory(),
+                parent_id=self.session_manager.leaf_id,
+                timestamp=self._timestamp_factory(),
+                provider=model.provider,
+                model_id=model.id,
+            )
+        )
+        self.agent.set_model(model)
+
+    def set_thinking_level(self, level: ModelThinkingLevel) -> None:
+        self._ensure_open()
+        if self.state.thinking_level == level:
+            return
+        if self.state.is_streaming:
+            raise RuntimeError("cannot change thinking level while Agent is streaming")
+        self.session_manager.append(
+            ThinkingLevelChangeEntry(
+                type="thinking_level_change",
+                id=self._entry_id_factory(),
+                parent_id=self.session_manager.leaf_id,
+                timestamp=self._timestamp_factory(),
+                thinking_level=level,
+            )
+        )
+        self.agent.set_thinking_level(level)
 
     async def compact(self, *, reason: CompactionReason = "manual") -> CompactionEntry:
         self._ensure_open()

@@ -13,6 +13,7 @@ from pi_ai import (
     ModelThinkingLevel,
     StreamFunction,
     TextContent,
+    ToolResultMessage,
     UserMessage,
 )
 
@@ -51,6 +52,7 @@ class Agent:
         system_prompt: str = "",
         thinking_level: ModelThinkingLevel = "off",
         tools: Iterable[AgentTool[Any, Any]] = (),
+        all_tools: Iterable[AgentTool[Any, Any]] | None = None,
         messages: Iterable[AgentMessage] = (),
         transform_context: TransformContext | None = None,
         convert_to_llm: ConvertToLlm = default_convert_to_llm,
@@ -69,6 +71,8 @@ class Agent:
         self._system_prompt = system_prompt
         self._thinking_level: ModelThinkingLevel = thinking_level
         self._tools = tuple(tools)
+        configured_tools = self._tools if all_tools is None else tuple(all_tools)
+        self._all_tools = {tool.name: tool for tool in configured_tools}
         self._messages = list(messages)
         self._transform_context = transform_context
         self._convert_to_llm = convert_to_llm
@@ -132,6 +136,10 @@ class Agent:
             raise RuntimeError("cannot change thinking level while Agent is streaming")
         self._thinking_level = level
 
+    def set_active_tool_names(self, names: Iterable[str]) -> None:
+        selected = tuple(dict.fromkeys(name for name in names if name in self._all_tools))
+        self._tools = tuple(self._all_tools[name] for name in selected)
+
     @property
     def has_queued_messages(self) -> bool:
         return self._steering_queue.has_items or self._follow_up_queue.has_items
@@ -181,6 +189,7 @@ class Agent:
                     tool_execution=self._tool_execution,
                     get_steering_messages=self._drain_steering,
                     get_follow_up_messages=self._drain_follow_up,
+                    get_active_tools=lambda: self._tools,
                     clock=self._clock,
                 ),
             )
@@ -223,6 +232,10 @@ class Agent:
             self._messages.append(event.message)
             if isinstance(event.message, AssistantMessage):
                 self._error_message = event.message.error_message
+            elif isinstance(event.message, ToolResultMessage) and event.message.added_tool_names:
+                active = [tool.name for tool in self._tools]
+                active.extend(name for name in event.message.added_tool_names if name not in active)
+                self.set_active_tool_names(active)
         elif isinstance(event, ToolExecutionStartEvent):
             self._pending_tool_calls.add(event.tool_call_id)
         elif isinstance(event, ToolExecutionEndEvent):

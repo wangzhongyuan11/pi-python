@@ -41,6 +41,7 @@ from ..attachments import (
     supports_image_input,
 )
 from ..cli.run import HeadlessOptions, resolve_session_manager
+from ..extensions.context import ExtensionActions
 from ..extensions.registry import CapabilityRegistry
 from ..model_runtime import ModelRuntime, create_model_runtime, match_model_argument
 from ..resources.prompts import PromptDescriptor, load_prompt_descriptors
@@ -275,6 +276,12 @@ def _message_timestamp() -> int:
 class _HasRegistry(Protocol):
     @property
     def registry(self) -> CapabilityRegistry: ...
+
+
+@runtime_checkable
+class _HasActions(Protocol):
+    @property
+    def actions(self) -> ExtensionActions: ...
 
 
 class _RawOutput(Protocol):
@@ -867,6 +874,12 @@ async def run_interactive(
         try:
             last_idle_interrupt: float | None = None
             while True:
+                current_extensions = created.services.extensions
+                if (
+                    isinstance(current_extensions, _HasActions)
+                    and current_extensions.actions.shutdown_requested
+                ):
+                    return 0
                 try:
                     line = await reader_fn("› ")
                 except KeyboardInterrupt:
