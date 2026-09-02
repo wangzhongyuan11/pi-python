@@ -61,7 +61,7 @@ def test_package_cli_survives_restart_and_completes_local_lifecycle(
 
     manager = _manager(agent_dir, project)
     roots = manager.resource_roots()
-    assert {root.kind for root in roots} == {"skill", "prompt", "theme"}
+    assert {root.kind for root in roots} == {"extension", "skill", "prompt", "theme"}
     resources = DefaultResourceLoader(resource_roots=roots, agent_dir=agent_dir).discover(project)
     assert {(item.kind, item.name, item.source) for item in resources} == {
         ("skill", "golden-skill", "package"),

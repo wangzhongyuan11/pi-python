@@ -32,6 +32,7 @@ class DefaultExtensionRuntime:
     __slots__ = (
         "_cwd",
         "_actions",
+        "_applied_flags",
         "_auth_stores",
         "_auth_apis",
         "_descriptors",
@@ -53,6 +54,7 @@ class DefaultExtensionRuntime:
     ) -> None:
         self._cwd = cwd.resolve()
         self._actions = ExtensionActions()
+        self._applied_flags: dict[str, bool | str] = {}
         self._product_ui = ui
         self._ui_apis: list[ExtensionUiApi] = []
         self._auth_stores: dict[str, MemoryCredentialStore] = {}
@@ -152,6 +154,7 @@ class DefaultExtensionRuntime:
             errors.append(f"unrecognized arguments: {' '.join(unknown)}")
         if errors:
             raise ExtensionFlagError("; ".join(errors))
+        self._applied_flags.update(values)
 
     async def emit(self, event: object) -> tuple[HookOutcome, ...]:
         event_name = getattr(event, "type", None)
@@ -234,6 +237,8 @@ class DefaultExtensionRuntime:
             await self.emit(SessionShutdownEvent(reason="reload"))
         await self.close()
         descriptors = await self.start()
+        if self._applied_flags:
+            self.apply_flags(dict(self._applied_flags))
         if binding is not None:
             session, model_runtime, all_tools = binding
             self.bind_session(

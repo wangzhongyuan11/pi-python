@@ -12,6 +12,7 @@ from pi_coding_agent.ports import ResourceKind, ResourceRoot
 
 _PACKAGE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _RESOURCE_FIELDS: tuple[tuple[str, ResourceKind], ...] = (
+    ("extensions", "extension"),
     ("skills", "skill"),
     ("prompts", "prompt"),
     ("themes", "theme"),
