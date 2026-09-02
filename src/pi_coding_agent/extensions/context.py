@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -285,8 +286,89 @@ class ExtensionActions:
         return self._binding
 
 
+class ExtensionCommandContext:
+    """Command-only session replacement actions guarded by one action generation."""
+
+    __slots__ = (
+        "_actions",
+        "_fork",
+        "_navigate",
+        "_new_session",
+        "_reload",
+        "_switch",
+        "_wait_for_idle",
+    )
+
+    def __init__(self, actions: ExtensionActions) -> None:
+        self._actions = actions
+        self._wait_for_idle: Callable[[], Awaitable[None]] = _completed
+        self._new_session: Callable[[], Awaitable[bool]] = _false
+        self._fork: Callable[[str], Awaitable[bool]] = _false_with_argument
+        self._navigate: Callable[[str], Awaitable[bool]] = _false_with_argument
+        self._switch: Callable[[str], Awaitable[bool]] = _false_with_argument
+        self._reload: Callable[[], Awaitable[None]] = _completed
+
+    def bind(
+        self,
+        *,
+        wait_for_idle: Callable[[], Awaitable[None]],
+        new_session: Callable[[], Awaitable[bool]],
+        fork: Callable[[str], Awaitable[bool]],
+        navigate: Callable[[str], Awaitable[bool]],
+        switch: Callable[[str], Awaitable[bool]],
+        reload: Callable[[], Awaitable[None]],
+    ) -> None:
+        self._wait_for_idle = wait_for_idle
+        self._new_session = new_session
+        self._fork = fork
+        self._navigate = navigate
+        self._switch = switch
+        self._reload = reload
+
+    def __getattr__(self, name: str) -> object:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        self._ensure_active()
+        return getattr(self._actions, name)
+
+    async def wait_for_idle(self) -> None:
+        self._ensure_active()
+        await self._wait_for_idle()
+
+    async def new_session(self) -> bool:
+        self._ensure_active()
+        return await self._new_session()
+
+    async def fork(self, entry_id: str) -> bool:
+        self._ensure_active()
+        return await self._fork(entry_id)
+
+    async def navigate_tree(self, target_id: str) -> bool:
+        self._ensure_active()
+        return await self._navigate(target_id)
+
+    async def switch_session(self, session_path: str) -> bool:
+        self._ensure_active()
+        return await self._switch(session_path)
+
+    async def reload(self) -> None:
+        self._ensure_active()
+        await self._reload()
+
+    def _ensure_active(self) -> None:
+        self._actions.is_idle()
+
+
 async def _completed() -> None:
     return None
+
+
+async def _false() -> bool:
+    return False
+
+
+async def _false_with_argument(_value: str) -> bool:
+    return False
 
 
 async def _exec_command(
@@ -326,6 +408,7 @@ async def _exec_command(
 __all__ = [
     "ExtensionActions",
     "ExtensionCommandInfo",
+    "ExtensionCommandContext",
     "ExtensionContextUnavailableError",
     "ExtensionContextUsage",
     "ExtensionExecResult",

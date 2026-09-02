@@ -9,6 +9,7 @@ from .auth_api import (
 )
 from .context import (
     ExtensionActions,
+    ExtensionCommandContext,
     ExtensionCommandInfo,
     ExtensionContextUnavailableError,
     ExtensionContextUsage,
@@ -88,6 +89,7 @@ __all__ = [
     "ExtensionAPI",
     "ExtensionAuthApi",
     "ExtensionCommandInfo",
+    "ExtensionCommandContext",
     "ExtensionContextUnavailableError",
     "ExtensionContextUsage",
     "ExtensionExecResult",

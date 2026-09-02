@@ -35,13 +35,17 @@ class MemoryCredentialStore:
 class ExtensionAuthApi:
     """Reads and stores provider credentials through the configured store."""
 
-    __slots__ = ("_store",)
+    __slots__ = ("_active", "_store")
 
     def __init__(self, *, store: CredentialStore | None = None) -> None:
         self._store = store
+        self._active = True
+
+    def invalidate(self) -> None:
+        self._active = False
 
     def _require_store(self) -> CredentialStore:
-        if self._store is None:
+        if not self._active or self._store is None:
             raise CredentialStoreUnavailableError(
                 "no credential store is configured for extensions"
             )

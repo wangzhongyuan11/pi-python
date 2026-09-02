@@ -22,6 +22,7 @@ from .loader import ExtensionLoader
 from .metadata import ExtensionMetadata
 from .registry import CapabilityRegistry, ExtensionFlagError, FlagState
 from .renderers import ExtensionRendererRegistry
+from .session_context import SessionShutdownEvent, SessionStartEvent
 from .ui_api import ExtensionUiApi
 
 
@@ -32,6 +33,7 @@ class DefaultExtensionRuntime:
         "_cwd",
         "_actions",
         "_auth_stores",
+        "_auth_apis",
         "_descriptors",
         "_diagnostics",
         "_hooks",
@@ -40,8 +42,10 @@ class DefaultExtensionRuntime:
         "_registry",
         "_renderers",
         "_resources",
+        "_session_binding",
         "_started",
-        "_ui",
+        "_product_ui",
+        "_ui_apis",
     )
 
     def __init__(
@@ -49,8 +53,10 @@ class DefaultExtensionRuntime:
     ) -> None:
         self._cwd = cwd.resolve()
         self._actions = ExtensionActions()
-        self._ui = ExtensionUiApi(product_ui=ui)
+        self._product_ui = ui
+        self._ui_apis: list[ExtensionUiApi] = []
         self._auth_stores: dict[str, MemoryCredentialStore] = {}
+        self._auth_apis: list[ExtensionAuthApi] = []
         self._renderers = ExtensionRendererRegistry()
         self._resources = resources
         self._loader = ExtensionLoader()
@@ -60,6 +66,7 @@ class DefaultExtensionRuntime:
         self._descriptors: tuple[ResourceDescriptor, ...] = ()
         self._diagnostics: list[str] = []
         self._started = False
+        self._session_binding: tuple[object, object, tuple[AgentTool[Any, Any], ...]] | None = None
 
     @property
     def registry(self) -> CapabilityRegistry:
@@ -110,6 +117,7 @@ class DefaultExtensionRuntime:
 
         if not isinstance(session, AgentSession) or not isinstance(model_runtime, ModelRuntime):
             raise TypeError("extension actions require the product session and model runtime")
+        self._session_binding = (session, model_runtime, all_tools)
         self._actions.bind(
             session=session,
             model_runtime=model_runtime,
@@ -179,6 +187,8 @@ class DefaultExtensionRuntime:
             self._registry = CapabilityRegistry()
             self._hooks = HookRunner()
             self._actions = ExtensionActions()
+            self._ui_apis = []
+            self._auth_apis = []
             self._renderers = ExtensionRendererRegistry()
         result = self._resources.load(cwd=self._cwd, agent_dir=self._resources.agent_dir)
         self._descriptors = tuple(
@@ -209,27 +219,56 @@ class DefaultExtensionRuntime:
         errors = await self._lifecycle.teardown_async()
         self._diagnostics.extend(f"extension teardown failed: {error}" for error in errors)
         self._actions.invalidate()
+        for ui in self._ui_apis:
+            ui.invalidate()
+        for auth in self._auth_apis:
+            auth.invalidate()
+        self._renderers.invalidate()
         self._started = False
 
+    async def reload(self) -> tuple[ResourceDescriptor, ...]:
+        """Replace this runtime generation while preserving its session binding."""
+
+        binding = self._session_binding
+        if self._started:
+            await self.emit(SessionShutdownEvent(reason="reload"))
+        await self.close()
+        descriptors = await self.start()
+        if binding is not None:
+            session, model_runtime, all_tools = binding
+            self.bind_session(
+                session=session,
+                model_runtime=model_runtime,
+                all_tools=all_tools,
+            )
+        await self.emit(SessionStartEvent(reason="reload"))
+        return descriptors
+
     async def _activate(self, metadata: ExtensionMetadata) -> None:
+        api: ExtensionAPI | None = None
+        auth: ExtensionAuthApi | None = None
+        ui: ExtensionUiApi | None = None
         try:
             module = self._loader.load(metadata)
             factory = getattr(module, "activate", None)
             if not callable(factory):
                 raise TypeError("extension entry must define callable activate(api)")
-            teardown = factory(
-                ExtensionAPI(
-                    metadata.name,
-                    registry=self._registry,
-                    hooks=self._hooks,
-                    actions=self._actions,
-                    ui=self._ui,
-                    auth=ExtensionAuthApi(
-                        store=self._auth_stores.setdefault(metadata.name, MemoryCredentialStore())
-                    ),
-                    renderers=self._renderers,
-                )
+            auth = ExtensionAuthApi(
+                store=self._auth_stores.setdefault(metadata.name, MemoryCredentialStore())
             )
+            self._auth_apis.append(auth)
+            ui = ExtensionUiApi(product_ui=self._product_ui)
+            self._ui_apis.append(ui)
+            api = ExtensionAPI(
+                metadata.name,
+                registry=self._registry,
+                hooks=self._hooks,
+                actions=self._actions,
+                ui=ui,
+                auth=auth,
+                renderers=self._renderers,
+            )
+            teardown = factory(api)
             if inspect.isawaitable(teardown):
                 teardown = await teardown
             if teardown is not None:
@@ -237,6 +276,12 @@ class DefaultExtensionRuntime:
                     raise TypeError("extension activate() must return a teardown callable or None")
                 self._lifecycle.register_teardown(_as_teardown(teardown))
         except Exception as error:
+            if api is not None:
+                api.rollback_activation()
+            if auth is not None:
+                auth.invalidate()
+            if ui is not None:
+                ui.invalidate()
             self._registry.remove_source(metadata.name)
             self._renderers.remove_source(metadata.name)
             self._diagnostics.append(f"extension {metadata.name!r} failed: {error}")

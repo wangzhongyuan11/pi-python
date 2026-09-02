@@ -26,23 +26,35 @@ class UiUnavailableError(RuntimeError):
 class ExtensionUiApi:
     """Delegates UI interactions to the attached bridge; safe when absent."""
 
-    __slots__ = ("_bridge", "_product_ui", "_renderers", "_session_actions")
+    __slots__ = ("_active", "_bridge", "_product_ui", "_renderers", "_session_actions")
 
     def __init__(self, *, product_ui: UI | None = None) -> None:
         self._bridge: UiBridge | None = None
+        self._active = True
         self._product_ui = product_ui
         self._renderers: dict[str, Callable[..., object]] = {}
         self._session_actions: dict[str, Callable[..., object]] = {}
 
     def bind(self, bridge: UiBridge | None) -> None:
+        self._ensure_active()
         self._bridge = bridge
 
+    def invalidate(self) -> None:
+        self._active = False
+        self._bridge = None
+
+    def _ensure_active(self) -> None:
+        if not self._active:
+            raise UiUnavailableError("extension UI context is no longer active")
+
     def _require_bridge(self) -> UiBridge:
+        self._ensure_active()
         if self._bridge is None:
             raise UiUnavailableError("no UI bridge is attached to this session")
         return self._bridge
 
     def show_message(self, text: str) -> None:
+        self._ensure_active()
         if self._product_ui is not None:
             self._product_ui.notify(text)
             return
@@ -58,21 +70,25 @@ class ExtensionUiApi:
         return self._require_bridge().request_confirmation(prompt)
 
     async def input(self, prompt: str, *, default: str = "") -> str | None:
+        self._ensure_active()
         if self._product_ui is not None:
             return await self._product_ui.input(prompt, default=default)
         return self.request_input(prompt)
 
     async def confirm(self, prompt: str) -> bool | None:
+        self._ensure_active()
         if self._product_ui is not None:
             return await self._product_ui.confirm(prompt)
         return self.request_confirmation(prompt)
 
     async def select(self, title: str, options: tuple[str, ...]) -> str | None:
+        self._ensure_active()
         if self._product_ui is None:
             raise UiUnavailableError("no UI bridge is attached to this session")
         return await self._product_ui.select(title, options)
 
     def set_status(self, key: str, value: str | None) -> None:
+        self._ensure_active()
         if self._product_ui is None:
             raise UiUnavailableError("no UI bridge is attached to this session")
         self._product_ui.set_status(key, value)

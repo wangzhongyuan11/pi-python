@@ -24,10 +24,11 @@ class _ToolRenderers:
 class ExtensionRendererRegistry:
     """Stores extension render callbacks and isolates rendering failures."""
 
-    __slots__ = ("_entries", "_markdown", "_messages", "_tools")
+    __slots__ = ("_active", "_entries", "_markdown", "_messages", "_tools")
 
     def __init__(self) -> None:
         self._messages: dict[str, _OwnedRenderer] = {}
+        self._active = True
         self._entries: dict[str, _OwnedRenderer] = {}
         self._tools: dict[str, _ToolRenderers] = {}
         self._markdown: list[tuple[str, Callable[[str], str]]] = []
@@ -35,11 +36,13 @@ class ExtensionRendererRegistry:
     def register_message(
         self, source: str, custom_type: str, renderer: Callable[[object], object]
     ) -> None:
+        self._ensure_active()
         self._register(self._messages, "message", source, custom_type, renderer)
 
     def register_entry(
         self, source: str, custom_type: str, renderer: Callable[[object], object]
     ) -> None:
+        self._ensure_active()
         self._register(self._entries, "entry", source, custom_type, renderer)
 
     def register_tool(
@@ -50,28 +53,43 @@ class ExtensionRendererRegistry:
         render_call: Callable[[object], object] | None,
         render_result: Callable[[object], object] | None,
     ) -> None:
+        self._ensure_active()
         if tool_name in self._tools:
             raise RegistryConflictError(f"tool renderer {tool_name!r} already registered")
         self._tools[tool_name] = _ToolRenderers(source, render_call, render_result)
 
     def register_markdown(self, source: str, transformer: Callable[[str], str]) -> None:
+        self._ensure_active()
         self._markdown.append((source, transformer))
 
+    def invalidate(self) -> None:
+        self._active = False
+
     def render_message(self, custom_type: str, payload: object) -> str | None:
+        if not self._active:
+            return None
         return self._render(self._messages.get(custom_type), payload)
 
     def render_entry(self, custom_type: str, payload: object) -> str | None:
+        if not self._active:
+            return None
         return self._render(self._entries.get(custom_type), payload)
 
     def render_tool_call(self, tool_name: str, payload: object) -> str | None:
+        if not self._active:
+            return None
         renderers = self._tools.get(tool_name)
         return self._invoke(renderers.render_call, payload) if renderers is not None else None
 
     def render_tool_result(self, tool_name: str, payload: object) -> str | None:
+        if not self._active:
+            return None
         renderers = self._tools.get(tool_name)
         return self._invoke(renderers.render_result, payload) if renderers is not None else None
 
     def transform_markdown(self, markdown: str) -> str:
+        if not self._active:
+            return markdown
         transformed = markdown
         for _source, transformer in self._markdown:
             try:
@@ -91,6 +109,10 @@ class ExtensionRendererRegistry:
             name: renderers for name, renderers in self._tools.items() if renderers.source != source
         }
         self._markdown = [item for item in self._markdown if item[0] != source]
+
+    def _ensure_active(self) -> None:
+        if not self._active:
+            raise RuntimeError("extension renderer generation is no longer active")
 
     @staticmethod
     def _register(

@@ -33,7 +33,7 @@ from pi_ai import (
 )
 from pi_tui.render import InlineRenderer, ScreenRenderer
 
-from ..agent_session import AgentSession
+from ..agent_session import AgentSession, SessionOperationCancelled
 from ..attachments import (
     build_image_attachment,
     build_text_file_attachment,
@@ -41,7 +41,7 @@ from ..attachments import (
     supports_image_input,
 )
 from ..cli.run import HeadlessOptions, resolve_session_manager
-from ..extensions.context import ExtensionActions
+from ..extensions.context import ExtensionActions, ExtensionCommandContext
 from ..extensions.registry import CapabilityRegistry
 from ..extensions.renderers import ExtensionRendererRegistry
 from ..model_runtime import ModelRuntime, create_model_runtime, match_model_argument
@@ -55,8 +55,10 @@ from ..sdk import (
     default_session_dir,
 )
 from ..services import ServiceOverrides
-from ..session.catalog import SessionSummary, list_sessions
+from ..session.catalog import SessionSummary, list_sessions, open_session
 from ..session.errors import SessionNotFoundError
+from ..session.fork import fork_session
+from ..session.manager import SessionManager
 from .commands import CommandDispatcher, CommandOutcome, CommandSpec, ShortcutDispatcher
 from .config_ui import ModelSettingsController
 from .main import InteractiveApp
@@ -293,6 +295,11 @@ class _HasActions(Protocol):
 class _HasRenderers(Protocol):
     @property
     def renderers(self) -> ExtensionRendererRegistry: ...
+
+
+@runtime_checkable
+class _HasReload(Protocol):
+    async def reload(self) -> tuple[object, ...]: ...
 
 
 class _RawOutput(Protocol):
@@ -658,7 +665,11 @@ async def run_interactive(
                 timestamp_factory=_utc_timestamp,
             )
         extensions = created.services.extensions
-        extension_context = extensions.actions if isinstance(extensions, _HasActions) else None
+        extension_context = (
+            ExtensionCommandContext(extensions.actions)
+            if isinstance(extensions, _HasActions)
+            else None
+        )
         extension_renderers = (
             extensions.renderers if isinstance(extensions, _HasRenderers) else None
         )
@@ -880,6 +891,7 @@ async def run_interactive(
             summary = items[chosen - 1]
             if await switch_to(created, summary):
                 return CommandOutcome(kind="message", text="session switch cancelled by extension")
+            refresh_extension_surfaces()
             rebuild()
             app_holder[0].note(f"switched to {summary.id}")
             return CommandOutcome(kind="none")
@@ -893,9 +905,80 @@ async def run_interactive(
             summary = _PathRef(path=manager.path)
             if await fork_from(created, summary):
                 return CommandOutcome(kind="message", text="session fork cancelled by extension")
+            refresh_extension_surfaces()
             rebuild()
             app_holder[0].note(f"forked to {created.session.session_manager.header.id}")
             return CommandOutcome(kind="none")
+
+        async def new_extension_session() -> bool:
+            timestamp = _utc_timestamp()
+            manager = (
+                SessionManager.in_memory(
+                    cwd=options.cwd,
+                    session_id=uuid4().hex,
+                    timestamp=timestamp,
+                )
+                if options.no_session
+                else SessionManager.create(
+                    cwd=options.cwd,
+                    session_dir=_selector_directory(),
+                    session_id=uuid4().hex,
+                    timestamp=timestamp,
+                    parent_session=(
+                        str(created.session.session_manager.path)
+                        if created.session.session_manager.path is not None
+                        else None
+                    ),
+                )
+            )
+            cancelled = await created.new_session(manager)
+            if not cancelled:
+                refresh_extension_surfaces()
+                rebuild()
+            return cancelled
+
+        async def fork_extension_session(entry_id: str) -> bool:
+            manager = created.session.session_manager
+            if manager.path is None:
+                raise ValueError("cannot fork an in-memory session")
+            forked = await asyncio.to_thread(
+                fork_session,
+                manager.path,
+                leaf_id=entry_id,
+                target_cwd=options.cwd,
+                session_dir=manager.path.parent,
+                session_id=uuid4().hex,
+                timestamp=_utc_timestamp(),
+            )
+            cancelled = await created.fork(forked)
+            if not cancelled:
+                refresh_extension_surfaces()
+                rebuild()
+            return cancelled
+
+        async def navigate_extension_session(target_id: str) -> bool:
+            try:
+                await created.session.branch(target_id)
+            except SessionOperationCancelled:
+                return True
+            rebuild()
+            return False
+
+        async def switch_extension_session(path: str) -> bool:
+            manager = await asyncio.to_thread(open_session, Path(path))
+            cancelled = await created.switch(manager)
+            if not cancelled:
+                refresh_extension_surfaces()
+                rebuild()
+            return cancelled
+
+        async def reload_extensions() -> None:
+            current = created.services.extensions
+            if not isinstance(current, _HasReload):
+                raise RuntimeError("extension reload is unavailable")
+            await current.reload()
+            refresh_extension_surfaces()
+            rebuild()
 
         def compose(line: str) -> AgentMessage | str:
             if not pending_attachments:
@@ -942,6 +1025,41 @@ async def run_interactive(
                 (f"/{item.name}", f"extension: {item.source}")
                 for item in extensions.registry.registrations("command")
                 if item.name not in skipped
+            )
+
+        def refresh_extension_surfaces() -> None:
+            nonlocal extension_context, extension_renderers, extensions
+            extensions = created.services.extensions
+            extension_context = (
+                ExtensionCommandContext(extensions.actions)
+                if isinstance(extensions, _HasActions)
+                else None
+            )
+            extension_renderers = (
+                extensions.renderers if isinstance(extensions, _HasRenderers) else None
+            )
+            if isinstance(extensions, _HasRegistry):
+                dispatcher.refresh_registry(extensions.registry, context=extension_context)
+                if shortcuts is not None:
+                    shortcuts.refresh_registry(extensions.registry, context=extension_context)
+            if extension_context is not None:
+                extension_context.bind(
+                    wait_for_idle=created.session.wait_for_idle,
+                    new_session=new_extension_session,
+                    fork=fork_extension_session,
+                    navigate=navigate_extension_session,
+                    switch=switch_extension_session,
+                    reload=reload_extensions,
+                )
+
+        if extension_context is not None:
+            extension_context.bind(
+                wait_for_idle=created.session.wait_for_idle,
+                new_session=new_extension_session,
+                fork=fork_extension_session,
+                navigate=navigate_extension_session,
+                switch=switch_extension_session,
+                reload=reload_extensions,
             )
         reader_fn = read_line or _prompt_toolkit_reader(
             shortcuts=shortcuts,

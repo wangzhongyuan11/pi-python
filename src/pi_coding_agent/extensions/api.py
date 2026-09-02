@@ -46,7 +46,16 @@ _ACTION_NAMES = frozenset(
 class ExtensionAPI:
     """Registers capabilities on behalf of one extension into one registry."""
 
-    __slots__ = ("_actions", "_auth", "_hooks", "_name", "_registry", "_renderers", "_ui")
+    __slots__ = (
+        "_actions",
+        "_auth",
+        "_hook_unsubscribers",
+        "_hooks",
+        "_name",
+        "_registry",
+        "_renderers",
+        "_ui",
+    )
 
     def __init__(
         self,
@@ -62,6 +71,7 @@ class ExtensionAPI:
         self._name = name
         self._registry = registry if registry is not None else CapabilityRegistry()
         self._hooks = hooks if hooks is not None else HookRunner()
+        self._hook_unsubscribers: list[Callable[[], None]] = []
         self._actions = actions if actions is not None else ExtensionActions()
         self._ui = ui if ui is not None else ExtensionUiApi()
         self._auth = auth if auth is not None else ExtensionAuthApi()
@@ -150,7 +160,15 @@ class ExtensionAPI:
 
     def on(self, event: str, handler: Handler) -> Callable[[], None]:
         """Register an ordered lifecycle handler for this extension generation."""
-        return self._hooks.register(event, handler)
+        unregister = self._hooks.register(event, handler)
+        self._hook_unsubscribers.append(unregister)
+        return unregister
+
+    def rollback_activation(self) -> None:
+        """Remove hooks registered by an activation that did not complete."""
+        for unregister in reversed(self._hook_unsubscribers):
+            unregister()
+        self._hook_unsubscribers.clear()
 
     def __getattr__(self, name: str) -> object:
         """Expose the stable action names directly, matching the upstream facade."""

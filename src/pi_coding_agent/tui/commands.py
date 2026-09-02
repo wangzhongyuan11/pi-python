@@ -68,6 +68,15 @@ class CommandDispatcher:
                 skipped.append(registration.name)
         return tuple(skipped)
 
+    def refresh_registry(
+        self, registry: CapabilityRegistry, *, context: object | None = None
+    ) -> tuple[str, ...]:
+        self._commands = {
+            name: spec for name, spec in self._commands.items() if spec.source == "builtin"
+        }
+        self._context = context
+        return self.register_registry(registry)
+
     def register(self, spec: CommandSpec) -> None:
         if spec.name in self._commands:
             raise RegistryConflictError(
@@ -113,6 +122,15 @@ class ShortcutDispatcher:
             if callable(registration.payload):
                 dispatcher._shortcuts[_normalize_shortcut(registration.name)] = registration.payload
         return dispatcher
+
+    def refresh_registry(
+        self, registry: CapabilityRegistry, *, context: object | None = None
+    ) -> None:
+        self._context = context
+        self._shortcuts.clear()
+        for registration in registry.registrations("shortcut"):
+            if callable(registration.payload):
+                self._shortcuts[_normalize_shortcut(registration.name)] = registration.payload
 
     @property
     def names(self) -> tuple[str, ...]:
