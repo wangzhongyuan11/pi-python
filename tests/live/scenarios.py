@@ -170,6 +170,155 @@ evidence_path.write_text(
 raise SystemExit(exit_code)
 """
 
+_EXTENSION_TUI_CHILD = r"""
+import json
+import os
+from pathlib import Path
+
+from pi_ai import (
+    AssistantMessage,
+    FakeProvider,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    fake_assistant_message,
+)
+from pi_coding_agent.cli.main import main
+from pi_coding_agent.deepseek_credentials import DeepSeekCredentialResolver
+from pi_coding_agent.model_runtime import ModelRuntime, create_model_runtime
+from pi_coding_agent.session.agent_messages import parse_message_entry
+from pi_coding_agent.session.catalog import open_session
+from pi_coding_agent.session.models import MessageEntry
+from tests.live.scenarios import BudgetedProvider, TUI_MAX_REQUESTS
+
+project = Path(os.environ["PI_LIVE_TUI_PROJECT"])
+repository = Path(os.environ["PI_LIVE_TUI_REPOSITORY"])
+session_dir = Path(os.environ["PI_LIVE_TUI_SESSION_DIR"])
+evidence_path = Path(os.environ["PI_LIVE_TUI_EVIDENCE"])
+
+if os.environ.get("PI_LIVE_TUI_FAKE") == "1":
+    first = "golden-hook-result\n"
+    corrected = first + "corrected-v2\n"
+    provider = FakeProvider([
+        fake_assistant_message(
+            ToolCall(id="golden-live", name="golden_echo", arguments={"text": "live-proof"}),
+            stop_reason="toolUse",
+        ),
+        fake_assistant_message(
+            ToolCall(
+                id="write-extension-proof",
+                name="write",
+                arguments={"path": "extension-proof.txt", "content": first},
+            ),
+            stop_reason="toolUse",
+        ),
+        fake_assistant_message("initial extension proof verified"),
+        fake_assistant_message(
+            ToolCall(
+                id="read-extension-proof",
+                name="read",
+                arguments={"path": "extension-proof.txt"},
+            ),
+            stop_reason="toolUse",
+        ),
+        fake_assistant_message(
+            ToolCall(
+                id="edit-extension-proof",
+                name="edit",
+                arguments={
+                    "path": "extension-proof.txt",
+                    "edits": [{"oldText": first, "newText": corrected}],
+                },
+            ),
+            stop_reason="toolUse",
+        ),
+        fake_assistant_message("correction verified"),
+        fake_assistant_message(
+            ToolCall(
+                id="resume-read-proof",
+                name="read",
+                arguments={"path": "extension-proof.txt"},
+            ),
+            stop_reason="toolUse",
+        ),
+        fake_assistant_message("resumed session verified both lines"),
+    ])
+    base_model = provider.models[0]
+else:
+    resolver = DeepSeekCredentialResolver(
+        environ=os.environ,
+        env_file=repository / ".env",
+        cwd=project,
+    )
+    live_runtime = create_model_runtime(
+        credential_resolver=resolver,
+        model_id="deepseek-v4-flash",
+        thinking_level="off",
+        max_tokens=2048,
+        timeout_seconds=90,
+    )
+    provider = live_runtime.provider
+    base_model = live_runtime.model
+
+budgeted = BudgetedProvider(provider, max_requests=TUI_MAX_REQUESTS)
+
+def run_tui(*extra):
+    runtime = ModelRuntime(provider=budgeted, model=base_model)
+    return main(
+        [
+            "--provider", runtime.model.provider,
+            "--model", runtime.model.id,
+            "--thinking", "off",
+            "--session-dir", str(session_dir),
+            "--tools", "all",
+            "--approve",
+            "--golden-mode",
+            *extra,
+        ],
+        model_runtime=runtime,
+    )
+
+first_exit = run_tui()
+second_exit = run_tui("--resume")
+
+session_files = tuple(session_dir.glob("*.jsonl"))
+if len(session_files) != 1:
+    raise AssertionError(f"expected one resumed TUI session, got {len(session_files)}")
+manager = open_session(session_files[0])
+messages = [
+    parse_message_entry(entry)
+    for entry in manager.active_path()
+    if isinstance(entry, MessageEntry)
+]
+tool_results = [
+    message
+    for message in messages
+    if isinstance(message, ToolResultMessage) and message.tool_name == "golden_echo"
+]
+hooked = any(
+    isinstance(block, TextContent) and block.text == "golden-hook-result"
+    for message in tool_results
+    for block in message.content
+)
+total_cost = sum(
+    message.usage.cost.total for message in messages if isinstance(message, AssistantMessage)
+)
+evidence_path.write_text(
+    json.dumps(
+        {
+            "exit_code": max(first_exit, second_exit),
+            "hooked": hooked,
+            "request_count": budgeted.request_count,
+            "session_path": str(session_files[0]),
+            "tool_result_count": len(tool_results),
+            "total_cost": total_cost,
+        }
+    ),
+    encoding="utf-8",
+)
+raise SystemExit(max(first_exit, second_exit))
+"""
+
 
 def verification_command() -> str:
     executable = Path(sys.executable).as_posix()
@@ -235,6 +384,16 @@ class TuiScenarioEvidence:
     total_cost: float
     session_path: Path
     transcript: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExtensionTuiEvidence:
+    request_count: int
+    total_cost: float
+    session_path: Path
+    transcript: str
+    tool_result_count: int
+    hooked: bool
 
 
 def create_disposable_project(project: Path) -> None:
@@ -337,6 +496,88 @@ def run_packaged_tui_scenario(
         total_cost=float(payload["total_cost"]),
         session_path=Path(payload["session_path"]),
         transcript=completed.stdout,
+    )
+
+
+def run_extension_tui_scenario(*, root: Path, live: bool) -> ExtensionTuiEvidence:
+    repository = Path(__file__).resolve().parents[2]
+    project = root / "project"
+    agent_dir = root / "agent"
+    session_dir = root / "sessions"
+    evidence_path = root / "extension-tui-evidence.json"
+    project.mkdir(parents=True)
+    entrypoint_name = "pi-python.exe" if os.name == "nt" else "pi-python"
+    entrypoint = Path(sys.executable).with_name(entrypoint_name)
+    environ = dict(os.environ)
+    environ.update(
+        {
+            "PI_LIVE_TUI_EVIDENCE": str(evidence_path),
+            "PI_LIVE_TUI_PROJECT": str(project),
+            "PI_LIVE_TUI_REPOSITORY": str(repository),
+            "PI_LIVE_TUI_SESSION_DIR": str(session_dir),
+            "PI_PYTHON_AGENT_DIR": str(agent_dir),
+            "PYTHONIOENCODING": "utf-8",
+        }
+    )
+    if not live:
+        environ["PI_LIVE_TUI_FAKE"] = "1"
+
+    installed = subprocess.run(
+        [entrypoint, "install", str(repository / "tests" / "fixtures" / "golden_package")],
+        cwd=project,
+        env=environ,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=False,
+    )
+    if installed.returncode != 0:
+        raise AssertionError(f"extension package install failed: {installed.stderr}")
+
+    initial = (
+        "/golden-status\n"
+        "You must call golden_echo with text live-proof first. Use the resulting tool text "
+        "as the exact first line of extension-proof.txt, then read the file and verify it.\n"
+        "The requirement changed: preserve the first line and add corrected-v2 as the exact "
+        "second line. Read, edit, and verify extension-proof.txt.\n"
+        "/golden-reload\n"
+        "/golden-status\n"
+        "/exit\n"
+    )
+    resumed = (
+        "/golden-status\n"
+        "Resume this session. Read extension-proof.txt and report its exact two lines without "
+        "changing the file.\n"
+        "/exit\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", _EXTENSION_TUI_CHILD],
+        input=initial + resumed,
+        cwd=project,
+        env=environ,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=TUI_PROCESS_TIMEOUT_SECONDS,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"extension TUI failed with {completed.returncode}:\n"
+            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+        )
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    proof = (project / "extension-proof.txt").read_text(encoding="utf-8")
+    if proof.splitlines() != ["golden-hook-result", "corrected-v2"]:
+        raise AssertionError(f"unexpected extension proof: {proof!r}")
+    return ExtensionTuiEvidence(
+        request_count=int(payload["request_count"]),
+        total_cost=float(payload["total_cost"]),
+        session_path=Path(payload["session_path"]),
+        transcript=completed.stdout,
+        tool_result_count=int(payload["tool_result_count"]),
+        hooked=bool(payload["hooked"]),
     )
 
 

@@ -311,7 +311,7 @@ G14-LIVE（DeepSeek 持续授权；真实 TUI；测试内强制请求/费用/进
 | [x] P14-T08 | UI/Auth/renderer 调用输入；输出 TUI bridge、Extension-owned credentials 和 message/tool/session renderers | EXT-006,EXT-008,EXT-014..016; P14-T06 | `src/pi_coding_agent/extensions/ui_api.py`, `src/pi_coding_agent/extensions/auth_api.py`, `src/pi_coding_agent/extensions/renderers.py`, `src/pi_coding_agent/tui/main.py`, `tests/pi_coding_agent/extensions/test_ui_renderers.py` | 独立 ports 无法从 api 获得红测 → Extension context 注入 | Intentional divergence | `uv run --frozen pytest tests/pi_coding_agent/extensions/test_ui_renderers.py` / G14 | `P14-T08: expose extension ui auth and renderers` |
 | [x] P14-T09 | reload/new/fork/switch 与失败 Extension 输入；输出反向 teardown、EventBus 退订和 stale context 拒绝 | EXT-017,EXT-018; P14-T05..T08 | `src/pi_coding_agent/extensions/lifecycle.py`, `src/pi_coding_agent/extensions/runtime.py`, `src/pi_coding_agent/extensions/context.py`, `tests/pi_coding_agent/extensions/test_reload_generation.py` | 旧 handler 继续触发红测 → generation invalidation | Supported | `uv run --frozen pytest tests/pi_coding_agent/extensions/test_reload_generation.py` / G14 | `P14-T09: invalidate stale extension generations` |
 | [x] P14-T10 | 黄金 Package/Extension 经 install、restart、Agent、TUI、switch/reload 输入；输出 Tool/Command/Provider/Flag/Skill/hook 全部可观察 | Phase 14 主链；P14-T09 | `tests/pi_coding_agent/e2e/test_golden_extension.py`, `tests/fixtures/golden_package/*` | 组件测试绿但产品路径失败红测 → 只修闭环接线 | Supported | `uv run --frozen pytest tests/pi_coding_agent/e2e/test_golden_extension.py` / G14 | `P14-T10: prove the extension platform end to end` |
-| [ ] P14-T11 | 持续授权的真实 DeepSeek + 黄金 Extension + 真实 TUI 进程输入；输出扩展 Tool/Command/hook 实际调用、多轮修正、Session 延续与硬预算证据 | live 验收轨；P14-T10 | `tests/live/test_extension_tui.py`, `tests/live/scenarios.py`, `tests/fixtures/golden_package/*` | FakeProvider/伪终端先固定判据 → opt-in 真 API + 真 TUI 进程验证 | Intentional divergence | `uv run --frozen pytest tests/live/test_extension_tui.py -m "live_provider and network"` / G14-LIVE | `P14-T11: validate extensions in the real tui` |
+| [x] P14-T11 | 持续授权的真实 DeepSeek + 黄金 Extension + 真实 TUI 进程输入；输出扩展 Tool/Command/hook 实际调用、多轮修正、Session 延续与硬预算证据 | live 验收轨；P14-T10 | `tests/live/test_extension_tui.py`, `tests/live/scenarios.py`, `tests/fixtures/golden_package/*` | FakeProvider/伪终端先固定判据 → opt-in 真 API + 真 TUI 进程验证 | Intentional divergence | `uv run --frozen pytest tests/live/test_extension_tui.py -m "live_provider and network"` / G14-LIVE | `P14-T11: validate extensions in the real tui` |
 
 ## Phase 15：CLI、TUI 与本地 RPC 完整产品模式
 
@@ -388,4 +388,4 @@ G14-LIVE（DeepSeek 持续授权；真实 TUI；测试内强制请求/费用/进
 
 ## 当前停止点
 
-Phase 11.5、Phase 12、Phase 13 与 P14-T01..T10 已完成；下一项严格进入 P14-T11。Phase 12–17 先完成 Pi 产品闭环，Phase 18–20 再完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。
+Phase 11.5、Phase 12、Phase 13 与 Phase 14 已完成；下一项严格进入 P15-T01。Phase 12–17 先完成 Pi 产品闭环，Phase 18–20 再完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。
