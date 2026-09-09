@@ -206,6 +206,9 @@ class DefaultResourceLoader:
             if kind == "extension":
                 continue
             for root in roots:
+                if root.is_file():
+                    collected.append((kind, root))
+                    continue
                 directory = root / kind if root.name not in {kind, f"{kind}s"} else root
                 if not directory.is_dir():
                     diagnostics.append(f"package resource root missing: {root}")

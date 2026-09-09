@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pi_coding_agent.extensions.metadata import MANIFEST_NAME
+from ..extensions.metadata import MANIFEST_NAME
 
 from .manifest import read_package_manifest
 

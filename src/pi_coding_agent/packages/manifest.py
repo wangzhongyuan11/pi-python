@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from pi_coding_agent.config.models import PackageSource
-from pi_coding_agent.ports import ResourceKind, ResourceRoot
+from ..config.models import PackageSource
+from ..ports import ResourceKind, ResourceRoot
 
 _PACKAGE_NAME = re.compile(
     r"^(?:[A-Za-z0-9][A-Za-z0-9._-]*|@[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)$"

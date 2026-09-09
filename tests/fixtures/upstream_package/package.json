@@ -1,0 +1,11 @@
+{
+  "name": "upstream-compatible-package",
+  "version": "1.0.0",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["extensions/*.ts", "extensions/python"],
+    "skills": ["skills"],
+    "prompts": ["prompts/*.md", "!prompts/legacy.md"],
+    "themes": ["themes"]
+  }
+}

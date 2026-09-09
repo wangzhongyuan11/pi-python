@@ -10,9 +10,9 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 
-from pi_coding_agent.config.models import PackageSource
-from pi_coding_agent.config.settings import SettingsManager
-from pi_coding_agent.ports import ConfiguredPackage, PackageScope, ResourceRoot
+from ..config.models import PackageSource
+from ..config.settings import SettingsManager
+from ..ports import ConfiguredPackage, PackageScope, ResourceRoot
 
 from .environment import Installer, install_requirement
 from .manifest import PackageManifestError, read_package_manifest
@@ -239,7 +239,14 @@ class DefaultPackageManager:
                     continue
                 package_root = installed.get(_source_text(configured))
                 if package_root is not None:
-                    roots.extend(read_package_manifest(package_root).resources)
+                    roots.extend(
+                        read_package_manifest(
+                            package_root,
+                            package_filter=(
+                                configured if isinstance(configured, PackageSource) else None
+                            ),
+                        ).resources
+                    )
         return tuple(roots)
 
     def set_enabled(self, source: str, enabled: bool, *, scope: PackageScope = "user") -> bool:
