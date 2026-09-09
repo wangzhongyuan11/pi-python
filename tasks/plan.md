@@ -1,6 +1,6 @@
 # Pi Agent Python 重写实施计划
 
-> 状态：P0–P14 已完成；下一项是 P15-T01。P12 起按“功能闭环优先”路线执行。
+> 状态：P0–P14 与 P14.5-T01 已完成；正在执行 Phase 14.5，下一项是 P14.5-T02。P12 起按“功能闭环优先”路线执行。
 > 上游源码：`D:\pi`
 > 冻结提交：`e14afc648e10fb6c527ea88fa627091ada764306`
 > 上游版本：`0.84.1`
@@ -157,7 +157,7 @@ flowchart TD
 - 异步 SDK 与同步便利封装。
 - Settings、Prompt、Skill、Theme、上下文文件和项目资源信任。
 - Python-native Extension 的工具、命令、flags、快捷键、Provider、认证交互、hooks、renderers、session actions 和 UI。
-- local/Git/PyPI Python 包，以及 npm Pi Package 中的纯数据资源。
+- 官方 Pi `package.json#pi`、约定目录、过滤规则与 local/Git/npm 来源；Skill/Prompt/Theme 直接加载，常用 JS/TS Extension 经 Node Host 无源码修改运行。
 - prompt_toolkit TUI 的功能和动作语义对齐。
 - HTML export、文本剪贴板、文件/图片附件数据契约。
 - 默认关闭的逐工具权限 Extension。
@@ -176,7 +176,7 @@ flowchart TD
 - `.pi/` 只在显式兼容模式下只读挂载或选择性导入。
 - 内建 Provider 只有 DeepSeek；其他 Provider 由 Extension 注册。
 - 内核不保存凭据；DeepSeek 使用 CLI/env/.env，Extension 自行实现认证持久化。
-- 不执行 JS/TS Extension。
+- JS/TS Extension 通过独立 Node Host 运行；不能跨进程表示的上游私有对象和自定义 TUI 组件会明确报告为 unsupported。
 - TUI 不追求上游自研渲染器的逐像素一致。
 - DeepSeek 不支持图片时在请求前明确拒绝；不实现 Kitty/iTerm2 图片协议。
 - macOS 明确不支持。
@@ -190,7 +190,7 @@ flowchart TD
 - SQLite Session 后端。
 - 实验性 protocol/client/server 与远程 Session。
 - 内建多 Provider、内建 OAuth、凭据仓库。
-- Node sidecar/TS Extension 执行。
+- 上游实验性或私有 Extension 内部对象的完全兼容。
 - 终端图片协议与 macOS 支持。
 
 ### 6.4 完成 Pi 后与 Codex 的产品差距
@@ -336,17 +336,29 @@ Session 审计边界补充：catalog cwd 过滤在 Windows 盘符大小写与目
 
 验收：黄金 Extension 通过正常 CLI/Package 路径注册 Tool、Command、Provider、Flag、Skill 和 hook；Agent 实际调用扩展 Tool，TUI 执行扩展 Command，Provider 可选；new/fork/switch/reload 后旧 generation teardown 且事件不再触发，失败 Extension 不影响其他 Extension；最终使用真实 DeepSeek API 驱动真实 TUI 进程调用扩展能力并完成多轮任务。
 
+### Phase 14.5：官方 Package 兼容基础
+
+在不执行 Node 代码的前提下先兼容上游 Package 数据契约。增加 npm、Git URL/简写和本地来源规范化，解析 `package.json#pi`、约定资源目录、glob、排除与强制包含规则；递归加载 Skill，保持 Prompt/Theme 语义。安全解包 npm 完整内容并保留 JS/TS Extension，但安装阶段不运行 lifecycle scripts。统一输出 `native`、`portable`、`bridged`、`unsupported` 能力报告，避免安装成功后静默丢失功能。决策和边界见 ADR 0009。
+
+验收：上游风格本地与离线 npm fixture 可安装并在重启后加载 Skill/Prompt/Theme；JS/TS 文件被保留且准确报告为 `bridged`，不会在 Node Host 完成前执行；过滤和路径逃逸均有行为测试；现有 Python Package/Extension 全部保持兼容。
+
 ### Phase 15：CLI、TUI 与本地 RPC 完整产品模式
 
 在共享 bootstrap 和完整 Extension runtime 上完成用户入口。先完成动态 help/flags、Package/trust/offline 命令和 Extension commands，再实现 strict-LF JSONL RPC schema、server、完整 AgentSession commands、Extension UI bridge 与 Python RpcClient。RPC 只是同一 AgentSession 的另一种适配器，不拥有第二套业务逻辑；包含最新 Pi 的 `clear_queue`，并允许长时间工具使用调用方可控超时而不是固定 60 秒。
 
 验收：同一 Session 可通过 CLI/TUI/RPC 执行 prompt、steer、abort、tool、compact、model、fork/switch 和 Extension UI；RPC stdout 只含协议帧，慢消费者有界；RpcClient 正确处理乱序 response/event、退出与清理。
 
+### Phase 15.5：Node/TypeScript Extension Host
+
+在 Phase 15 的通信基础上增加版本化 Node Host。使用 Jiti 原生加载 `.ts`/`.js` 与官方 default factory，不做源码翻译；为 Tool、Command、Flag、Shortcut、事件/hook、Session actions 和简单可序列化 UI 建立双向代理。每个 Package 使用自己的模块根和运行时依赖；Host 支持握手、能力协商、取消、超时、reload generation、崩溃诊断和干净退出。高级 `pi-tui` 组件、私有 AgentSession 对象和尚未映射的 Provider/OAuth 能力必须显式拒绝。
+
+验收：至少一个真实公开 Pi Package 和本地官方风格 fixture 可无源码修改安装；真实 DeepSeek + 真实 TUI 调用 TypeScript Tool/Command/hook 并完成多轮 Session 恢复；Host 崩溃、reload、switch 和退出不遗留进程，unsupported API 有稳定诊断。
+
 ### Phase 16：功能可靠性与上游语义差分
 
-把原计划中最有价值的 P13 内容提前：TypeScript/Python 语义差分、历史 regression 和黄金 Package/Extension 端到端测试。差分比较事件顺序、状态变化和可观察结果，不比较时间、ID、绝对路径或模型自然语言。使用本地 FakeProvider、临时 Git/PyPI/npm fixture 和 subprocess/PTY，避免把 mock 单元测试当成产品可用证明。最新 Pi 增量回归至少覆盖：JSONL 尾行无换行恢复、Extension 插入消息不拆开 ToolCall/ToolResult、大工具结果在下一 Provider 请求前自动压缩、并行工具结果逐个持久化、Extension/MCP 子进程在 reload/退出时清理。
+把原计划中最有价值的 P13 内容提前：TypeScript/Python 语义差分、历史 regression 和 Python/TypeScript 黄金 Package/Extension 端到端测试。差分比较事件顺序、状态变化和可观察结果，不比较时间、ID、绝对路径或模型自然语言。使用本地 FakeProvider、临时 Git/PyPI/npm fixture 和 subprocess/PTY，避免把 mock 单元测试当成产品可用证明。最新 Pi 增量回归至少覆盖：JSONL 尾行无换行恢复、Extension 插入消息不拆开 ToolCall/ToolResult、大工具结果在下一 Provider 请求前自动压缩、并行工具结果逐个持久化、Extension/MCP 子进程在 reload/退出时清理。
 
-验收：黄金 Package 覆盖 install → restart → Agent 调用扩展 Tool → TUI Command → Session switch/reload → RPC → update → remove；冻结上游核心场景语义 diff 通过；已确认历史问题每项有独立 regression。
+验收：Python 与 TypeScript 黄金 Package 均覆盖 install → restart → Agent 调用扩展 Tool → TUI Command → Session switch/reload → RPC → update → remove；冻结上游核心场景语义 diff 通过；已确认历史问题每项有独立 regression。
 
 ### Phase 17：次要但属于 1.0 的产品表面
 

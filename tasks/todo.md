@@ -33,7 +33,9 @@ G11 uv run --frozen pytest tests/pi_coding_agent/tui
 G12 uv run --frozen pytest tests/pi_coding_agent -m "not live_provider and not network"
 G13 uv run --frozen pytest tests/pi_coding_agent/packages tests/pi_coding_agent/resources tests/pi_coding_agent/cli/test_packages_e2e.py -m "not network"
 G14 uv run --frozen pytest tests/pi_coding_agent/extensions tests/pi_coding_agent/agent_session tests/pi_coding_agent/tui/test_commands.py
+G14.5 uv run --frozen pytest tests/pi_coding_agent/packages tests/pi_coding_agent/resources tests/pi_coding_agent/extensions -m "not network"
 G15 uv run --frozen pytest tests/pi_coding_agent/cli tests/pi_coding_agent/rpc tests/pi_coding_agent/tui
+G15.5 uv run --frozen pytest tests/pi_coding_agent/node_host tests/pi_coding_agent/extensions tests/pi_coding_agent/e2e/test_typescript_extension.py -m "not live_provider and not network"
 G16 uv run --frozen pytest tests/differential tests/regressions tests/pi_coding_agent/e2e -m "not live_provider and not network"
 G17 uv run --frozen pytest tests/pi_coding_agent/attachments tests/pi_coding_agent/export tests/contracts/test_documented_cli.py
 G18 uv run --frozen pytest tests/pi_coding_agent/mcp -m "not live_provider and not network"
@@ -313,6 +315,17 @@ G14-LIVE（DeepSeek 持续授权；真实 TUI；测试内强制请求/费用/进
 | [x] P14-T10 | 黄金 Package/Extension 经 install、restart、Agent、TUI、switch/reload 输入；输出 Tool/Command/Provider/Flag/Skill/hook 全部可观察 | Phase 14 主链；P14-T09 | `tests/pi_coding_agent/e2e/test_golden_extension.py`, `tests/fixtures/golden_package/*` | 组件测试绿但产品路径失败红测 → 只修闭环接线 | Supported | `uv run --frozen pytest tests/pi_coding_agent/e2e/test_golden_extension.py` / G14 | `P14-T10: prove the extension platform end to end` |
 | [x] P14-T11 | 持续授权的真实 DeepSeek + 黄金 Extension + 真实 TUI 进程输入；输出扩展 Tool/Command/hook 实际调用、多轮修正、Session 延续与硬预算证据 | live 验收轨；P14-T10 | `tests/live/test_extension_tui.py`, `tests/live/scenarios.py`, `tests/fixtures/golden_package/*` | FakeProvider/伪终端先固定判据 → opt-in 真 API + 真 TUI 进程验证 | Intentional divergence | `uv run --frozen pytest tests/live/test_extension_tui.py -m "live_provider and network"` / G14-LIVE | `P14-T11: validate extensions in the real tui` |
 
+## Phase 14.5：官方 Package 兼容基础
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [x] P14.5-T01 | 双运行时目标输入；输出 ADR、兼容矩阵和后续阶段依赖一致 | `packages.md`,`extensions.md`; P14-T11 | `docs/decisions/0009-dual-runtime-package-extensions.md`, `docs/compatibility/surface-matrix.md`, `tasks/plan.md`, `tasks/todo.md` | 旧矩阵仍拒绝 Node 红测 → 四级兼容契约 | Supported | `uv run --frozen python scripts/check_surface_matrix.py --source D:\pi` / `git diff --check` | `P14.5-T01: plan dual runtime package compatibility` |
+| [ ] P14.5-T02 | 官方 npm/Git URL/简写/本地 source 输入；输出规范化 kind/location/ref/identity | `packages.md` Package Sources; P14.5-T01 | `src/pi_coding_agent/packages/spec.py`, `tests/pi_coding_agent/packages/test_spec.py` | npm/git shorthand/raw URL/尾部 ref 红测 → source parser | Supported | `uv run --frozen pytest tests/pi_coding_agent/packages/test_spec.py` / G14.5 | `P14.5-T02: parse upstream package sources` |
+| [ ] P14.5-T03 | `package.json#pi`、约定目录和 object filters 输入；输出 glob/排除/强制包含后的稳定 ResourceRoot | `packages.md` Package Structure/Filtering; P14.5-T02 | `src/pi_coding_agent/packages/manifest.py`, `src/pi_coding_agent/config/models.py`, `tests/pi_coding_agent/packages/test_manifest.py` | glob/递归 skill/空列表/逃逸红测 → manifest resolver | Supported | `uv run --frozen pytest tests/pi_coding_agent/packages/test_manifest.py` / G14.5 | `P14.5-T03: resolve upstream package resources` |
+| [ ] P14.5-T04 | npm tarball 含官方 manifest、JS/TS 和 scripts 输入；输出安全完整解包且零代码执行 | `package-manager.ts`; P14.5-T03 | `src/pi_coding_agent/packages/npm_data.py`, `src/pi_coding_agent/packages/manager.py`, `tests/pi_coding_agent/packages/test_npm_data.py`, `tests/pi_coding_agent/packages/test_npm_package_integration.py` | code 被拒绝/manifest 被重写红测 → no-exec archive installer | Supported | `uv run --frozen pytest tests/pi_coding_agent/packages/test_npm_data.py tests/pi_coding_agent/packages/test_npm_package_integration.py` / G14.5 | `P14.5-T04: preserve npm extension packages without execution` |
+| [ ] P14.5-T05 | 已安装 Package 内容输入；输出 native/portable/bridged/unsupported 能力清单与原因 | ADR 0009; P14.5-T04 | `src/pi_coding_agent/packages/compatibility.py`, `src/pi_coding_agent/packages/__init__.py`, `tests/pi_coding_agent/packages/test_compatibility.py` | TS 静默消失红测 → deterministic inspector | Supported | `uv run --frozen pytest tests/pi_coding_agent/packages/test_compatibility.py` / G14.5 | `P14.5-T05: inspect package runtime compatibility` |
+| [ ] P14.5-T06 | 上游风格本地/npm fixture 经 install/restart 输入；输出过滤后的资源可用、TS 保留且不激活、旧 Python 包不回归 | Phase 14.5 主链; P14.5-T05 | `tests/pi_coding_agent/e2e/test_upstream_package_compat.py`, `tests/fixtures/upstream_package/*`, `src/pi_coding_agent/packages/manager.py` | 分层单测绿但重启丢根红测 → lifecycle 接线 | Supported | `uv run --frozen pytest tests/pi_coding_agent/e2e/test_upstream_package_compat.py` / G14.5 | `P14.5-T06: prove upstream package compatibility` |
+
 ## Phase 15：CLI、TUI 与本地 RPC 完整产品模式
 
 | 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
@@ -324,6 +337,18 @@ G14-LIVE（DeepSeek 持续授权；真实 TUI；测试内强制请求/费用/进
 | [ ] P15-T05 | Extension UI request/response 输入；输出关联、取消、disconnect 与 fire-and-forget UI events | RPC-014..RPC-016; P15-T03,P14-T08 | `src/pi_coding_agent/rpc/ui_bridge.py`, `src/pi_coding_agent/rpc/server.py`, `tests/pi_coding_agent/rpc/test_ui_bridge.py` | unknown/duplicate/disconnect 红测 → pending request map | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_ui_bridge.py` / G15 | `P15-T05: bridge extension ui over rpc` |
 | [ ] P15-T06 | 子进程 transport 输入；输出 Python RpcClient state、并发 request 和 cleanup | `modes/rpc/rpc-client.ts`; P15-T04,P15-T05 | `src/pi_coding_agent/rpc/client.py`, `src/pi_coding_agent/rpc/__init__.py`, `tests/pi_coding_agent/rpc/test_client.py` | 乱序/disposal/error 红测 → async client | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_client.py` / G15 | `P15-T06: expose the local python rpc client` |
 | [ ] P15-T07 | CLI `--mode rpc` 与 SDK client 对同一黄金 Session 输入；输出完整 subprocess 往返与干净退出 | Phase 15 主链；P15-T06 | `src/pi_coding_agent/cli/main.py`, `tests/pi_coding_agent/e2e/test_rpc_product.py` | 仍返回 Phase 12 stub 红测 → bootstrap adapter | Supported | `uv run --frozen pytest tests/pi_coding_agent/e2e/test_rpc_product.py` / G15 | `P15-T07: prove rpc product mode end to end` |
+
+## Phase 15.5：Node/TypeScript Extension Host
+
+| 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
+|---|---|---|---|---|---|---|---|
+| [ ] P15.5-T01 | Python/Node hello 输入；输出版本、generation、能力和错误语义已协商的 wire contract | ADR 0009; P15-T07 | `src/pi_coding_agent/node_host/models.py`, `tests/pi_coding_agent/node_host/test_models.py`, `node/extension-host/protocol.ts` | 版本/未知能力红测 → 判别消息模型 | Supported | `uv run --frozen pytest tests/pi_coding_agent/node_host/test_models.py` / G15.5 | `P15.5-T01: define the node host protocol` |
+| [ ] P15.5-T02 | Package 模块根与 dependency 输入；输出隔离 npm install、Jiti load 和 default factory 激活 | upstream ADR 0009; P15.5-T01 | `node/extension-host/package.json`, `node/extension-host/src/host.ts`, `src/pi_coding_agent/node_host/process.py`, `tests/pi_coding_agent/node_host/test_loading.py` | 官方 `.ts` 不能加载红测 → managed Node process | Supported | `uv run --frozen pytest tests/pi_coding_agent/node_host/test_loading.py` / G15.5 | `P15.5-T02: load typescript extensions in node` |
+| [ ] P15.5-T03 | registerTool/Command/Flag/Shortcut 输入；输出 Python registry 动态代理与调用结果 | Extension API; P15.5-T02 | `src/pi_coding_agent/node_host/registry_bridge.py`, `node/extension-host/src/api.ts`, `tests/pi_coding_agent/node_host/test_registry_bridge.py` | 注册只留在 Node 红测 → bidirectional proxies | Supported | `uv run --frozen pytest tests/pi_coding_agent/node_host/test_registry_bridge.py` / G15.5 | `P15.5-T03: bridge extension registry surfaces` |
+| [ ] P15.5-T04 | lifecycle/control hook 与 Session action 输入；输出有序事件、修改结果、取消和 stale generation 拒绝 | EXT-002..013; P15.5-T03 | `src/pi_coding_agent/node_host/event_bridge.py`, `node/extension-host/src/api.ts`, `tests/pi_coding_agent/node_host/test_events_actions.py` | hook/action 无产品影响红测 → runtime bridge | Supported | `uv run --frozen pytest tests/pi_coding_agent/node_host/test_events_actions.py` / G15.5 | `P15.5-T04: bridge hooks and session actions` |
+| [ ] P15.5-T05 | input/confirm/select/notify/status 与 renderer 输入；输出可序列化 UI；custom TUI 返回结构化 unsupported | EXT-008,014; P15.5-T04 | `src/pi_coding_agent/node_host/ui_bridge.py`, `node/extension-host/src/api.ts`, `tests/pi_coding_agent/node_host/test_ui.py` | UI 挂起/静默忽略红测 → negotiated subset | Supported | `uv run --frozen pytest tests/pi_coding_agent/node_host/test_ui.py` / G15.5 | `P15.5-T05: bridge serializable extension ui` |
+| [ ] P15.5-T06 | reload/switch/crash/abort/exit 输入；输出 teardown、重启或稳定诊断且无遗留进程 | P15.5-T05 | `src/pi_coding_agent/node_host/runtime.py`, `src/pi_coding_agent/bootstrap.py`, `tests/pi_coding_agent/node_host/test_lifecycle.py` | orphan/stale callback 红测 → supervised lifecycle | Supported | `uv run --frozen pytest tests/pi_coding_agent/node_host/test_lifecycle.py` / G15.5 | `P15.5-T06: supervise node extension lifecycle` |
+| [ ] P15.5-T07 | 本地官方 fixture + 真实公开 Package 输入；输出无源码修改的 Tool/Command/hook 与 unsupported 报告 | Phase 15.5 主链; P15.5-T06 | `tests/pi_coding_agent/e2e/test_typescript_extension.py`, `tests/fixtures/typescript_package/*`, `tests/live/test_typescript_extension_tui.py` | 假桥通过但真实 Jiti/TUI 失败红测 → product wiring | Supported | `uv run --frozen pytest tests/pi_coding_agent/e2e/test_typescript_extension.py` / G15.5 + capped live | `P15.5-T07: prove real typescript extension compatibility` |
 
 ## Phase 16：功能可靠性与上游语义差分
 
@@ -388,4 +413,4 @@ G14-LIVE（DeepSeek 持续授权；真实 TUI；测试内强制请求/费用/进
 
 ## 当前停止点
 
-Phase 11.5、Phase 12、Phase 13 与 Phase 14 已完成；下一项严格进入 P15-T01。Phase 12–17 先完成 Pi 产品闭环，Phase 18–20 再完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。
+Phase 11.5、Phase 12、Phase 13 与 Phase 14 已完成；下一项严格进入 P14.5-T01。Phase 14.5 先完成官方 Package 数据契约，Phase 15 完成 RPC，Phase 15.5 再执行 JS/TS Extension；Phase 16–17 完成双运行时 Pi 产品闭环，Phase 18–20 再完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。
