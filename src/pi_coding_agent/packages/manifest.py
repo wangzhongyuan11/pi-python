@@ -29,6 +29,7 @@ class PackageManifestError(ValueError):
 @dataclass(frozen=True, slots=True)
 class PackageManifest:
     name: str
+    package_name: str
     resources: tuple[ResourceRoot, ...]
 
 
@@ -64,13 +65,16 @@ def read_package_manifest(
         if filter_entries is not None:
             selected = _apply_filter(root, selected, filter_entries)
         roots.extend(ResourceRoot(kind=kind, path=path, source="package") for path in selected)
-    return PackageManifest(name=name, resources=tuple(roots))
+    return PackageManifest(name=name, package_name=package_name, resources=tuple(roots))
 
 
 def _string_entries(value: object, *, label: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+    if not isinstance(value, list):
         raise PackageManifestError(f"{label} must be a string array")
-    return tuple(cast(list[str], value))
+    items = cast("list[object]", value)
+    if not all(isinstance(item, str) for item in items):
+        raise PackageManifestError(f"{label} must be a string array")
+    return tuple(cast("list[str]", items))
 
 
 def _apply_filter(root: Path, base: tuple[Path, ...], entries: tuple[str, ...]) -> tuple[Path, ...]:
