@@ -21,7 +21,7 @@ from ..extensions.registry import ExtensionFlagError
 from ..model_runtime import ModelRuntime, UnknownModelError
 from ..providers import UnknownProviderError
 from ..sdk import AgentSessionFactory, ToolSelection
-from ..services import ServiceOverrides
+from ..services import ServiceOverrides, create_product_services
 from ..session.errors import SessionError
 from ..tui.runner import InteractiveOptions, run_interactive
 from .import_session import run_import_session
@@ -29,7 +29,7 @@ from .packages import run_package_command
 from .parser import create_parser, create_run_parser, parse_run_arguments
 from .run import HeadlessOptions, run_headless
 from .session_repair import run_session_repair
-from .surface import UnknownFlagError
+from .surface import UnknownFlagError, format_extension_flag_help
 
 _GLOBAL_VALUE_OPTIONS = {"--api-key", "--env-file"}
 _PACKAGE_COMMANDS = frozenset({"install", "remove", "uninstall", "update", "list", "config"})
@@ -130,6 +130,25 @@ def _auth(
     return 0
 
 
+async def _print_run_help(
+    parser: argparse.ArgumentParser,
+    *,
+    stdout: TextIO,
+    cwd: Path,
+    service_overrides: ServiceOverrides,
+) -> int:
+    services = create_product_services(cwd, service_overrides)
+    try:
+        await services.extensions.start()
+        registry = getattr(services.extensions, "registry", None)
+        registrations = () if registry is None else registry.registrations("flag")
+        stdout.write(parser.format_help())
+        stdout.write(format_extension_flag_help(registrations))
+    finally:
+        await services.extensions.close()
+    return 0
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -152,6 +171,20 @@ def main(
         if command_mode
         else create_run_parser(version=version("pi-python"))
     )
+    if not command_mode and any(value in {"--help", "-h"} for value in raw_arguments):
+        try:
+            return asyncio.run(
+                _print_run_help(
+                    parser,
+                    stdout=output,
+                    cwd=runtime_cwd,
+                    service_overrides=(
+                        ServiceOverrides() if service_overrides is None else service_overrides
+                    ),
+                )
+            )
+        except KeyboardInterrupt:
+            return 130
     extras: dict[str, bool | str] = {}
     try:
         with redirect_stdout(output), redirect_stderr(errors):

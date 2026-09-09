@@ -330,7 +330,7 @@ G14-LIVE（DeepSeek 持续授权；真实 TUI；测试内强制请求/费用/进
 
 | 状态 / ID | 目标与明确输入输出 | 对应源码证据 / 前置 | 预计主要文件 | 先写失败测试 → 最小实现 | 分类 | 聚焦验证 / 阶段回归 | 提交信息 |
 |---|---|---|---|---|---|---|---|
-| [ ] P15-T01 | 静态+Extension CLI surface 输入；输出动态 help、完整命令行为、稳定 exit/stdout/stderr | `main.ts:L858-L975`; P13-T08,P14-T10 | `src/pi_coding_agent/cli/main.py`, `src/pi_coding_agent/cli/surface.py`, `tests/pi_coding_agent/cli/test_entrypoints.py` | parser 支持但行为 stub 红测 → 完整 dispatch | Supported | `uv run --frozen pytest tests/pi_coding_agent/cli/test_entrypoints.py` / G15 | `P15-T01: finalize the functional cli surface` |
+| [x] P15-T01 | 静态+Extension CLI surface 输入；输出动态 help、完整命令行为、稳定 exit/stdout/stderr | `main.ts:L858-L975`; P13-T08,P14-T10 | `src/pi_coding_agent/cli/main.py`, `src/pi_coding_agent/cli/surface.py`, `tests/pi_coding_agent/cli/test_entrypoints.py` | parser 支持但行为 stub 红测 → 完整 dispatch | Supported | `uv run --frozen pytest tests/pi_coding_agent/cli/test_entrypoints.py` / G15 | `P15-T01: finalize the functional cli surface` |
 | [ ] P15-T02 | RPC JSON 输入；输出 command/response/state/event Pydantic 判别模型 | `modes/rpc/rpc-types.ts`; P15-T01 | `src/pi_coding_agent/rpc/models.py`, `tests/pi_coding_agent/rpc/test_models.py` | alias/request-id/unknown-command 红测 → wire models | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_models.py` / G15 | `P15-T02: freeze local rpc wire models` |
 | [ ] P15-T03 | stdin JSONL 与 AgentSession events 输入；输出 strict-LF、纯 stdout、有 backpressure 的 RPC prompt/steer/abort | `rpc/jsonl.ts`, `rpc-mode.ts`; P15-T02 | `src/pi_coding_agent/rpc/server.py`, `src/pi_coding_agent/rpc/framing.py`, `tests/pi_coding_agent/rpc/test_server_core.py` | malformed/slow consumer/log pollution红测 → bounded server | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_server_core.py` / G15 | `P15-T03: run the core stdio rpc server` |
 | [ ] P15-T04 | model/tool/compact/retry/bash/session/tree/fork/switch/clear_queue commands 输入；输出复用同一 AgentSession actions 且长工具超时可配置 | RPC-003..RPC-011、最新 main; P15-T03 | `src/pi_coding_agent/rpc/server.py`, `src/pi_coding_agent/rpc/commands.py`, `tests/pi_coding_agent/rpc/test_session_commands.py` | RPC 自建第二套状态/固定 60 秒红测 → action adapter | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_session_commands.py` / G15 | `P15-T04: expose agent session commands over rpc` |
@@ -413,4 +413,4 @@ G14-LIVE（DeepSeek 持续授权；真实 TUI；测试内强制请求/费用/进
 
 ## 当前停止点
 
-Phase 11.5、Phase 12、Phase 13、Phase 14 与 Phase 14.5 已完成；按阶段验收规则停在 Phase 14.5，用户确认后下一项严格进入 P15-T01。Phase 15 完成 RPC，Phase 15.5 再执行 JS/TS Extension；Phase 16–17 完成双运行时 Pi 产品闭环，Phase 18–20 再完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。
+Phase 11.5、Phase 12、Phase 13、Phase 14 与 Phase 14.5 已完成；P15-T01 已完成，下一项严格进入 P15-T02。Phase 15 完成 RPC，Phase 15.5 再执行 JS/TS Extension；Phase 16–17 完成双运行时 Pi 产品闭环，Phase 18–20 再完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。

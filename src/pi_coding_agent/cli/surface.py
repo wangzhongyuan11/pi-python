@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
+
+from ..extensions.registry import FlagState, Registration
 
 
 class UnknownFlagError(ValueError):
@@ -76,8 +78,24 @@ def partition_extension_flags(
     return static_arguments, split_unknown_flags(extension_arguments)
 
 
+def format_extension_flag_help(registrations: Iterable[Registration]) -> str:
+    """Render activated Extension flags after argparse's static help."""
+    rows: list[str] = []
+    for registration in registrations:
+        if registration.kind != "flag":
+            continue
+        suffix = " <value>" if isinstance(registration.payload, FlagState) and (
+            registration.payload.value_type == "string"
+        ) else ""
+        rows.append(f"  {registration.name}{suffix}\t({registration.source})")
+    if not rows:
+        return ""
+    return "\nExtension flags:\n" + "\n".join(rows) + "\n"
+
+
 __all__ = [
     "UnknownFlagError",
+    "format_extension_flag_help",
     "partition_extension_flags",
     "split_unknown_flags",
 ]
