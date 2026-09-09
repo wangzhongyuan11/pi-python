@@ -145,21 +145,7 @@ class DefaultPackageManager:
         tarball = build_tarball(source[4:], cache_dir=cache_dir, runner=self._npm_pack_runner)
         staging = packages_root / f".npm.{uuid.uuid4().hex}.staging"
         try:
-            extracted = extract_npm_data(tarball, staging)
-            safe_name = extracted.name.lstrip("@").replace("/", "--")
-            (staging / "package.json").write_text(
-                json.dumps(
-                    {
-                        "name": safe_name,
-                        "pi": {
-                            "skills": ["skills"],
-                            "prompts": ["prompts"],
-                            "themes": ["themes"],
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
+            extract_npm_data(tarball, staging)
             return self._activate_staging(staging, source, scope)
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)

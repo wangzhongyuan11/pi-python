@@ -11,7 +11,9 @@ from typing import cast
 from pi_coding_agent.config.models import PackageSource
 from pi_coding_agent.ports import ResourceKind, ResourceRoot
 
-_PACKAGE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_PACKAGE_NAME = re.compile(
+    r"^(?:[A-Za-z0-9][A-Za-z0-9._-]*|@[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)$"
+)
 _RESOURCE_FIELDS: tuple[tuple[str, ResourceKind], ...] = (
     ("extensions", "extension"),
     ("skills", "skill"),
@@ -44,9 +46,10 @@ def read_package_manifest(
     if not isinstance(raw, dict):
         raise PackageManifestError("package manifest must be a JSON object")
     payload = cast(dict[str, object], raw)
-    name = payload.get("name")
-    if not isinstance(name, str) or not _PACKAGE_NAME.fullmatch(name):
+    package_name = payload.get("name")
+    if not isinstance(package_name, str) or not _PACKAGE_NAME.fullmatch(package_name):
         raise PackageManifestError("package manifest requires a safe name")
+    name = package_name.lstrip("@").replace("/", "--")
     pi = payload.get("pi")
     if pi is not None and not isinstance(pi, dict):
         raise PackageManifestError("package manifest pi field must be an object")

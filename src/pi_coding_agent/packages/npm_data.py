@@ -1,4 +1,4 @@
-"""Ingest npm packages as pure data resources, never executing their scripts."""
+"""Safely unpack npm packages without executing package or extension code."""
 
 from __future__ import annotations
 
@@ -15,30 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-ALLOWED_RESOURCE_DIRS = ("skills", "prompts", "themes")
 MAX_TARBALL_BYTES = 20 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 2_048
 MAX_MEMBER_BYTES = 5 * 1024 * 1024
 MAX_EXTRACTED_BYTES = 20 * 1024 * 1024
-_FORBIDDEN_SUFFIXES = (
-    ".bat",
-    ".cjs",
-    ".cmd",
-    ".com",
-    ".cts",
-    ".exe",
-    ".js",
-    ".dll",
-    ".mjs",
-    ".mts",
-    ".ps1",
-    ".py",
-    ".sh",
-    ".so",
-    ".ts",
-    ".dylib",
-)
-_CODE_ENTRY_FIELDS = ("bin", "browser", "exports", "main", "module")
 
 
 class NpmDataError(RuntimeError):
@@ -96,22 +76,14 @@ def extract_npm_data(tarball: Path, dest: Path) -> NpmDataExtraction:
         manifest = _read_manifest(archive)
         name = _manifest_string(manifest, "name")
         version = _manifest_string(manifest, "version")
-        scripts = manifest.get("scripts")
-        if scripts not in (None, {}):
-            raise NpmDataForbiddenError(f"{name}: lifecycle scripts are forbidden in data packages")
-        for field in _CODE_ENTRY_FIELDS:
-            if manifest.get(field) not in (None, "", (), [], {}):
-                raise NpmDataForbiddenError(f"{name}: code entry field {field!r} is forbidden")
         total_size = 0
         identities: set[str] = set()
         for member in members:
+            if member.issym() or member.islnk():
+                raise NpmDataForbiddenError(f"links are forbidden in npm packages: {member.name}")
             if not member.isfile():
                 continue
-            if member.name.casefold().endswith(_FORBIDDEN_SUFFIXES):
-                raise NpmDataForbiddenError(
-                    f"executable or code file in data package: {member.name}"
-                )
-            relative = _relative_data_path(member.name)
+            relative = _relative_package_path(member.name)
             if relative is None:
                 continue
             identity = relative.casefold()
@@ -175,7 +147,7 @@ def _manifest_string(manifest: dict[str, object], field: str) -> str:
     return value
 
 
-def _relative_data_path(member_name: str) -> str | None:
+def _relative_package_path(member_name: str) -> str | None:
     if (
         not member_name
         or "\\" in member_name
@@ -188,10 +160,7 @@ def _relative_data_path(member_name: str) -> str | None:
     if len(parts) < 2 or parts[0] != "package":
         return None
     relative = "/".join(parts[1:])
-    top = relative.split("/", 1)[0]
-    if top not in ALLOWED_RESOURCE_DIRS:
-        return None
-    return relative
+    return relative or None
 
 
 def _tarball_hash(tarball: Path) -> str:
@@ -291,7 +260,6 @@ def _npm_pack(spec: str, cache_dir: Path) -> Path:
 
 
 __all__ = [
-    "ALLOWED_RESOURCE_DIRS",
     "MAX_ARCHIVE_MEMBERS",
     "MAX_EXTRACTED_BYTES",
     "MAX_MEMBER_BYTES",

