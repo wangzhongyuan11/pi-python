@@ -75,10 +75,10 @@ class MarkdownSettings(_SettingsModel):
 class PackageSource(_SettingsModel):
     source: str
     autoload: bool = True
-    extensions: tuple[str, ...] = ()
-    skills: tuple[str, ...] = ()
-    prompts: tuple[str, ...] = ()
-    themes: tuple[str, ...] = ()
+    extensions: tuple[str, ...] | None = None
+    skills: tuple[str, ...] | None = None
+    prompts: tuple[str, ...] | None = None
+    themes: tuple[str, ...] | None = None
 
 
 class SettingsValues(_SettingsModel):
