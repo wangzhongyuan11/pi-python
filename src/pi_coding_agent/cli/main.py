@@ -153,6 +153,7 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     stdout: TextIO | None = None,
+    stdin: TextIO | None = None,
     stderr: TextIO | None = None,
     cwd: Path | None = None,
     environ: Mapping[str, str] | None = None,
@@ -229,11 +230,8 @@ def main(
             environ=runtime_environ,
         )
     messages = cast("list[str]", arguments.messages)
-    if arguments.mode == "rpc":
-        errors.write(
-            "Error: RPC mode is not wired in this build; "
-            "the local stdio RPC server lands in Phase 15\n"
-        )
+    if arguments.mode == "rpc" and (messages or arguments.print_mode):
+        errors.write("Error: RPC mode accepts commands on stdin, not positional prompts or -p\n")
         return 1
     tool_selection = tool_selection_from_arguments(arguments)
     project_trusted = bool(
@@ -250,6 +248,54 @@ def main(
     if arguments.session_dir:
         candidate = Path(arguments.session_dir)
         session_dir = (candidate if candidate.is_absolute() else runtime_cwd / candidate).resolve()
+    if arguments.mode == "rpc":
+        from ..rpc.runner import run_rpc
+
+        try:
+            return asyncio.run(
+                run_rpc(
+                    HeadlessOptions(
+                        cwd=runtime_cwd,
+                        prompt="",
+                        mode="json",
+                        credential_resolver=_resolver(
+                            arguments, cwd=runtime_cwd, environ=runtime_environ
+                        ),
+                        provider_id=arguments.provider,
+                        model_id=arguments.model,
+                        thinking_level=arguments.thinking,
+                        no_session=arguments.no_session,
+                        session=arguments.session,
+                        resume=arguments.resume or arguments.continue_session,
+                        session_dir=session_dir,
+                        model_runtime=model_runtime,
+                        tool_selection=tool_selection,
+                        name=session_name,
+                        service_overrides=service_overrides or ServiceOverrides(),
+                        runtime_factory=runtime_factory,
+                        project_trusted=project_trusted,
+                        extension_flags=extras,
+                    ),
+                    stdin=sys.stdin if stdin is None else stdin,
+                    stdout=output,
+                    stderr=errors,
+                )
+            )
+        except KeyboardInterrupt:
+            return 130
+        except ExtensionFlagError as error:
+            errors.write(f"Error: {error}\n")
+            return 2
+        except (
+            CredentialResolutionError,
+            SessionError,
+            UnknownModelError,
+            UnknownProviderError,
+            ValueError,
+            OSError,
+        ) as error:
+            errors.write(f"RPC error: {error}\n")
+            return 1
     if not messages:
         if arguments.print_mode or arguments.mode == "json":
             parser.print_help(output)

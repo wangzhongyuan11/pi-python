@@ -336,7 +336,7 @@ G14-LIVE（DeepSeek 持续授权；真实 TUI；测试内强制请求/费用/进
 | [x] P15-T04 | model/tool/compact/retry/bash/session/tree/fork/switch/clear_queue commands 输入；输出复用同一 AgentSession actions 且长工具超时可配置 | RPC-003..RPC-011、最新 main; P15-T03 | `src/pi_coding_agent/rpc/server.py`, `src/pi_coding_agent/rpc/commands.py`, `tests/pi_coding_agent/rpc/test_session_commands.py` | RPC 自建第二套状态/固定 60 秒红测 → action adapter | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_session_commands.py` / G15 | `P15-T04: expose agent session commands over rpc` |
 | [x] P15-T05 | Extension UI request/response 输入；输出关联、取消、disconnect 与 fire-and-forget UI events | RPC-014..RPC-016; P15-T03,P14-T08 | `src/pi_coding_agent/rpc/ui_bridge.py`, `src/pi_coding_agent/rpc/server.py`, `tests/pi_coding_agent/rpc/test_ui_bridge.py` | unknown/duplicate/disconnect 红测 → pending request map | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_ui_bridge.py` / G15 | `P15-T05: bridge extension ui over rpc` |
 | [x] P15-T06 | 子进程 transport 输入；输出 Python RpcClient state、并发 request 和 cleanup | `modes/rpc/rpc-client.ts`; P15-T04,P15-T05 | `src/pi_coding_agent/rpc/client.py`, `src/pi_coding_agent/rpc/__init__.py`, `tests/pi_coding_agent/rpc/test_client.py` | 乱序/disposal/error 红测 → async client | Supported | `uv run --frozen pytest tests/pi_coding_agent/rpc/test_client.py` / G15 | `P15-T06: expose the local python rpc client` |
-| [ ] P15-T07 | CLI `--mode rpc` 与 SDK client 对同一黄金 Session 输入；输出完整 subprocess 往返与干净退出 | Phase 15 主链；P15-T06 | `src/pi_coding_agent/cli/main.py`, `tests/pi_coding_agent/e2e/test_rpc_product.py` | 仍返回 Phase 12 stub 红测 → bootstrap adapter | Supported | `uv run --frozen pytest tests/pi_coding_agent/e2e/test_rpc_product.py` / G15 | `P15-T07: prove rpc product mode end to end` |
+| [x] P15-T07 | CLI `--mode rpc` 与 SDK client 对同一黄金 Session 输入；输出完整 subprocess 往返与干净退出 | Phase 15 主链；P15-T06 | `src/pi_coding_agent/cli/main.py`, `tests/pi_coding_agent/e2e/test_rpc_product.py` | 仍返回 Phase 12 stub 红测 → bootstrap adapter | Supported | `uv run --frozen pytest tests/pi_coding_agent/e2e/test_rpc_product.py` / G15 | `P15-T07: prove rpc product mode end to end` |
 
 ## Phase 15.5：Node/TypeScript Extension Host
 
@@ -413,4 +413,6 @@ G14-LIVE（DeepSeek 持续授权；真实 TUI；测试内强制请求/费用/进
 
 ## 当前停止点
 
-Phase 11.5、Phase 12、Phase 13、Phase 14 与 Phase 14.5 已完成；P15-T01–T03 已完成，下一项严格进入 P15-T04。Phase 15 完成 RPC，Phase 15.5 再执行 JS/TS Extension；Phase 16–17 完成双运行时 Pi 产品闭环，Phase 18–20 再完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。
+Phase 11.5、Phase 12、Phase 13、Phase 14 与 Phase 14.5 已完成；P15-T04–T07 已实现 RPC Session actions、Extension UI bridge、Python RpcClient 和真实子进程入口。2026-09-10：G15 加 RPC subprocess E2E 共 159 passed，RPC/CLI 变更范围 Ruff、Pyright 与 diff 检查通过。子进程验证使用 FakeProvider，覆盖两轮对话、Session 替换、扩展输入/通知和 stdout 日志隔离；不是 DeepSeek/live TUI 验证。
+
+当前位于 Phase 15 阶段验收点，未合并。不能把 RPC 主链通过等同于全部上游表面兼容：P15-T01 的动态 help 已验证，但其“完整 CLI dispatch”仍需逐项核对；RPC 附件一致性与 HTML exporter 分别属于 P17-T02/T03，Extension slash-command 与 lifecycle 完整交叉验证仍需覆盖。Phase 15.5 的 Node Host 尚未开始，不能声称公开 TypeScript Package 已能执行。下一阶段从 P15.5-T01 开始；Phase 16–17 完成双运行时 Pi 产品闭环，Phase 18–20 完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。

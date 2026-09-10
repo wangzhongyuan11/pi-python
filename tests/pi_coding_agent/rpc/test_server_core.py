@@ -4,6 +4,8 @@ import asyncio
 import json
 from collections.abc import Callable
 
+import pytest
+
 from pi_coding_agent.rpc.framing import JsonlFramer, serialize_json_line
 from pi_coding_agent.rpc.server import RpcOutput, RpcServer
 
@@ -77,3 +79,18 @@ def test_bounded_output_applies_backpressure_to_producers() -> None:
         return was_blocked
 
     assert asyncio.run(scenario()) is True
+
+
+def test_output_writer_failure_does_not_hang_close() -> None:
+    async def scenario() -> None:
+        def broken_write(_line: str) -> None:
+            raise BrokenPipeError("client disconnected")
+
+        output = RpcOutput(broken_write)
+        await output.start()
+        await output.emit({"type": "first"})
+        await output.emit({"type": "second"})
+        with pytest.raises(BrokenPipeError):
+            await asyncio.wait_for(output.close(), 0.2)
+
+    asyncio.run(scenario())

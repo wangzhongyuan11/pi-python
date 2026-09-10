@@ -51,17 +51,36 @@ class RpcOutput:
             self._task = asyncio.create_task(self._run())
 
     async def emit(self, value: object) -> None:
+        await self._put(serialize_json_line(value))
+
+    async def _put(self, line: str | None) -> None:
         if self._task is None:
             raise RuntimeError("RPC output is not started")
-        await self._queue.put(serialize_json_line(value))
+        if self._task.done():
+            self._task.result()
+            raise RuntimeError("RPC output is closed")
+        try:
+            self._queue.put_nowait(line)
+        except asyncio.QueueFull:
+            pending = asyncio.create_task(self._queue.put(line))
+            try:
+                await asyncio.wait((pending, self._task), return_when=asyncio.FIRST_COMPLETED)
+                if self._task.done():
+                    self._task.result()
+                    raise RuntimeError("RPC output is closed")
+                await pending
+            finally:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
 
     async def close(self) -> None:
         if self._task is None:
             return
-        await self._queue.join()
-        await self._queue.put(None)
-        await self._task
-        self._task = None
+        try:
+            await self._put(None)
+            await self._task
+        finally:
+            self._task = None
 
     async def _run(self) -> None:
         while True:
@@ -144,16 +163,22 @@ class RpcServer:
         if self._pending:
             await asyncio.gather(*tuple(self._pending))
 
-    async def close(self) -> None:
+    async def close(self, *, abort: bool = False) -> None:
         if self._ui is not None:
             await self._ui.close()
+        if abort:
+            self._session.abort()
+            tasks = tuple(self._pending)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         await self.wait_for_pending()
         self._unsubscribe()
 
     async def _dispatch(self, command: RpcCommand) -> None:
         if command.type == "prompt":
             await self._respond(_success(command))
-            task = asyncio.create_task(self._session.prompt(command.message or ""))
+            task = asyncio.create_task(self._run_prompt(command))
             self._pending.add(task)
             task.add_done_callback(self._pending.discard)
             return
@@ -184,6 +209,19 @@ class RpcServer:
         from .commands import NO_DATA
 
         await self._respond(_success(command) if data is NO_DATA else _success(command, data))
+
+    async def _run_prompt(self, command: RpcCommand) -> None:
+        try:
+            await self._session.prompt(command.message or "")
+        except Exception as error:
+            await self._respond(
+                RpcResponse(
+                    id=command.id,
+                    command="prompt",
+                    success=False,
+                    error=str(error),
+                )
+            )
 
     async def _respond(self, response: RpcResponse) -> None:
         payload = response.model_dump(by_alias=True, exclude_none=True)
