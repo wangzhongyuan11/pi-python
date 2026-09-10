@@ -120,6 +120,24 @@ class Agent:
         self.clear_steering_queue()
         self.clear_follow_up_queue()
 
+    @property
+    def steering_mode(self) -> QueueMode:
+        return self._steering_queue.mode
+
+    @property
+    def follow_up_mode(self) -> QueueMode:
+        return self._follow_up_queue.mode
+
+    @property
+    def pending_message_count(self) -> int:
+        return self._steering_queue.count + self._follow_up_queue.count
+
+    def set_steering_mode(self, mode: QueueMode) -> None:
+        self._steering_queue.mode = mode
+
+    def set_follow_up_mode(self, mode: QueueMode) -> None:
+        self._follow_up_queue.mode = mode
+
     def restore_messages(self, messages: Iterable[AgentMessage]) -> None:
         if self._is_streaming:
             raise RuntimeError("cannot restore messages while Agent is streaming")

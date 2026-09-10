@@ -39,6 +39,7 @@ RpcCommandType = Literal[
     "set_session_name",
     "get_messages",
     "get_commands",
+    "clear_queue",
 ]
 
 

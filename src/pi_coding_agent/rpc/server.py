@@ -5,23 +5,30 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import time
 from collections.abc import Awaitable, Callable
 from io import StringIO
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from pydantic import ValidationError
 
+from pi_ai import TextContent, UserMessage
+
+from ..agent_session_events import AgentSessionEventListener
 from ..presenters import JsonEventPresenter
 from .framing import serialize_json_line
 from .models import RpcCommand, RpcResponse, parse_rpc_command
+
+if TYPE_CHECKING:
+    from .commands import RpcCommandAdapter
 
 type LineWriter = Callable[[str], object | Awaitable[object]]
 type EventEncoder = Callable[[object], dict[str, object]]
 
 
 class _RpcSession(Protocol):
-    def subscribe(self, listener: Callable[..., object]) -> Callable[[], None]: ...
-    async def prompt(self, message: str) -> None: ...
+    def subscribe(self, listener: AgentSessionEventListener) -> Callable[[], None]: ...
+    async def prompt(self, message: str, /) -> None: ...
     def abort(self) -> None: ...
 
 
@@ -69,7 +76,7 @@ class RpcOutput:
 
 
 class RpcServer:
-    __slots__ = ("_encode_event", "_output", "_pending", "_session", "_unsubscribe")
+    __slots__ = ("_commands", "_encode_event", "_output", "_pending", "_session", "_unsubscribe")
 
     def __init__(
         self,
@@ -77,10 +84,12 @@ class RpcServer:
         session: _RpcSession,
         output: RpcOutput,
         event_encoder: EventEncoder | None = None,
+        commands: RpcCommandAdapter | None = None,
     ) -> None:
         self._session = session
         self._output = output
         self._encode_event = event_encoder or _encode_agent_event
+        self._commands = commands
         self._pending: set[asyncio.Task[None]] = set()
         self._unsubscribe = session.subscribe(self._on_event)
 
@@ -99,7 +108,14 @@ class RpcServer:
                 request_id = raw_id if isinstance(raw_id, str) else None
             command = parse_rpc_command(validated_input)
             await self._dispatch(command)
-        except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as error:
+        except (
+            json.JSONDecodeError,
+            ValidationError,
+            TypeError,
+            ValueError,
+            LookupError,
+            RuntimeError,
+        ) as error:
             await self._respond(
                 RpcResponse(
                     id=request_id,
@@ -133,19 +149,41 @@ class RpcServer:
             handler = getattr(agent, command.type, None)
             if not callable(handler):
                 raise ValueError(f"{command.type} is unavailable")
-            handler(command.message)
+            handler(
+                UserMessage(
+                    content=(TextContent(text=command.message or ""),),
+                    timestamp=time.time_ns() // 1_000_000,
+                )
+            )
             await self._respond(_success(command))
             return
-        raise ValueError(f"unsupported RPC command: {command.type}")
+        if self._commands is None:
+            raise ValueError(f"unsupported RPC command: {command.type}")
+        data = await self._commands.execute(command)
+        if self._commands.session is not self._session:
+            self._unsubscribe()
+            self._session = self._commands.session
+            self._unsubscribe = self._session.subscribe(self._on_event)
+        from .commands import NO_DATA
+
+        await self._respond(_success(command) if data is NO_DATA else _success(command, data))
 
     async def _respond(self, response: RpcResponse) -> None:
-        await self._output.emit(response.model_dump(by_alias=True, exclude_none=True))
+        payload = response.model_dump(by_alias=True, exclude_none=True)
+        if "data" in response.model_fields_set and response.data is None:
+            payload["data"] = None
+        await self._output.emit(payload)
 
     async def _on_event(self, event: object, _signal: asyncio.Event) -> None:
         await self._output.emit(self._encode_event(event))
 
 
-def _success(command: RpcCommand, data: object | None = None) -> RpcResponse:
+_NO_DATA = object()
+
+
+def _success(command: RpcCommand, data: object = _NO_DATA) -> RpcResponse:
+    if data is _NO_DATA:
+        return RpcResponse(id=command.id, command=command.type, success=True)
     return RpcResponse(id=command.id, command=command.type, success=True, data=data)
 
 

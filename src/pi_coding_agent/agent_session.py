@@ -93,6 +93,7 @@ from .session.models import (
     ThinkingLevelChangeEntry,
 )
 from .session.tree import SessionTree
+from .tools.bash import BashResult
 
 
 def _entry_id() -> str:
@@ -118,6 +119,7 @@ class AgentSession:
         "_compaction_keep_recent_tokens",
         "_compaction_reserve_tokens",
         "_auto_compaction_enabled",
+        "_is_compacting",
         "_compaction_service",
         "_compaction_token_count",
         "_entry_id_factory",
@@ -168,6 +170,7 @@ class AgentSession:
         self._compaction_keep_recent_tokens = compaction_keep_recent_tokens
         self._compaction_reserve_tokens = compaction_reserve_tokens
         self._auto_compaction_enabled = auto_compaction_enabled
+        self._is_compacting = False
         self._compaction_token_count = compaction_token_count
         self._branch_summary_service = branch_summary_service
         self._listeners: list[AgentSessionEventListener] = []
@@ -284,6 +287,25 @@ class AgentSession:
     def cancel_retry(self) -> None:
         self._retry_cancel.set()
 
+    @property
+    def auto_compaction_enabled(self) -> bool:
+        return self._auto_compaction_enabled
+
+    def set_auto_compaction_enabled(self, enabled: bool) -> None:
+        self._auto_compaction_enabled = enabled
+
+    @property
+    def auto_retry_enabled(self) -> bool:
+        return self._retry_policy.enabled
+
+    def set_auto_retry_enabled(self, enabled: bool) -> None:
+        self._retry_policy = RetryPolicy(
+            enabled=enabled,
+            max_retries=self._retry_policy.max_retries,
+            base_delay_seconds=self._retry_policy.base_delay_seconds,
+            provider_request_retries=self._retry_policy.provider_request_retries,
+        )
+
     def append_custom_entry(self, custom_type: str, data: JsonValue = None) -> str:
         self._ensure_open()
         entry = CustomEntry(
@@ -296,6 +318,34 @@ class AgentSession:
         )
         self.session_manager.append(entry)
         return entry.id
+
+    def record_bash_result(
+        self, command: str, result: BashResult, *, exclude_from_context: bool = False
+    ) -> None:
+        self._ensure_open()
+        if self.state.is_streaming:
+            raise RuntimeError("cannot record user bash while Agent is streaming")
+        payload: dict[str, JsonValue] = {
+            "role": "bashExecution",
+            "command": command,
+            "output": result.output,
+            "exitCode": result.exit_code,
+            "cancelled": result.aborted,
+            "truncated": result.truncated,
+            "fullOutputPath": str(result.full_output_path) if result.full_output_path else None,
+            "excludeFromContext": exclude_from_context,
+            "timestamp": time.time_ns() // 1_000_000,
+        }
+        self.session_manager.append(
+            MessageEntry(
+                type="message",
+                id=self._entry_id_factory(),
+                parent_id=self.session_manager.leaf_id,
+                timestamp=self._timestamp_factory(),
+                message=payload,
+            )
+        )
+        self._restore_active_context()
 
     def append_custom_message(
         self,
@@ -379,7 +429,27 @@ class AgentSession:
         )
         self.agent.set_thinking_level(level)
 
-    async def compact(self, *, reason: CompactionReason = "manual") -> CompactionEntry:
+    async def compact(
+        self, *, reason: CompactionReason = "manual", custom_instructions: str | None = None
+    ) -> CompactionEntry:
+        self._ensure_open()
+        if self._is_compacting:
+            raise RuntimeError("compaction is already running")
+        if self.state.is_streaming:
+            raise RuntimeError("cannot compact while Agent is streaming")
+        self._is_compacting = True
+        try:
+            return await self._compact(reason=reason, custom_instructions=custom_instructions)
+        finally:
+            self._is_compacting = False
+
+    @property
+    def is_compacting(self) -> bool:
+        return self._is_compacting
+
+    async def _compact(
+        self, *, reason: CompactionReason, custom_instructions: str | None
+    ) -> CompactionEntry:
         self._ensure_open()
         if self._compaction_service is None:
             raise RuntimeError("compaction is not configured for this AgentSession")
@@ -456,6 +526,7 @@ class AgentSession:
                 reason=reason,
                 tokens_before=tokens_before,
                 previous_summary=previous_summary,
+                custom_instructions=custom_instructions,
             )
         self._restore_active_context()
         await self.services.extensions.emit(
