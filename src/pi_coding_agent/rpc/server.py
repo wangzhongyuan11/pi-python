@@ -21,6 +21,7 @@ from .models import RpcCommand, RpcResponse, parse_rpc_command
 
 if TYPE_CHECKING:
     from .commands import RpcCommandAdapter
+    from .ui_bridge import RpcUiBridge
 
 type LineWriter = Callable[[str], object | Awaitable[object]]
 type EventEncoder = Callable[[object], dict[str, object]]
@@ -76,7 +77,15 @@ class RpcOutput:
 
 
 class RpcServer:
-    __slots__ = ("_commands", "_encode_event", "_output", "_pending", "_session", "_unsubscribe")
+    __slots__ = (
+        "_commands",
+        "_encode_event",
+        "_output",
+        "_pending",
+        "_session",
+        "_ui",
+        "_unsubscribe",
+    )
 
     def __init__(
         self,
@@ -85,11 +94,13 @@ class RpcServer:
         output: RpcOutput,
         event_encoder: EventEncoder | None = None,
         commands: RpcCommandAdapter | None = None,
+        ui: RpcUiBridge | None = None,
     ) -> None:
         self._session = session
         self._output = output
         self._encode_event = event_encoder or _encode_agent_event
         self._commands = commands
+        self._ui = ui
         self._pending: set[asyncio.Task[None]] = set()
         self._unsubscribe = session.subscribe(self._on_event)
 
@@ -103,6 +114,10 @@ class RpcServer:
                 mapping = cast("dict[str, object]", value)
                 validated_input = mapping
                 raw_type = mapping.get("type")
+                if raw_type == "extension_ui_response":
+                    if self._ui is not None:
+                        self._ui.handle_response(mapping)
+                    return
                 raw_id = mapping.get("id")
                 command_name = raw_type if isinstance(raw_type, str) else ""
                 request_id = raw_id if isinstance(raw_id, str) else None
@@ -130,6 +145,8 @@ class RpcServer:
             await asyncio.gather(*tuple(self._pending))
 
     async def close(self) -> None:
+        if self._ui is not None:
+            await self._ui.close()
         await self.wait_for_pending()
         self._unsubscribe()
 
