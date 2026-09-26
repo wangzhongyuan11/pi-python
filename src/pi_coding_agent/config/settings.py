@@ -11,8 +11,8 @@ from typing import Any, cast
 from pydantic import ValidationError
 
 from pi_ai import JsonValue
-from pi_coding_agent.session.atomic import atomic_write
 
+from ..session.atomic import atomic_write
 from .models import (
     KNOWN_SETTING_ALIASES,
     PackageSource,
