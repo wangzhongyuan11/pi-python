@@ -11,17 +11,19 @@ from uuid import uuid4
 
 from pi_ai import AssistantMessage, CredentialResolver, ModelThinkingLevel, clamp_thinking_level
 
-from ..model_runtime import ModelRuntime, create_model_runtime
+from ..model_runtime import ModelRuntime, create_model_runtime, select_model_argument
 from ..presenters import JsonEventPresenter, assistant_text
 from ..sdk import (
     AgentSessionFactory,
     CreateAgentSessionOptions,
     ToolSelection,
     create_agent_session,
+    default_session_dir,
 )
 from ..services import ServiceOverrides
-from ..session.catalog import list_sessions, open_session
+from ..session.catalog import list_sessions, open_or_create_session, open_session
 from ..session.errors import SessionNotFoundError
+from ..session.fork import fork_session
 from ..session.manager import SessionManager
 
 
@@ -41,9 +43,11 @@ class HeadlessOptions:
     credential_resolver: CredentialResolver
     provider_id: str = "deepseek"
     model_id: str | None = None
-    thinking_level: ModelThinkingLevel = "high"
+    thinking_level: ModelThinkingLevel | None = None
     no_session: bool = False
     session: str | None = None
+    session_id: str | None = None
+    fork: str | None = None
     resume: bool = False
     session_dir: Path | None = None
     model_runtime: ModelRuntime | None = None
@@ -55,6 +59,22 @@ class HeadlessOptions:
     extension_flags: Mapping[str, bool | str] = field(default_factory=_empty_flags)
 
 
+def _fork_source(options: HeadlessOptions) -> SessionManager:
+    assert options.fork is not None
+    candidate = Path(options.fork)
+    if candidate.exists():
+        return open_session(candidate)
+    session_dir = options.session_dir or default_session_dir(options.cwd)
+    catalog = list_sessions(cwd=options.cwd, session_dir=session_dir)
+    exact = [summary for summary in catalog.sessions if summary.id == options.fork]
+    matches = exact or [
+        summary for summary in catalog.sessions if summary.id.startswith(options.fork)
+    ]
+    if len(matches) != 1:
+        raise SessionNotFoundError(f"no session found matching {options.fork!r}")
+    return open_session(matches[0].path)
+
+
 def resolve_session_manager(options: HeadlessOptions) -> SessionManager | None:
     if options.no_session:
         return SessionManager.in_memory(
@@ -62,14 +82,32 @@ def resolve_session_manager(options: HeadlessOptions) -> SessionManager | None:
             session_id=uuid4().hex,
             timestamp=_timestamp(),
         )
+    if options.fork is not None:
+        source = _fork_source(options)
+        if source.path is None or source.leaf_id is None:
+            raise SessionNotFoundError("cannot fork a session without persisted turns")
+        return fork_session(
+            source.path,
+            leaf_id=source.leaf_id,
+            target_cwd=options.cwd,
+            session_dir=options.session_dir or default_session_dir(options.cwd),
+            session_id=uuid4().hex,
+            timestamp=_timestamp(),
+        )
     if options.session is not None:
         return open_session(options.session, session_dir=options.session_dir)
+    if options.session_id is not None:
+        return open_or_create_session(
+            options.session_id,
+            session_dir=options.session_dir or default_session_dir(options.cwd),
+            cwd=options.cwd,
+            timestamp_factory=_timestamp,
+        )
     if options.resume:
-        if options.session_dir is None:
-            raise SessionNotFoundError("--session-dir is required with --resume in headless mode")
-        catalog = list_sessions(cwd=options.cwd, session_dir=options.session_dir)
+        session_dir = options.session_dir or default_session_dir(options.cwd)
+        catalog = list_sessions(cwd=options.cwd, session_dir=session_dir)
         if not catalog.sessions:
-            raise SessionNotFoundError(f"no sessions found in {options.session_dir}")
+            raise SessionNotFoundError(f"no sessions found in {session_dir}")
         return open_session(catalog.sessions[0].path)
     if options.session_dir is not None:
         return SessionManager.create(
@@ -82,16 +120,18 @@ def resolve_session_manager(options: HeadlessOptions) -> SessionManager | None:
 
 
 async def run_headless(options: HeadlessOptions, *, stdout: TextIO, stderr: TextIO) -> int:
+    model_thinking: ModelThinkingLevel | None = None
     runtime = options.model_runtime
     if runtime is None:
         runtime = create_model_runtime(
             credential_resolver=options.credential_resolver,
             provider_id=options.provider_id,
-            model_id=options.model_id,
         )
-    elif options.model_id is not None:
-        runtime.select_model(options.model_id)
-    thinking = clamp_thinking_level(runtime.model, options.thinking_level)
+    if options.model_id is not None:
+        _selected, model_thinking = select_model_argument(runtime, options.model_id)
+    thinking = clamp_thinking_level(
+        runtime.model, options.thinking_level or model_thinking or "high"
+    )
     selection = options.tool_selection or ToolSelection()
     runtime_factory = options.runtime_factory or create_agent_session
     created = await runtime_factory(

@@ -99,7 +99,7 @@ def create_run_parser(*, version: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "--thinking",
         choices=_THINKING_LEVELS,
-        default="high",
+        default=None,
     )
     parser.add_argument("--system-prompt")
     parser.add_argument("--append-system-prompt", action="append", dest="append_system_prompt")

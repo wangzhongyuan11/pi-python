@@ -13,7 +13,6 @@ from typing import cast
 from ..config.models import PackageSource
 from ..config.settings import SettingsManager
 from ..ports import ConfiguredPackage, PackageScope, ResourceRoot
-
 from .environment import Installer, install_requirement
 from .manifest import PackageManifestError, read_package_manifest
 from .npm_data import NpmPackRunner, build_tarball, extract_npm_data

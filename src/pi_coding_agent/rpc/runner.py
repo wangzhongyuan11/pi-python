@@ -8,10 +8,10 @@ from dataclasses import replace
 from threading import Thread
 from typing import TextIO
 
-from pi_ai import clamp_thinking_level
+from pi_ai import ModelThinkingLevel, clamp_thinking_level
 
 from ..cli.run import HeadlessOptions, resolve_session_manager
-from ..model_runtime import create_model_runtime
+from ..model_runtime import create_model_runtime, select_model_argument
 from ..sdk import CreateAgentSessionOptions, ToolSelection, create_agent_session
 from .commands import RpcCommandAdapter
 from .server import RpcOutput, RpcServer
@@ -67,13 +67,13 @@ async def run_rpc(
         # Capture extension prints throughout activation, turns and disposal.
         # The protocol writer retains the original stdout stream explicitly.
         with redirect_stdout(stderr):
+            model_thinking: ModelThinkingLevel | None = None
             runtime = options.model_runtime or create_model_runtime(
                 credential_resolver=options.credential_resolver,
                 provider_id=options.provider_id,
-                model_id=options.model_id,
             )
-            if options.model_runtime is not None and options.model_id is not None:
-                runtime.select_model(options.model_id)
+            if options.model_id is not None:
+                _selected, model_thinking = select_model_argument(runtime, options.model_id)
             selection = options.tool_selection or ToolSelection()
             factory = options.runtime_factory or create_agent_session
             created = await factory(
@@ -84,7 +84,9 @@ async def run_rpc(
                     extension_flags=options.extension_flags,
                     model_runtime=runtime,
                     session_manager=resolve_session_manager(options),
-                    thinking_level=clamp_thinking_level(runtime.model, options.thinking_level),
+                    thinking_level=clamp_thinking_level(
+                        runtime.model, options.thinking_level or model_thinking or "high"
+                    ),
                     no_tools=selection.no_tools,
                     tool_names=selection.tool_names,
                     exclude_tools=selection.exclude_tools,

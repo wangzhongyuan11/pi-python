@@ -171,10 +171,39 @@ def match_model_argument(runtime: ModelRuntime, argument: str) -> str:
     raise ValueError(f"unknown model {argument!r}; available: {', '.join(available)}")
 
 
+_THINKING_LEVEL_CHOICES = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def select_model_argument(
+    runtime: ModelRuntime, argument: str
+) -> tuple[Model, ModelThinkingLevel | None]:
+    """Resolve a CLI ``--model`` argument and select it on ``runtime``.
+
+    Mirrors the upstream CLI model resolution: canonical ``provider/id``, a bare
+    model id, or a unique partial match, plus the ``:<thinking>`` shorthand
+    suffix. A suffix that names a valid thinking level is returned to the
+    caller so an explicit ``--thinking`` flag can still take precedence; any
+    other suffix is ignored and the remaining pattern is matched.
+    """
+
+    pattern = argument.strip()
+    thinking: ModelThinkingLevel | None = None
+    head, separator, suffix = pattern.rpartition(":")
+    if separator:
+        pattern = head
+        if suffix in _THINKING_LEVEL_CHOICES:
+            thinking = suffix
+    resolved = match_model_argument(runtime, pattern)
+    provider_id, _, model_id = resolved.partition("/")
+    model = runtime.select_model(model_id, provider_id=provider_id)
+    return model, thinking
+
+
 __all__ = [
     "ModelCapabilityError",
     "ModelRuntime",
     "UnknownModelError",
     "create_model_runtime",
     "match_model_argument",
+    "select_model_argument",
 ]

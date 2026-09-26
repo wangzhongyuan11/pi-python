@@ -93,6 +93,15 @@ def run_package_command(
         return 0
     if command == "update":
         source = getattr(arguments, "source", None)
+        self_requested = (
+            bool(getattr(arguments, "self_update", False)) or source in {"self", "pi"}
+        )
+        if self_requested:
+            # The wheel is managed by the user's installer; self-update only
+            # prints the matching upgrade command instead of mutating anything.
+            stdout.write("To update pi-python, run: uv tool upgrade pi-python\n")
+            stdout.write("(or: pip install --upgrade pi-python)\n")
+            return 0
         try:
             updated = manager.update(source, offline=bool(getattr(arguments, "offline", False)))
         except ValueError as error:

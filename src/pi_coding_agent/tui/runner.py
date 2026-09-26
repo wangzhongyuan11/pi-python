@@ -44,7 +44,12 @@ from ..cli.run import HeadlessOptions, resolve_session_manager
 from ..extensions.context import ExtensionActions, ExtensionCommandContext
 from ..extensions.registry import CapabilityRegistry
 from ..extensions.renderers import ExtensionRendererRegistry
-from ..model_runtime import ModelRuntime, create_model_runtime, match_model_argument
+from ..model_runtime import (
+    ModelRuntime,
+    create_model_runtime,
+    match_model_argument,
+    select_model_argument,
+)
 from ..resources.prompts import PromptDescriptor, load_prompt_descriptors
 from ..resources.skills import SkillDescriptor, load_skill_descriptors
 from ..sdk import (
@@ -333,9 +338,11 @@ class InteractiveOptions:
     credential_resolver: CredentialResolver
     provider_id: str = "deepseek"
     model_id: str | None = None
-    thinking_level: ModelThinkingLevel = "high"
+    thinking_level: ModelThinkingLevel | None = None
     no_session: bool = False
     session: str | None = None
+    session_id: str | None = None
+    fork: str | None = None
     resume: bool = False
     session_dir: Path | None = None
     model_runtime: ModelRuntime | None = None
@@ -590,16 +597,18 @@ async def run_interactive(
     if sys.platform == "darwin":
         stderr.write("interactive mode is not supported on macOS\n")
         return 2
+    model_thinking: ModelThinkingLevel | None = None
     runtime = options.model_runtime
     if runtime is None:
         runtime = create_model_runtime(
             credential_resolver=options.credential_resolver,
             provider_id=options.provider_id,
-            model_id=options.model_id,
         )
-    elif options.model_id is not None:
-        runtime.select_model(options.model_id, provider_id=options.provider_id)
-    thinking = clamp_thinking_level(runtime.model, options.thinking_level)
+    if options.model_id is not None:
+        _selected, model_thinking = select_model_argument(runtime, options.model_id)
+    thinking = clamp_thinking_level(
+        runtime.model, options.thinking_level or model_thinking or "high"
+    )
     session_dir = options.session_dir
     if options.resume and session_dir is None and options.session is None:
         session_dir = default_session_dir(options.cwd)
@@ -615,6 +624,8 @@ async def run_interactive(
                 thinking_level=thinking,
                 no_session=options.no_session,
                 session=options.session,
+                session_id=options.session_id,
+                fork=options.fork,
                 resume=options.resume,
                 session_dir=session_dir,
                 model_runtime=runtime,

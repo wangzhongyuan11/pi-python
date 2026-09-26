@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Literal
 
 from ..extensions.metadata import MANIFEST_NAME
-
 from .manifest import read_package_manifest
 
 type CompatibilityLevel = Literal["native", "portable", "bridged", "unsupported"]
