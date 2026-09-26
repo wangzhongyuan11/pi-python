@@ -74,10 +74,11 @@ class _Binding:
 class ExtensionActions:
     """Controlled session actions whose binding changes with the runtime generation."""
 
-    __slots__ = ("_binding", "_shutdown_requested")
+    __slots__ = ("_binding", "_exec_processes", "_shutdown_requested")
 
     def __init__(self) -> None:
         self._binding: _Binding | None = None
+        self._exec_processes: set[asyncio.subprocess.Process] = set()
         self._shutdown_requested = False
 
     def bind(
@@ -189,7 +190,16 @@ class ExtensionActions:
             tuple(args),
             cwd=working_directory,
             timeout=timeout,
+            processes=self._exec_processes,
         )
+
+    def terminate_exec_processes(self) -> None:
+        """Kill every in-flight exec child so reload/exit leaves no orphans."""
+
+        for process in tuple(self._exec_processes):
+            if process.returncode is None:
+                process.kill()
+        self._exec_processes.clear()
 
     def get_active_tools(self) -> tuple[str, ...]:
         return tuple(tool.name for tool in self._require().session.state.tools)
@@ -377,6 +387,7 @@ async def _exec_command(
     *,
     cwd: Path,
     timeout: float | None,
+    processes: set[asyncio.subprocess.Process] | None = None,
 ) -> ExtensionExecResult:
     if not command:
         raise ValueError("extension command must not be empty")
@@ -390,6 +401,8 @@ async def _exec_command(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    if processes is not None:
+        processes.add(process)
     killed = False
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
@@ -397,6 +410,9 @@ async def _exec_command(
         killed = True
         process.kill()
         stdout, stderr = await process.communicate()
+    finally:
+        if processes is not None:
+            processes.discard(process)
     return ExtensionExecResult(
         stdout=stdout.decode(errors="replace"),
         stderr=stderr.decode(errors="replace"),

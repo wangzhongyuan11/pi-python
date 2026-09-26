@@ -30,6 +30,7 @@ from pi_ai import (
     JsonValue,
     Model,
     ModelThinkingLevel,
+    ToolCall,
     ToolResultMessage,
     UserMessage,
 )
@@ -131,6 +132,8 @@ class AgentSession:
         "_sleep",
         "_timestamp_factory",
         "_extension_turn_index",
+        "_open_tool_calls",
+        "_queued_pair_messages",
         "_unsubscribe_agent",
         "agent",
         "services",
@@ -175,6 +178,8 @@ class AgentSession:
         self._branch_summary_service = branch_summary_service
         self._listeners: list[AgentSessionEventListener] = []
         self._extension_turn_index = 0
+        self._open_tool_calls = 0
+        self._queued_pair_messages: list[dict[str, JsonValue]] = []
         self._closed = False
         self._unsubscribe_agent = agent.subscribe(self._handle_agent_event)
 
@@ -356,6 +361,30 @@ class AgentSession:
         details: JsonValue = None,
     ) -> str:
         self._ensure_open()
+        if self._open_tool_calls > 0:
+            # Queue the message until the open ToolCall/ToolResult pair settles;
+            # inserting between them would split the pair in the session graph.
+            self._queued_pair_messages.append(
+                {
+                    "custom_type": custom_type,
+                    "content": content,
+                    "display": display,
+                    "details": details,
+                }
+            )
+            return ""
+        return self._append_custom_message_now(
+            custom_type, content, display=display, details=details
+        )
+
+    def _append_custom_message_now(
+        self,
+        custom_type: str,
+        content: str,
+        *,
+        display: bool = True,
+        details: JsonValue = None,
+    ) -> str:
         entry = CustomMessageEntry(
             type="custom_message",
             id=self._entry_id_factory(),
@@ -370,6 +399,16 @@ class AgentSession:
         if not self.state.is_streaming:
             self._restore_active_context()
         return entry.id
+
+    def _flush_queued_pair_messages(self) -> None:
+        queued, self._queued_pair_messages = self._queued_pair_messages, []
+        for item in queued:
+            self._append_custom_message_now(
+                cast("str", item["custom_type"]),
+                cast("str", item["content"]),
+                display=cast("bool", item["display"]),
+                details=item["details"],
+            )
 
     def set_session_name(self, name: str) -> str:
         self._ensure_open()
@@ -647,6 +686,10 @@ class AgentSession:
         entry: MessageEntry | None = None
         if isinstance(event, MessageEndEvent):
             entry = self._persist_message(event)
+        elif isinstance(event, AgentEndEvent):
+            # Aborted or exhausted turns must still release queued pair messages.
+            self._open_tool_calls = 0
+            self._flush_queued_pair_messages()
         await self._emit(event, signal)
         if entry is not None:
             await self._emit(EntryAppendedEvent(entry=entry), signal)
@@ -723,6 +766,14 @@ class AgentSession:
             message=dump_message(message),
         )
         self.session_manager.append(entry)
+        if isinstance(message, AssistantMessage):
+            self._open_tool_calls += sum(
+                1 for block in message.content if isinstance(block, ToolCall)
+            )
+        elif isinstance(message, ToolResultMessage):
+            self._open_tool_calls = max(0, self._open_tool_calls - 1)
+            if self._open_tool_calls == 0:
+                self._flush_queued_pair_messages()
         return entry
 
     def _ensure_open(self) -> None:

@@ -133,6 +133,7 @@ def test_actions_and_deferred_tool_metadata_change_the_live_agent(
         *,
         cwd: Path,
         timeout: float | None,
+        processes: set[object] | None = None,
     ) -> ExtensionExecResult:
         exec_calls.append((command, args, cwd, timeout))
         return ExtensionExecResult(stdout="exec-output", stderr="", code=0, killed=False)

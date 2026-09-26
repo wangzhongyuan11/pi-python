@@ -219,6 +219,7 @@ class DefaultExtensionRuntime:
     async def close(self) -> None:
         if not self._started:
             return
+        self._actions.terminate_exec_processes()
         errors = await self._lifecycle.teardown_async()
         self._diagnostics.extend(f"extension teardown failed: {error}" for error in errors)
         self._actions.invalidate()
