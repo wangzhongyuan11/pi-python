@@ -50,8 +50,6 @@ from .models import (
 from .provider import (
     CredentialResolver,
     Provider,
-    ProviderHeadersHook,
-    ProviderPayloadHook,
     StreamFunction,
     StreamOptions,
 )
@@ -111,8 +109,6 @@ __all__ = [
     "ModelInput",
     "ModelThinkingLevel",
     "Provider",
-    "ProviderHeadersHook",
-    "ProviderPayloadHook",
     "StopReason",
     "StreamConsumedError",
     "StreamFunction",
