@@ -15,12 +15,15 @@ from pi_ai import (
     Model,
     Provider,
     StreamOptions,
+    ToolResultMessage,
 )
 from pi_coding_agent.agent_session import AgentSession
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.sdk import CreateAgentSessionOptions, create_agent_session
+from pi_coding_agent.session.agent_messages import parse_message_entry
 from pi_coding_agent.session.catalog import open_session
 from pi_coding_agent.session.manager import SessionManager
+from pi_coding_agent.session.models import MessageEntry
 
 INITIAL_IMPLEMENTATION = '''def normalize_tags(values: list[str]) -> list[str]:
     """Return sorted, unique, normalized tags."""
@@ -396,6 +399,15 @@ class ExtensionTuiEvidence:
     hooked: bool
 
 
+@dataclass(slots=True)
+class TypescriptTuiEvidence:
+    request_count: int
+    total_cost: float
+    session_path: Path
+    transcript: str
+    tool_result_count: int
+
+
 def create_disposable_project(project: Path) -> None:
     project.mkdir(parents=True)
     (project / "README.md").write_text(
@@ -578,6 +590,191 @@ def run_extension_tui_scenario(*, root: Path, live: bool) -> ExtensionTuiEvidenc
         transcript=completed.stdout,
         tool_result_count=int(payload["tool_result_count"]),
         hooked=bool(payload["hooked"]),
+    )
+
+
+_TYPESCRIPT_TUI_CHILD = r"""
+import json
+import os
+from pathlib import Path
+
+from pi_ai import (
+    AssistantMessage,
+    FakeProvider,
+    ToolCall,
+    ToolResultMessage,
+    fake_assistant_message,
+)
+from pi_coding_agent.cli.main import main
+from pi_coding_agent.deepseek_credentials import DeepSeekCredentialResolver
+from pi_coding_agent.model_runtime import ModelRuntime, create_model_runtime
+from pi_coding_agent.session.agent_messages import parse_message_entry
+from pi_coding_agent.session.catalog import open_session
+from pi_coding_agent.session.models import MessageEntry
+from tests.live.scenarios import BudgetedProvider, TUI_MAX_REQUESTS
+
+project = Path(os.environ["PI_LIVE_TUI_PROJECT"])
+repository = Path(os.environ["PI_LIVE_TUI_REPOSITORY"])
+session_dir = Path(os.environ["PI_LIVE_TUI_SESSION_DIR"])
+evidence_path = Path(os.environ["PI_LIVE_TUI_EVIDENCE"])
+
+if os.environ.get("PI_LIVE_TUI_FAKE") == "1":
+    provider = FakeProvider([
+        fake_assistant_message(
+            ToolCall(id="ts-live", name="official_weather", arguments={"city": "capital"}),
+            stop_reason="toolUse",
+        ),
+        fake_assistant_message("weather proof recorded"),
+    ])
+    base_model = provider.models[0]
+else:
+    resolver = DeepSeekCredentialResolver(
+        environ=os.environ,
+        env_file=repository / ".env",
+        cwd=project,
+    )
+    live_runtime = create_model_runtime(
+        credential_resolver=resolver,
+        model_id="deepseek-v4-flash",
+        thinking_level="off",
+        max_tokens=2048,
+        timeout_seconds=90,
+    )
+    provider = live_runtime.provider
+    base_model = live_runtime.model
+
+budgeted = BudgetedProvider(provider, max_requests=TUI_MAX_REQUESTS)
+
+runtime = ModelRuntime(provider=budgeted, model=base_model)
+exit_code = main(
+    [
+        "--provider", runtime.model.provider,
+        "--model", runtime.model.id,
+        "--thinking", "off",
+        "--session-dir", str(session_dir),
+        "--tools", "all",
+        "--approve",
+        "--official",
+    ],
+    model_runtime=runtime,
+)
+
+session_files = tuple(session_dir.glob("*.jsonl"))
+if len(session_files) != 1:
+    raise AssertionError(f"expected one TUI session, got {len(session_files)}")
+manager = open_session(session_files[0])
+messages = [
+    parse_message_entry(entry)
+    for entry in manager.active_path()
+    if isinstance(entry, MessageEntry)
+]
+tool_results = [
+    message
+    for message in messages
+    if isinstance(message, ToolResultMessage) and message.tool_name == "official_weather"
+]
+total_cost = sum(
+    message.usage.cost.total for message in messages if isinstance(message, AssistantMessage)
+)
+evidence_path.write_text(
+    json.dumps(
+        {
+            "exit_code": exit_code,
+            "request_count": budgeted.request_count,
+            "session_path": str(session_files[0]),
+            "tool_result_count": len(tool_results),
+            "total_cost": total_cost,
+        }
+    ),
+    encoding="utf-8",
+)
+raise SystemExit(exit_code)
+"""
+
+
+def run_typescript_extension_tui_scenario(*, root: Path, live: bool) -> TypescriptTuiEvidence:
+    repository = Path(__file__).resolve().parents[2]
+    project = root / "project"
+    agent_dir = root / "agent"
+    session_dir = root / "sessions"
+    evidence_path = root / "typescript-tui-evidence.json"
+    project.mkdir(parents=True)
+    entrypoint_name = "pi-python.exe" if os.name == "nt" else "pi-python"
+    entrypoint = Path(sys.executable).with_name(entrypoint_name)
+    environ = dict(os.environ)
+    environ.update(
+        {
+            "PI_LIVE_TUI_EVIDENCE": str(evidence_path),
+            "PI_LIVE_TUI_PROJECT": str(project),
+            "PI_LIVE_TUI_REPOSITORY": str(repository),
+            "PI_LIVE_TUI_SESSION_DIR": str(session_dir),
+            "PI_PYTHON_AGENT_DIR": str(agent_dir),
+            "PYTHONIOENCODING": "utf-8",
+        }
+    )
+    if not live:
+        environ["PI_LIVE_TUI_FAKE"] = "1"
+
+    installed = subprocess.run(
+        [entrypoint, "install", str(repository / "tests" / "fixtures" / "typescript_package")],
+        cwd=project,
+        env=environ,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=False,
+    )
+    if installed.returncode != 0:
+        raise AssertionError(f"typescript package install failed: {installed.stderr}")
+
+    prompt = (
+        "Call the official_weather tool with city set to exactly capital. Then reply with "
+        "the tool's exact weather line, word for word.\n/exit\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", _TYPESCRIPT_TUI_CHILD],
+        input=prompt,
+        cwd=project,
+        env=environ,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=TUI_PROCESS_TIMEOUT_SECONDS,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"typescript TUI failed with {completed.returncode}:\n"
+            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+        )
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    manager = open_session(payload["session_path"])
+    messages = [
+        parse_message_entry(entry)
+        for entry in manager.active_path()
+        if isinstance(entry, MessageEntry)
+    ]
+    tool_results = [
+        message
+        for message in messages
+        if isinstance(message, ToolResultMessage) and message.tool_name == "official_weather"
+    ]
+    if len(tool_results) != 1:
+        raise AssertionError(f"expected one official_weather result, got {len(tool_results)}")
+    text = "".join(
+        block.text for block in tool_results[0].content if getattr(block, "type", "") == "text"
+    )
+    # The Node-side control hook must have rewritten the arguments before the
+    # TypeScript tool executed inside the Node host.
+    if "Weather for Berlin" not in text or "official TypeScript extension" not in text:
+        raise AssertionError(f"unexpected official_weather result: {text!r}")
+    return TypescriptTuiEvidence(
+        request_count=int(payload["request_count"]),
+        total_cost=float(payload["total_cost"]),
+        session_path=Path(payload["session_path"]),
+        transcript=completed.stdout,
+        tool_result_count=len(tool_results),
     )
 
 
