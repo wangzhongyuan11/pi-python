@@ -14,8 +14,6 @@ export const CAPABILITIES: readonly string[] = [
   "register_command",
   "register_flag",
   "register_shortcut",
-  "register_message_renderer",
-  "register_entry_renderer",
   "events",
   "actions",
   "ui",

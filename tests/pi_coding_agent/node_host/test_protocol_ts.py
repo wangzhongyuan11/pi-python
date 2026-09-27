@@ -57,7 +57,7 @@ def test_typescript_protocol_mirrors_the_python_contract() -> None:
     assert payload["generation"] == 2
     assert payload["command"] == "events"
     assert payload["errors"] == ["invalid_frame", "invalid_frame", "version_mismatch"]
-    assert payload["capabilityCount"] == 10
+    assert payload["capabilityCount"] == 8
 
 
 @pytest.mark.parametrize(

@@ -111,17 +111,17 @@ export class ExtensionApi {
           options: { description: options.description },
         });
       },
-      registerMessageRenderer: (customType: string, renderer: unknown) => {
-        if (typeof renderer !== "function") {
-          throw new TypeError("registerMessageRenderer requires a renderer function");
-        }
-        return this.callPython("register_message_renderer", { customType, serialized: true });
+      registerMessageRenderer: () => {
+        throw new UnsupportedCapabilityError(
+          "register_message_renderer",
+          "JavaScript renderers cannot cross the process boundary (ADR 0009)",
+        );
       },
-      registerEntryRenderer: (customType: string, renderer: unknown) => {
-        if (typeof renderer !== "function") {
-          throw new TypeError("registerEntryRenderer requires a renderer function");
-        }
-        return this.callPython("register_entry_renderer", { customType, serialized: true });
+      registerEntryRenderer: () => {
+        throw new UnsupportedCapabilityError(
+          "register_entry_renderer",
+          "JavaScript renderers cannot cross the process boundary (ADR 0009)",
+        );
       },
       getFlag: (name: string) => this.state.flags[name],
       // Actions and session metadata: ordered fire-and-forget (void upstream).
