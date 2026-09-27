@@ -417,4 +417,4 @@ Phase 11.5–14.5 已完成；Phase 15 与 Phase 16 已完成。2026-09-26 验�
 
 Phase 16 五项全部落地：P16-T01 语义差分、P16-T02 五项历史缺陷回归、P16-T03 黄金 Package 全生命周期 E2E、P16-T04 故障恢复 E2E、P16-T05 干净 wheel 功能安装（`scripts/verify_wheel.py`，pytest 内跑纯守卫，完整验证用 `uv build --no-sources && uv run --frozen python scripts/verify_wheel.py --wheel <dist>`，仓库外 HOME/cwd 下 CLI/SDK/TUI/RPC/Package/Extension 全部可运行且无 checkout 路径泄漏）。
 
-当前位于 Phase 16 阶段验收点，Phase 12–16 的提交都在 `phase/16-reliability-differential` 分支（基于 `phase/15-cli-rpc`），未合并 main。RPC 附件一致性与 HTML exporter 仍属 P17-T02/T03；Phase 15.5 的 Node Host 尚未开始，不能声称公开 TypeScript Package 已能执行。下一阶段从 P15.5-T01 开始；Phase 17 完成次要 1.0 表面后双运行时 Pi 产品闭环达成，Phase 18–20 完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。
+2026-09-27：Phase 12–16 已全部合并进 main（merge commit `7ac3bfe`），合并后全量离线套件 899 passed，surface matrix 231 surfaces 验证通过；所有本地 phase 分支均已包含。RPC 附件一致性与 HTML exporter 仍属 P17-T02/T03；Phase 15.5 的 Node Host 尚未开始，不能声称公开 TypeScript Package 已能执行。下一阶段从 P15.5-T01 开始；Phase 17 完成次要 1.0 表面后双运行时 Pi 产品闭环达成，Phase 18–20 完成 MCP/child/background/worktree 本地能力；Phase 21 是低优先级发布门。
