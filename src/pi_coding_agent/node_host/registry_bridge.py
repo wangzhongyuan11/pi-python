@@ -15,8 +15,8 @@ from pydantic import BaseModel, Field, create_model
 
 from pi_agent import AgentTool, AgentToolResult
 from pi_ai import TextContent
-from pi_coding_agent.extensions.registry import CapabilityRegistry, FlagState, RegistrationKind
 
+from ..extensions.registry import CapabilityRegistry, FlagState, RegistrationKind
 from .event_bridge import NodeRequestError
 
 HostCaller = Callable[[str, Mapping[str, object]], Awaitable[object]]

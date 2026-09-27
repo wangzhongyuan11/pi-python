@@ -13,8 +13,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 
-from pi_coding_agent.extensions.runtime import DefaultExtensionRuntime
-
+from ..extensions.runtime import DefaultExtensionRuntime
 from .event_bridge import (
     ExtensionActionsProtocol,
     NodeActionBridge,

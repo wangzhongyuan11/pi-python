@@ -17,8 +17,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 
-from pi_coding_agent.rpc.framing import JsonlFramer, serialize_json_line
-
+from ..rpc.framing import JsonlFramer, serialize_json_line
 from .models import Hello, HelloAck, ProtocolError, Request, Response, parse_frame
 
 HANDSHAKE_TIMEOUT = 30.0
