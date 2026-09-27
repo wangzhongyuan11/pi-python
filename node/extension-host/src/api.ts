@@ -36,11 +36,29 @@ const UNSUPPORTED = new Set([
   "events",
 ]);
 
+interface ToolRecord {
+  name: string;
+  execute: (toolCallId: string, params: unknown, signal: unknown, onUpdate: unknown, ctx: unknown) => Promise<unknown>;
+}
+
+interface CommandRecord {
+  name: string;
+  handler: (args: string, context: unknown) => Promise<unknown> | unknown;
+}
+
+interface ShortcutRecord {
+  shortcut: string;
+  handler: (context: unknown) => Promise<void> | void;
+}
+
 export class ExtensionApi {
   readonly handlers = new Map<string, EventHandler[]>();
+  readonly tools = new Map<string, ToolRecord>();
+  readonly commands = new Map<string, CommandRecord>();
+  readonly shortcuts = new Map<string, ShortcutRecord>();
   state: HostState;
+  hasUI: boolean;
   private readonly callPython: PythonCaller;
-  private readonly hasUI: boolean;
 
   constructor(callPython: PythonCaller, state: HostState) {
     this.callPython = callPython;
@@ -60,13 +78,39 @@ export class ExtensionApi {
         list.push(handler);
         this.handlers.set(event, list);
       },
-      registerTool: (tool: unknown) => this.callPython("register_tool", { definition: tool }),
-      registerCommand: (name: string, options: unknown) =>
-        this.callPython("register_command", { name, options }),
-      registerFlag: (name: string, options: unknown) =>
+      registerTool: (tool: ToolRecord & Record<string, unknown>) => {
+        if (typeof tool?.execute !== "function") {
+          throw new TypeError("registerTool requires an execute function");
+        }
+        this.tools.set(tool.name, tool);
+        // Forward the definition without functions; JSON.stringify drops them.
+        return this.callPython("register_tool", { definition: JSON.parse(JSON.stringify(tool)) });
+      },
+      registerCommand: (name: string, options: { handler?: unknown; description?: string }) => {
+        if (typeof options?.handler !== "function") {
+          throw new TypeError("registerCommand requires a handler function");
+        }
+        this.commands.set(name, { name, handler: options.handler });
+        return this.callPython("register_command", {
+          name,
+          options: { description: options.description },
+        });
+      },
+      registerFlag: (name: string, options: { type?: string; default?: boolean | string }) =>
         this.callPython("register_flag", { name, options }),
-      registerShortcut: (shortcut: string, options: unknown) =>
-        this.callPython("register_shortcut", { shortcut, options }),
+      registerShortcut: (
+        shortcut: string,
+        options: { handler?: unknown; description?: string },
+      ) => {
+        if (typeof options?.handler !== "function") {
+          throw new TypeError("registerShortcut requires a handler function");
+        }
+        this.shortcuts.set(shortcut, { shortcut, handler: options.handler });
+        return this.callPython("register_shortcut", {
+          shortcut,
+          options: { description: options.description },
+        });
+      },
       registerMessageRenderer: (customType: string, renderer: unknown) => {
         if (typeof renderer !== "function") {
           throw new TypeError("registerMessageRenderer requires a renderer function");

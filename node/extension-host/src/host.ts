@@ -113,6 +113,18 @@ async function activateExtension(extensionPath: string, state?: Partial<HostStat
   }
 }
 
+function serializeToolResult(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) {
+    return { content: [], details: null, isError: false };
+  }
+  const record = raw as Record<string, unknown>;
+  return {
+    content: Array.isArray(record.content) ? record.content : [],
+    details: record.details ?? null,
+    isError: record.isError === true,
+  };
+}
+
 async function handleRequest(request: Request): Promise<unknown> {
   switch (request.command) {
     case "dispatch": {
@@ -127,6 +139,61 @@ async function handleRequest(request: Request): Promise<unknown> {
     }
     case "ping":
       return { pong: true };
+    case "execute_tool": {
+      const name = String(request.payload.name ?? "");
+      const toolCallId = String(request.payload.tool_call_id ?? "");
+      const args = request.payload.args ?? {};
+      for (const api of apis) {
+        const tool = api.tools.get(name);
+        if (tool) {
+          const raw = await tool.execute(toolCallId, args, undefined, undefined, {
+            hasUI: api.hasUI,
+          });
+          return serializeToolResult(raw);
+        }
+      }
+      throw Object.assign(new Error(`unknown tool ${name}`), { code: "unknown_tool" });
+    }
+    case "run_command": {
+      const commandName = String(request.payload.name ?? "");
+      const args = String(request.payload.args ?? "");
+      for (const api of apis) {
+        const command = api.commands.get(commandName);
+        if (command) {
+          const result = await command.handler(args, request.payload.context ?? {});
+          return { result: result ?? null };
+        }
+      }
+      throw Object.assign(new Error(`unknown command ${commandName}`), {
+        code: "unknown_command",
+      });
+    }
+    case "run_shortcut": {
+      const shortcut = String(request.payload.shortcut ?? "");
+      for (const api of apis) {
+        const record = api.shortcuts.get(shortcut);
+        if (record) {
+          await record.handler(request.payload.context ?? {});
+          return { ok: true };
+        }
+      }
+      throw Object.assign(new Error(`unknown shortcut ${shortcut}`), {
+        code: "unknown_shortcut",
+      });
+    }
+    case "update_state": {
+      const patch = (request.payload.state ?? {}) as Partial<HostState>;
+      for (const api of apis) {
+        if (patch.flags) api.state.flags = { ...api.state.flags, ...patch.flags };
+        if (patch.sessionName !== undefined) api.state.sessionName = patch.sessionName;
+        if (patch.activeTools) api.state.activeTools = [...patch.activeTools];
+        if (patch.allTools) api.state.allTools = [...patch.allTools];
+        if (patch.commands) api.state.commands = [...patch.commands];
+        if (patch.thinkingLevel) api.state.thinkingLevel = patch.thinkingLevel;
+        if (patch.hasUI !== undefined) api.hasUI = patch.hasUI;
+      }
+      return { ok: true };
+    }
     default:
       throw Object.assign(new Error(`unknown command ${request.command}`), {
         code: "unknown_command",

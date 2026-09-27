@@ -14,7 +14,7 @@ import os
 import shutil
 import subprocess
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 
 from pi_coding_agent.rpc.framing import JsonlFramer, serialize_json_line
@@ -126,6 +126,9 @@ class NodeHostProcess:
         self._stderr_task: asyncio.Task[None] | None = None
         self._stderr_tail: list[str] = []
         self._ack: HelloAck | None = None
+        self._request_handler: Callable[[str, Mapping[str, object]], Awaitable[object]] | None = (
+            None
+        )
         self._closed = False
         self._id = 0
 
@@ -217,6 +220,8 @@ class NodeHostProcess:
                     future = self._pending.pop("handshake", None)
                     if future and not future.done():
                         future.set_result(frame)
+                elif isinstance(frame, Request):
+                    await self._answer_host_request(frame)
                 elif isinstance(frame, Response):
                     future = self._pending.get(frame.id)
                     if future and not future.done():
@@ -230,6 +235,54 @@ class NodeHostProcess:
                                 )
                             )
                 # Requests from the host are handled in T03/T04/T05.
+
+    def set_request_handler(
+        self, handler: Callable[[str, Mapping[str, object]], Awaitable[object]]
+    ) -> None:
+        """Answer host-initiated requests (registrations, actions, UI)."""
+
+        self._request_handler = handler
+
+    async def _answer_host_request(self, request: Request) -> None:
+        if self._request_handler is None:
+            self._send_response(
+                Response.model_validate(
+                    {
+                        "id": request.id,
+                        "ok": False,
+                        "errorCode": "unknown_command",
+                        "error": "python side has no host request handler",
+                    }
+                )
+            )
+            return
+        try:
+            result = await self._request_handler(request.command, request.payload)
+        except Exception as error:  # noqa: BLE001 - errors cross the wire as strings
+            self._send_response(
+                Response.model_validate(
+                    {
+                        "id": request.id,
+                        "ok": False,
+                        "errorCode": "handler_error",
+                        "error": str(error),
+                    }
+                )
+            )
+            return
+        self._send_response(
+            Response.model_validate({"id": request.id, "ok": True, "result": result})
+        )
+
+    def _send_response(self, response: Response) -> None:
+        if self._process is None or self._process.stdin is None:
+            return
+        try:
+            self._process.stdin.write(
+                serialize_json_line(response.model_dump(by_alias=True)).encode("utf-8")
+            )
+        except (ConnectionResetError, RuntimeError):
+            return
 
     async def _drain_stderr(self) -> None:
         assert self._process is not None and self._process.stderr is not None
@@ -269,14 +322,13 @@ class NodeHostProcess:
         if self._closed:
             return
         self._closed = True
-        stdin_open = self._process is not None and self._process.stdin is not None
-        if stdin_open and self._process.returncode is None:
+        process = self._process
+        stdin = process.stdin if process is not None else None
+        if process is not None and stdin is not None and process.returncode is None:
             try:
                 shutdown = Request(id="py-shutdown", command="shutdown", payload={})
-                self._process.stdin.write(
-                    serialize_json_line(shutdown.model_dump()).encode("utf-8")
-                )
-                await self._process.stdin.drain()
+                stdin.write(serialize_json_line(shutdown.model_dump()).encode("utf-8"))
+                await stdin.drain()
             except (ConnectionResetError, RuntimeError):
                 pass
         if self._process is not None:

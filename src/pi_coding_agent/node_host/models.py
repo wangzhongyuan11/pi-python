@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -122,26 +122,25 @@ def parse_frame(line: str) -> Hello | HelloAck | Request | Response:
     """Parse one JSONL frame or raise a typed invalid_frame error."""
 
     try:
-        payload = json.loads(line)
+        raw_payload: object = json.loads(line)
     except json.JSONDecodeError as error:
         raise ProtocolError("invalid_frame", f"not JSON: {error}") from error
-    if not isinstance(payload, dict) or payload.get("type") not in FRAME_TYPES:
+    payload = cast("dict[str, object]", raw_payload) if isinstance(raw_payload, dict) else {}
+    raw_kind = payload.get("type")
+    kind = raw_kind if isinstance(raw_kind, str) else ""
+    if kind not in FRAME_TYPES:
         raise ProtocolError("invalid_frame", f"unknown frame type in {line[:80]!r}")
+    models: dict[str, type[Hello | HelloAck | Request | Response]] = {
+        "hello": Hello,
+        "hello_ack": HelloAck,
+        "request": Request,
+        "response": Response,
+    }
+    model = models[kind]
     try:
-        kind = cast_frame_kind(payload["type"])
-        model: type[Hello | HelloAck | Request | Response] = {
-            "hello": Hello,
-            "hello_ack": HelloAck,
-            "request": Request,
-            "response": Response,
-        }[kind]
         return model.model_validate(payload)
     except ValidationError as error:
         raise ProtocolError("invalid_frame", str(error)) from error
-
-
-def cast_frame_kind(value: object) -> str:
-    return value if isinstance(value, str) else ""
 
 
 __all__ = [
