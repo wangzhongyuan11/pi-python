@@ -27,6 +27,7 @@ interface ExtensionDescriptor {
   name?: string;
   error?: string;
   unsupported?: string[];
+  events?: string[];
 }
 
 interface HostConfig {

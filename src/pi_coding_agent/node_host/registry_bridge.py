@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, create_model
 
 from pi_agent import AgentTool, AgentToolResult
 from pi_ai import TextContent
-from pi_coding_agent.extensions.registry import FlagState
+from pi_coding_agent.extensions.registry import CapabilityRegistry, FlagState, RegistrationKind
 
 from .event_bridge import NodeRequestError
 
@@ -98,7 +98,7 @@ class RegistryBridge:
 
     def __init__(
         self,
-        registry: object,
+        registry: CapabilityRegistry,
         *,
         source: str,
         host_caller: HostCaller,
@@ -197,15 +197,16 @@ class RegistryBridge:
 
     async def _get_flag(self, payload: Mapping[str, object]) -> object:
         name = str(payload.get("name", ""))
-        lookup = cast("object | None", self._registry.lookup("flag", name))
-        state = cast("object", getattr(lookup, "payload", None))
+        lookup = self._registry.lookup("flag", name)
+        state = lookup.payload if lookup is not None else None
         if isinstance(state, FlagState):
             return state.value
         return None
 
     def _register(self, kind: str, name: str, payload: object) -> object:
-        registry = self._registry
-        return registry.register(kind, name, self._source, payload)  # type: ignore[union-attr]
+        return self._registry.register(
+            cast("RegistrationKind", kind), name, self._source, payload
+        )
 
 
 __all__ = ["NodeRequestError", "RegistryBridge", "model_from_json_schema"]

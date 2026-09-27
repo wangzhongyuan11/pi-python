@@ -74,6 +74,16 @@ class DefaultExtensionRuntime:
     def registry(self) -> CapabilityRegistry:
         return self._registry
 
+    def register_hook(self, event: str, handler: Callable[..., object]) -> Callable[[], None]:
+        """Register an ordered handler on the shared hook runner.
+
+        Used by cross-runtime bridges (the Node extension host) so that
+        bridged handlers participate in the same ordered fan-out as native
+        Python extensions.
+        """
+
+        return self._hooks.register(event, handler)
+
     @property
     def diagnostics(self) -> tuple[str, ...]:
         return tuple(self._diagnostics)

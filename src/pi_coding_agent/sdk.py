@@ -42,7 +42,7 @@ from .agent_session_runtime import (
     RuntimeEventSink,
     RuntimeTarget,
 )
-from .bootstrap import BootstrapConfig, ProductBootstrap, bootstrap
+from .bootstrap import BootstrapConfig, ProductBootstrap, attach_node_host, bootstrap
 from .branch_summary import BranchSummarizer, BranchSummaryService
 from .builtin_extensions.permission_gate import PermissionGate
 from .compaction.cutpoint import TokenCounter, estimate_entry_tokens
@@ -431,6 +431,7 @@ async def create_agent_session(
             extension_provider_ids.clear()
         services.resources.discover(target.cwd)
         await services.extensions.start()
+        node_host = await attach_node_host(services, target.cwd)
         if selected.extension_flags:
             apply_flags = getattr(services.extensions, "apply_flags", None)
             if not callable(apply_flags):
@@ -586,6 +587,8 @@ async def create_agent_session(
         )
 
         async def close_services(_reason: object) -> None:
+            if node_host is not None:
+                await node_host.close()
             await services.extensions.close()
 
         session = AgentSession(

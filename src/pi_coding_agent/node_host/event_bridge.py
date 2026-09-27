@@ -128,6 +128,8 @@ class NodeEventBridge:
             raise NodeHostStaleError("node host generation is stale")
         register = getattr(hooks, "register", None)
         if not callable(register):
+            register = getattr(hooks, "register_hook", None)
+        if not callable(register):
             raise TypeError("hooks must expose register(event, handler)")
         registered: tuple[str, ...] = ()
         for event_name, node_event in events.items():
