@@ -204,9 +204,7 @@ class RegistryBridge:
         return None
 
     def _register(self, kind: str, name: str, payload: object) -> object:
-        return self._registry.register(
-            cast("RegistrationKind", kind), name, self._source, payload
-        )
+        return self._registry.register(cast("RegistrationKind", kind), name, self._source, payload)
 
 
 __all__ = ["NodeRequestError", "RegistryBridge", "model_from_json_schema"]

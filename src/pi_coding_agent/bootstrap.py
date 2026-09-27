@@ -67,6 +67,7 @@ async def attach_node_host(services: ProductServices, cwd: Path) -> NodeHostRunt
     except Exception:
         await node_runtime.close()
         return None
+    runtime._node_host = node_runtime  # noqa: SLF001 - composition-root wiring
     return node_runtime
 
 

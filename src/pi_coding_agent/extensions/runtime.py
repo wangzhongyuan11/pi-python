@@ -47,6 +47,7 @@ class DefaultExtensionRuntime:
         "_started",
         "_product_ui",
         "_ui_apis",
+        "_node_host",
     )
 
     def __init__(
@@ -215,6 +216,9 @@ class DefaultExtensionRuntime:
         )
         self._diagnostics = list(result.diagnostics)
         for metadata in result.extensions:
+            if not metadata.entry.endswith(".py"):
+                # Bridged JavaScript/TypeScript entries belong to the Node host.
+                continue
             source = self._resources.source_for("extension", metadata.path)
             if source in {"explicit", "global", "package"} or (
                 source == "project" and result.project_trusted

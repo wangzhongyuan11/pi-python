@@ -130,6 +130,7 @@ class NodeHostProcess:
             None
         )
         self._host_request_tasks: set[asyncio.Task[None]] = set()
+        self._pending_commands: dict[str, str] = {}
         self._closed = False
         self._id = 0
 
@@ -228,6 +229,7 @@ class NodeHostProcess:
                     task.add_done_callback(self._host_request_tasks.discard)
                 elif isinstance(frame, Response):
                     future = self._pending.get(frame.id)
+                    self._pending_commands.pop(frame.id, None)
                     if future and not future.done():
                         if frame.ok:
                             future.set_result(frame.result)
@@ -305,6 +307,7 @@ class NodeHostProcess:
             if not future.done():
                 future.set_exception(NodeHostError(message))
         self._pending.clear()
+        self._pending_commands.clear()
 
     async def request(self, command: str, payload: Mapping[str, object] | None = None) -> object:
         if self._closed or self._process is None or self._process.stdin is None:
@@ -314,6 +317,7 @@ class NodeHostProcess:
         request = Request(id=request_id, command=command, payload=dict(payload or {}))
         future: asyncio.Future[object] = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
+        self._pending_commands[request_id] = command
         assert self._process.stdin is not None
         self._process.stdin.write(serialize_json_line(request.model_dump()).encode("utf-8"))
         try:

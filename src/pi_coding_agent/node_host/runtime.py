@@ -99,9 +99,7 @@ class NodeHostRuntime:
                 "Callable[[], ExtensionActionsProtocol | None]", self._actions_provider
             )
         )
-        process.set_request_handler(
-            combine_handlers(registry_bridge, ui_bridge, action_bridge)
-        )
+        process.set_request_handler(combine_handlers(registry_bridge, ui_bridge, action_bridge))
         try:
             ack = await process.start()
         except NodeHostError as error:
@@ -119,13 +117,17 @@ class NodeHostRuntime:
                 continue
             for item in cast("list[object]", raw_events):
                 subscriptions[str(item)] = str(item)
-        event_bridge.register_forwarders(
-            self._extensions_runtime, subscriptions, source=source
-        )
+        event_bridge.register_forwarders(self._extensions_runtime, subscriptions, source=source)
         return ack
 
     def _source(self) -> str:
         return f"node-host:{self._generation}"
+
+    async def update_flags(self, flags: dict[str, bool | str]) -> None:
+        """Push CLI flag values into the host's synchronous snapshot."""
+
+        if self._process is not None:
+            await self._process.request("update_state", {"state": {"flags": dict(flags)}})
 
     def _on_unexpected_exit(self, stderr: str) -> None:
         self._failed = True

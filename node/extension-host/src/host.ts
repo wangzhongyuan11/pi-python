@@ -108,6 +108,7 @@ async function activateExtension(extensionPath: string, state?: Partial<HostStat
       }
     }
     descriptor.name = extensionPath.replace(/\\/g, "/").split("/").pop() ?? extensionPath;
+    descriptor.events = [...api.handlers.keys()];
     loaded.push(descriptor);
   } catch (error) {
     descriptor.error = error instanceof Error ? error.message : String(error);

@@ -169,6 +169,11 @@ async def _before_extension_tool_call(
             if isinstance(mapping.get("reason"), str):
                 reason = cast("str", mapping["reason"])
             terminate = terminate or mapping.get("terminate") is True
+            bridged_input = mapping.get("input")
+            if isinstance(bridged_input, Mapping):
+                # Bridged (Node) hooks return the rewritten arguments because
+                # they cannot mutate the serialized event in place.
+                event.input = cast("dict[str, object]", dict(bridged_input))
     return BeforeToolCallResult(
         block=block,
         reason=reason,
@@ -443,6 +448,10 @@ async def create_agent_session(
             except Exception:
                 await services.extensions.close()
                 raise
+        if selected.extension_flags and node_host is not None:
+            await node_host.update_flags(
+                {f"--{name}": value for name, value in selected.extension_flags.items()}
+            )
         for provider in services.extensions.providers:
             model_runtime.register_provider(provider)
             extension_provider_ids.add(provider.id)
