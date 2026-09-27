@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
 from pydantic import ValidationError
 
-from .models import KNOWN_SETTING_ALIASES, SettingsValidationError, SettingsValues
+from pi_ai import JsonValue
+
+from ..session.atomic import atomic_write
+from .models import (
+    KNOWN_SETTING_ALIASES,
+    PackageSource,
+    SettingsValidationError,
+    SettingsValues,
+    settings_payload,
+)
 
 
 def _merge(base: dict[str, Any], overrides: Mapping[str, Any]) -> dict[str, Any]:
@@ -53,12 +62,18 @@ def _split_unknown(
     return known, unknown
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
+@dataclass(slots=True, kw_only=True)
 class SettingsManager:
     values: SettingsValues
     compatibility: dict[str, Any]
     warnings: tuple[str, ...]
     _resource_bases: dict[str, Path]
+    _agent_dir: Path
+    _cwd: Path
+    _project_trusted: bool
+    _environment_overrides: dict[str, Any]
+    _cli_overrides: dict[str, Any]
+    _runtime_overrides: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
 
     @classmethod
     def load(
@@ -121,7 +136,90 @@ class SettingsManager:
             compatibility=compatibility,
             warnings=tuple(warnings),
             _resource_bases=resource_bases,
+            _agent_dir=resolved_agent,
+            _cwd=resolved_cwd,
+            _project_trusted=project_trusted,
+            _environment_overrides=dict(environment_overrides or {}),
+            _cli_overrides=dict(cli_overrides or {}),
         )
+
+    @property
+    def project_trusted(self) -> bool:
+        return self._project_trusted
+
+    @property
+    def agent_dir(self) -> Path:
+        return self._agent_dir
+
+    @property
+    def cwd(self) -> Path:
+        return self._cwd
+
+    def reload(self, *, project_trusted: bool | None = None) -> None:
+        """Atomically reload file layers while preserving this manager's identity."""
+        next_trust = self._project_trusted if project_trusted is None else project_trusted
+        loaded = type(self).load(
+            agent_dir=self._agent_dir,
+            cwd=self._cwd,
+            project_trusted=next_trust,
+            environment_overrides=self._environment_overrides,
+            cli_overrides=_merge(self._cli_overrides, self._runtime_overrides),
+        )
+        self.values = loaded.values
+        self.compatibility = loaded.compatibility
+        self.warnings = loaded.warnings
+        self._resource_bases = loaded._resource_bases
+        self._project_trusted = next_trust
+
+    def get(self, key: str, default: JsonValue = None) -> JsonValue:
+        return self.snapshot().get(key, default)
+
+    def set(self, key: str, value: JsonValue) -> None:
+        self._runtime_overrides[key] = value
+        self.reload()
+
+    def snapshot(self) -> dict[str, JsonValue]:
+        snapshot = cast(dict[str, JsonValue], settings_payload(self.values))
+        snapshot.update(cast(dict[str, JsonValue], self.compatibility))
+        return snapshot
+
+    def package_sources(self, scope: str) -> tuple[str | PackageSource, ...]:
+        if scope == "project" and not self._project_trusted:
+            return ()
+        path, label = self._package_settings_path(scope)
+        payload = _read(path, label)
+        try:
+            return SettingsValues.model_validate({"packages": payload.get("packages", [])}).packages
+        except ValidationError as error:
+            raise SettingsValidationError(
+                f"invalid {label} settings at {path}: {error.errors(include_input=False)}"
+            ) from error
+
+    def set_package_sources(
+        self,
+        sources: tuple[str | PackageSource, ...],
+        *,
+        scope: str,
+    ) -> None:
+        if scope == "project" and not self._project_trusted:
+            raise PermissionError("project trust is required to change project packages")
+        path, label = self._package_settings_path(scope)
+        validated = SettingsValues.model_validate({"packages": sources}).packages
+        payload = _read(path, label)
+        payload["packages"] = [
+            source if isinstance(source, str) else source.model_dump(by_alias=True, mode="json")
+            for source in validated
+        ]
+        data = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        atomic_write(path, data)
+        self.reload()
+
+    def _package_settings_path(self, scope: str) -> tuple[Path, str]:
+        if scope == "user":
+            return self._agent_dir / "settings.json", "global"
+        if scope == "project":
+            return self._cwd / ".pi-python" / "settings.json", "project"
+        raise ValueError(f"unsupported package scope: {scope}")
 
     def resource_paths(self, kind: str) -> tuple[Path, ...]:
         if kind not in {"extensions", "skills", "prompts", "themes"}:

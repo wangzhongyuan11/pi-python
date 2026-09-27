@@ -27,6 +27,10 @@ class RegistryConflictError(RegistryError):
     """The same kind/name pair was already registered."""
 
 
+class ExtensionFlagError(ValueError):
+    """CLI values do not satisfy the activated extension flag registry."""
+
+
 @dataclass(frozen=True, slots=True)
 class Registration:
     kind: RegistrationKind
@@ -108,6 +112,7 @@ class CapabilityRegistry:
 __all__ = [
     "REGISTRATION_KINDS",
     "CapabilityRegistry",
+    "ExtensionFlagError",
     "FlagState",
     "Registration",
     "RegistrationKind",

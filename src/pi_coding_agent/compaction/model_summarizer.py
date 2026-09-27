@@ -146,9 +146,12 @@ class ModelRuntimeSummarizer(CompactionSummarizer):
         entries: tuple[SessionEntry, ...],
         *,
         previous_summary: str | None,
+        custom_instructions: str | None = None,
     ) -> str:
         model = self._model_runtime.model
-        prompt = build_summarization_prompt(entries, previous_summary=previous_summary)
+        prompt = build_summarization_prompt(
+            entries, previous_summary=previous_summary, custom_instructions=custom_instructions
+        )
         message = UserMessage(
             content=(TextContent(text=prompt),),
             timestamp=0,

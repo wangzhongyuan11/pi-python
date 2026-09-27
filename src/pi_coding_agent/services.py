@@ -7,15 +7,16 @@ from pathlib import Path
 
 from pi_tui import UI, NoopUI
 
-from .config.models import settings_payload
 from .config.settings import SettingsManager
 from .extensions.runtime import DefaultExtensionRuntime
+from .packages.manager import DefaultPackageManager
 from .ports import (
     DefaultSessionImporter,
     ExtensionRuntime,
-    InMemorySettings,
     NoopSessionExporter,
+    ResourceKind,
     ResourceLoader,
+    ResourceRoot,
     SessionExporter,
     SessionImporter,
     Settings,
@@ -32,6 +33,7 @@ class ServiceOverrides:
     exporter: SessionExporter | None = None
     importer: SessionImporter | None = None
     ui: UI | None = None
+    resource_roots: tuple[ResourceRoot, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -43,6 +45,23 @@ class ProductServices:
     exporter: SessionExporter
     importer: SessionImporter
     ui: UI
+    _static_resource_roots: tuple[ResourceRoot, ...] = ()
+
+    def reload_project_trust(self, trusted: bool) -> None:
+        """Reload settings and resources after resolving project trust."""
+        if not isinstance(self.settings, SettingsManager):
+            raise RuntimeError("project trust reload requires the default SettingsManager")
+        self.settings.reload(project_trusted=trusted)
+        if isinstance(self.resources, DefaultResourceLoader):
+            self.resources.set_resource_roots(
+                (
+                    *self._static_resource_roots,
+                    *_settings_resource_roots(self.settings),
+                    *_package_resource_roots(self.settings),
+                )
+            )
+            self.resources.set_project_trusted(self.cwd, trusted)
+            self.resources.load(cwd=self.cwd, agent_dir=self.resources.agent_dir)
 
 
 def create_product_services(
@@ -50,32 +69,62 @@ def create_product_services(
     overrides: ServiceOverrides | None = None,
 ) -> ProductServices:
     selected = ServiceOverrides() if overrides is None else overrides
+    resolved_cwd = cwd.resolve()
+    settings = selected.settings
+    if settings is None:
+        settings = SettingsManager.load(
+            agent_dir=_agent_dir(),
+            cwd=resolved_cwd,
+            project_trusted=False,
+        )
+    settings_roots = _settings_resource_roots(settings)
+    package_roots = _package_resource_roots(settings)
     default_resources = DefaultResourceLoader(
         trust_store=FileProjectTrustStore(_agent_dir() / "trust.json"),
         agent_dir=_agent_dir(),
+        resource_roots=(*selected.resource_roots, *settings_roots, *package_roots),
     )
+    default_resources.set_project_trusted(resolved_cwd, False)
     resources = selected.resources if selected.resources is not None else default_resources
-    default_extensions = DefaultExtensionRuntime(cwd=cwd, resources=default_resources)
-    settings = selected.settings
-    if settings is None:
-        settings = InMemorySettings(
-            settings_payload(
-                SettingsManager.load(
-                    agent_dir=_agent_dir(),
-                    cwd=cwd,
-                    project_trusted=False,
-                ).values
-            )
-        )
+    ui = selected.ui if selected.ui is not None else NoopUI()
+    if selected.extensions is None:
+        if not isinstance(resources, DefaultResourceLoader):
+            raise ValueError("custom resource loader requires a matching extension runtime")
+        extensions: ExtensionRuntime = DefaultExtensionRuntime(cwd=cwd, resources=resources, ui=ui)
+    else:
+        extensions = selected.extensions
     return ProductServices(
-        cwd=cwd.resolve(),
+        cwd=resolved_cwd,
         settings=settings,
         resources=resources,
-        extensions=selected.extensions if selected.extensions is not None else default_extensions,
+        extensions=extensions,
         exporter=(selected.exporter if selected.exporter is not None else NoopSessionExporter()),
         importer=(selected.importer if selected.importer is not None else DefaultSessionImporter()),
-        ui=selected.ui if selected.ui is not None else NoopUI(),
+        ui=ui,
+        _static_resource_roots=selected.resource_roots,
     )
+
+
+def _settings_resource_roots(settings: Settings) -> tuple[ResourceRoot, ...]:
+    if not isinstance(settings, SettingsManager):
+        return ()
+    singular: dict[str, ResourceKind] = {
+        "extensions": "extension",
+        "skills": "skill",
+        "prompts": "prompt",
+        "themes": "theme",
+    }
+    return tuple(
+        ResourceRoot(kind=kind, path=path, source="explicit")
+        for plural, kind in singular.items()
+        for path in settings.resource_paths(plural)
+    )
+
+
+def _package_resource_roots(settings: Settings) -> tuple[ResourceRoot, ...]:
+    if not isinstance(settings, SettingsManager):
+        return ()
+    return DefaultPackageManager(settings=settings).resource_roots()
 
 
 def _agent_dir() -> Path:

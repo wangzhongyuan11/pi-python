@@ -176,4 +176,14 @@ def _uv_installer(source_location: str, target_dir: Path) -> None:
         raise RuntimeError(f"uv pip install failed: {completed.stderr.strip()}")
 
 
-__all__ = ["EnvironmentInstallError", "Installer", "ManagedEnvironment"]
+def install_requirement(requirement: str, target_dir: Path) -> None:
+    """Install one PyPI requirement into an isolated staging directory."""
+    _uv_installer(requirement, target_dir)
+
+
+__all__ = [
+    "EnvironmentInstallError",
+    "Installer",
+    "ManagedEnvironment",
+    "install_requirement",
+]

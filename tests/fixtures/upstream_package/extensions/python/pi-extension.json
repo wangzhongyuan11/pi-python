@@ -1,0 +1,5 @@
+{
+  "name": "upstream-python-proof",
+  "version": "1.0.0",
+  "entry": "main.py"
+}

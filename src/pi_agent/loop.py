@@ -7,6 +7,7 @@ import inspect
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from pi_ai import (
     AssistantMessage,
@@ -40,10 +41,11 @@ from .tool_pipeline import (
     ToolCallOutcome,
     fail_tool_call,
 )
-from .tools import ToolExecutionMode
+from .tools import AgentTool, ToolExecutionMode
 
 type AgentEventSink = Callable[[AgentEvent], None | Awaitable[None]]
 type PendingMessageSource = Callable[[], Awaitable[Sequence[AgentMessage]]]
+type ActiveToolsSource = Callable[[], Sequence[AgentTool[Any, Any]]]
 
 
 def _now_ms() -> int:
@@ -65,6 +67,7 @@ class AgentLoopConfig:
     tool_execution: ToolExecutionMode = "parallel"
     get_steering_messages: PendingMessageSource | None = None
     get_follow_up_messages: PendingMessageSource | None = None
+    get_active_tools: ActiveToolsSource | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.max_turns, bool) or self.max_turns <= 0:
@@ -118,10 +121,15 @@ async def run_agent_loop(
             current_messages.append(pending_message)
             new_messages.append(pending_message)
         pending_messages = ()
+        active_tools = (
+            tuple(config.get_active_tools())
+            if config.get_active_tools is not None
+            else context.tools
+        )
         turn_context = AgentContext(
             system_prompt=context.system_prompt,
             messages=current_messages,
-            tools=context.tools,
+            tools=active_tools,
         )
         assistant = await _stream_assistant(turn_context, config, emitter)
         current_messages.append(assistant)
@@ -150,7 +158,7 @@ async def run_agent_loop(
                     tool_calls,
                     assistant,
                     turn_context,
-                    context.tools or (),
+                    active_tools or (),
                     execution_mode=config.tool_execution,
                     before_tool_call=config.before_tool_call,
                     after_tool_call=config.after_tool_call,

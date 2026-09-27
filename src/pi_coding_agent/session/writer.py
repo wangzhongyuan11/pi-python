@@ -35,9 +35,23 @@ def create_session_file(path: Path, records: Iterable[SessionHeader | SessionEnt
     path.chmod(0o600)
 
 
+def _ends_with_newline(path: Path) -> bool:
+    size = path.stat().st_size
+    if size == 0:
+        return True
+    with path.open("rb") as file:
+        file.seek(-1, os.SEEK_END)
+        return file.read(1) == b"\n"
+
+
 def append_session_record(path: Path, record: SessionEntry) -> None:
+    payload = encode_record_line(record)
+    if not _ends_with_newline(path):
+        # A file whose final line lacks the newline separator (for example a
+        # hand-edited or truncated copy) must not grow a concatenated record.
+        payload = b"\n" + payload
     with path.open("ab") as file:
-        file.write(encode_record_line(record))
+        file.write(payload)
         _flush(file)
 
 

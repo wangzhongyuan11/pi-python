@@ -1,6 +1,6 @@
 # Pi Agent Python 重写实施计划
 
-> 状态：已冻结，Phase 0 正在实施
+> 状态：P0–P14.5 与 P15-T01–T03 已完成；下一项是 P15-T04。P12 起按“功能闭环优先”路线执行。
 > 上游源码：`D:\pi`
 > 冻结提交：`e14afc648e10fb6c527ea88fa627091ada764306`
 > 上游版本：`0.84.1`
@@ -157,11 +157,17 @@ flowchart TD
 - 异步 SDK 与同步便利封装。
 - Settings、Prompt、Skill、Theme、上下文文件和项目资源信任。
 - Python-native Extension 的工具、命令、flags、快捷键、Provider、认证交互、hooks、renderers、session actions 和 UI。
-- local/Git/PyPI Python 包，以及 npm Pi Package 中的纯数据资源。
+- 官方 Pi `package.json#pi`、约定目录、过滤规则与 local/Git/npm 来源；Skill/Prompt/Theme 直接加载，常用 JS/TS Extension 经 Node Host 无源码修改运行。
 - prompt_toolkit TUI 的功能和动作语义对齐。
 - HTML export、文本剪贴板、文件/图片附件数据契约。
 - 默认关闭的逐工具权限 Extension。
-- GitHub Release wheel/sdist、SHA-256 清单与构建证明。
+- 可从干净环境安装和运行的 wheel；正式 GitHub Release、签名、SHA-256 清单与构建证明延后到发布阶段，不阻塞功能完整里程碑。
+
+产品路线分为三个里程碑：
+
+- **Pi 功能完整**：完成 Phase 12–17。CLI、SDK、TUI、Package、Extension 与本地 RPC 共享同一产品链，所有主要能力有真实端到端路径。
+- **Codex 式本地能力完整**：再完成 Phase 18–20。增加 MCP Host、child agent、后台任务和 worktree task runtime；这些能力采用“核心拥有生命周期，Package 提供策略与 UI”的边界。
+- **发布就绪**：最后完成 Phase 21。补齐安全审计、跨平台 CI、覆盖率、制品证明与正式 1.0 发布。
 
 ### 6.2 明确差异
 
@@ -170,7 +176,7 @@ flowchart TD
 - `.pi/` 只在显式兼容模式下只读挂载或选择性导入。
 - 内建 Provider 只有 DeepSeek；其他 Provider 由 Extension 注册。
 - 内核不保存凭据；DeepSeek 使用 CLI/env/.env，Extension 自行实现认证持久化。
-- 不执行 JS/TS Extension。
+- JS/TS Extension 通过独立 Node Host 运行；不能跨进程表示的上游私有对象和自定义 TUI 组件会明确报告为 unsupported。
 - TUI 不追求上游自研渲染器的逐像素一致。
 - DeepSeek 不支持图片时在请求前明确拒绝；不实现 Kitty/iTerm2 图片协议。
 - macOS 明确不支持。
@@ -184,8 +190,20 @@ flowchart TD
 - SQLite Session 后端。
 - 实验性 protocol/client/server 与远程 Session。
 - 内建多 Provider、内建 OAuth、凭据仓库。
-- Node sidecar/TS Extension 执行。
+- 上游实验性或私有 Extension 内部对象的完全兼容。
 - 终端图片协议与 macOS 支持。
+
+### 6.4 完成 Pi 后与 Codex 的产品差距
+
+Phase 17 得到的是功能完整的本地 Pi Python，而不是完整 Codex。用户已明确要求扩大功能范围，因此以下本地能力进入 Phase 18–20；桌面/云产品仍保留在更远路线：
+
+1. **MCP 与外部工具生态**：先实现 MCP client transport、server lifecycle、tool/resource/prompt 映射与断线恢复；web、数据库、浏览器等能力优先作为 MCP server 接入，不在核心重复实现。
+2. **subagent、后台任务与工作树隔离**：在 `AgentSessionRuntime` 之上增加 child task、状态/事件聚合、取消、资源预算和 Git worktree ownership；不要把 subagent 直接塞进单个 Agent Loop。
+3. **权限、sandbox 与变更审阅**：为公开分发增加 OS 级进程/文件边界、可配置审批策略、命令允许表、diff/patch 预览和提交前 review；这是 Codex 级安全体验，不是 Pi 功能闭环前置。
+4. **桌面/云协作产品**：任务列表、持久后台执行、跨设备同步、浏览器/终端/review 面板、团队权限和远程执行属于独立产品层，应复用 RPC/MCP，不污染本地 Agent 内核。
+5. **模型与多模态广度**：保持 Provider Extension 接口，按需增加 OpenAI/Anthropic 等 Provider、图片理解和更丰富输入；模型目录扩展不应改变 Agent/Session 契约。
+
+实现边界固定为：Package 只负责安装、配置、能力声明和 UI；Extension 负责注册工具、命令、Provider 与 hooks；连接、进程、并发、取消、持久化、cwd/worktree ownership 和资源释放由核心 Host 服务负责。MCP 最先实现；subagent 依赖稳定的 shared bootstrap、RPC 和 lifecycle，因此必须在 Phase 15–16 之后；桌面/云产品最后再做。
 
 ## 7. 阶段路线图
 
@@ -293,24 +311,84 @@ flowchart TD
 
 - **1.0 必须实现**：grep/find/ls 生产接线、readonly 工具集、工具开关 flags、`defaultTools`、threshold 自动压缩、`/compact`、vision 模型目录 + read 图片 + 附件端到端、edit diff/模糊匹配/TUI diff 摘要、bash PI_* 与 shellCommandPrefix、binDir PATH、流节流、`--name`、session repair、打开即创建、工具描述截断说明。
 - **Intentional divergence**（记录于 ADR/矩阵既有行）：核心沙箱与逐工具审批（TOOL-010 既有行，与上游一致，permission gate 默认关闭扩展已随包）；bash `spawnHook` 选项（Python 等价能力由 EXT-005 tool_execution hooks 提供，不复制该构造参数）；`app.clipboard.pasteImage` 图形剪贴板二进制读取（P11-T06 已定 divergence：附件走文件路径契约，OSC-52 只写不读）；鼠标支持（上游 alt-screen 有 mouse，冻结矩阵无 mouse action 行，pi_tui 不做鼠标）；`lastChangelogVersion`/`collapseChangelog` 键（settings 读取层已兼容接受，无上游自动更新 UI 行为）；Session 大文件 O(n·depth) 全量校验（可接受边界，见下）。
-- **Post-v1**（明确范围）：MCP client、subagent、后台任务、web 搜索工具（均非冻结上游 Pi 表面，非矩阵行）；`@`-mention 文件补全 UI（`@file` 数据路径由 P12-T02 提供，交互补全 UI 延后）；constrained sampling。
+- **Post-v1 分类、现已排期**：MCP client、subagent、后台任务和基于 MCP 的 web 搜索（均非冻结上游 Pi 表面，保持矩阵 `Post-v1` 分类，但已进入 Phase 18–20）；**仍未排期**：`@`-mention 交互补全 UI（`@file` 数据路径由 P17-T01 提供）与 constrained sampling。
 - **误报**（上游/源码证据）：持久输入历史（上游 editor 历史同样仅在内存，无持久化文件）；图片粘贴缺失（附件契约与 `/attach` 图片路径已存在，缺的是 vision 模型目录，由 P11.5-T07/T08 补齐）。
 
 Session 审计边界补充：catalog cwd 过滤在 Windows 盘符大小写与目录改名场景的行为、UNC/相对 cwd 编码，在 P11.5-T17 一并以测试固定；大 Session 全量载入 + 双重校验的成本边界记录于 ADR 0003 附录，不做流式重写。
 
 验收：Phase 11.5 全部任务原子提交；真实验收轮（P11.5-T19）覆盖 `--tools all` 真实 grep/find/ls、降低阈值自动压缩、vision 读真实截图、智能引号/NFKC edit、撕裂行 repair、ripgrep/fd pinned 下载 SHA256 校验、DeepSeek headless、JSON、regular TUI 多轮。
 
-### Phase 12：完整稳定产品面
+### Phase 12：共享产品组合主干
 
-关闭所有 1.0 Supported surface；完整 CLI、`@file`、package/offline/trust/export；明确 `--approve` 只表示项目资源信任；安全 HTML export；本地 JSONL RPC 与 RpcClient；所有入口复用 bootstrap；Darwin 清晰拒绝。
+先建立所有后续能力共同依赖的组合根。保留已经开始的 P12-T01，只把它限定为静态 CLI 参数、子命令和 Extension 未知 flag 的第一阶段解析；不在一个任务中实现所有命令行为。随后把 Settings、project trust、ResourceLoader、PackageManager、ExtensionRuntime、ModelRuntime、Tools、SessionManager 组合成唯一 runtime factory，并让 CLI、SDK、headless/TUI 以及 Session new/resume/fork/switch 复用它。
 
-验收：CLI subprocess；stdout 纯净；RPC framing/backpressure；Session/fork/compaction/Extension UI 契约；独立 checkpoint 任务更新版本与 changelog、仓库外 wheel smoke，用户确认后才 tag/release `0.6.0`。
+验收：同一 fixture 通过 SDK、headless CLI 和 TUI 获得相同 Settings、资源、工具和 Extension descriptors；Session 切换到不同 cwd 后旧服务关闭、新服务重建；不存在“SDK 可用但 CLI 不可用”的默认接线分叉。
 
-### Phase 13：差分、Evals、安全与 1.0
+### Phase 13：Pi Package 与资源闭环
 
-建立规范化 TypeScript oracle、历史 regression、双语文档、安全/依赖/secret 审查、仓库外全新 HOME 安装、Release artifacts/attestation，以及经批准的 Flash/Pro smoke。
+按纵向切片实现 Package，而不是先铺满所有来源。顺序为：本地 Package 安装并持久化 → Package 内 Skill/Prompt/Theme 被 ResourceLoader 发现 → list/config/remove → Git/PyPI → npm 纯数据 → update/offline → CLI 完整命令。Package 是资源分发层；一次安装必须能够在重启后影响真实 Agent/TUI，而不仅是生成锁文件。
 
-验收：所有静态/离线 CI 全绿；Windows/Ubuntu × 3.12/3.13；关键模块 branch coverage ≥90%；surface 无未分类 Supported；发布 `0.9` RC，用户验收后 `1.0`。
+验收：一个本地黄金 Package 可被 `install`，重启后 Skill/Prompt/Theme 仍可用，config 可启停，update 可替换，remove 后不再发现；Git/PyPI/npm 与 offline 分别有确定性 fixture；失败安装不破坏旧版本；最终通过真实 DeepSeek API 和真实 TUI 进程完成多轮资源驱动任务，而不是以 SDK/AgentSession 代替 TUI。
+
+### Phase 14：Python Extension 完整运行时
+
+把已有 loader、registry、HookRunner、UI/Auth ports 和 lifecycle 接进 AgentSession。显式 CLI Extension 与用户主动安装的全局 Package 直接按用户意图加载；项目 Extension 只受 project trust 控制，避免再建立一套没有产品入口的临时 `grant_trust()` 状态。先完成 Tool/Command/Provider 的正常产品路径，再分组接入 Agent/Turn/Message、Tool、Context/Provider、Session 事件与 actions，最后接动态 flags、shortcuts、UI、renderers、reload 和 stale-context 处理。纳入最新 Pi 增量：`ui_prompt_start`/`ui_prompt_end`、全量工具注册表与 active tool 集合、纯增量动态工具激活、deferred-tool 元数据及普通 Provider 回退；Extension 创建的长生命周期资源必须登记 teardown。
+
+验收：黄金 Extension 通过正常 CLI/Package 路径注册 Tool、Command、Provider、Flag、Skill 和 hook；Agent 实际调用扩展 Tool，TUI 执行扩展 Command，Provider 可选；new/fork/switch/reload 后旧 generation teardown 且事件不再触发，失败 Extension 不影响其他 Extension；最终使用真实 DeepSeek API 驱动真实 TUI 进程调用扩展能力并完成多轮任务。
+
+### Phase 14.5：官方 Package 兼容基础
+
+在不执行 Node 代码的前提下先兼容上游 Package 数据契约。增加 npm、Git URL/简写和本地来源规范化，解析 `package.json#pi`、约定资源目录、glob、排除与强制包含规则；递归加载 Skill，保持 Prompt/Theme 语义。安全解包 npm 完整内容并保留 JS/TS Extension，但安装阶段不运行 lifecycle scripts。统一输出 `native`、`portable`、`bridged`、`unsupported` 能力报告，避免安装成功后静默丢失功能。决策和边界见 ADR 0009。
+
+验收：上游风格本地与离线 npm fixture 可安装并在重启后加载 Skill/Prompt/Theme；JS/TS 文件被保留且准确报告为 `bridged`，不会在 Node Host 完成前执行；过滤和路径逃逸均有行为测试；现有 Python Package/Extension 全部保持兼容。
+
+### Phase 15：CLI、TUI 与本地 RPC 完整产品模式
+
+在共享 bootstrap 和完整 Extension runtime 上完成用户入口。先完成动态 help/flags、Package/trust/offline 命令和 Extension commands，再实现 strict-LF JSONL RPC schema、server、完整 AgentSession commands、Extension UI bridge 与 Python RpcClient。RPC 只是同一 AgentSession 的另一种适配器，不拥有第二套业务逻辑；包含最新 Pi 的 `clear_queue`，并允许长时间工具使用调用方可控超时而不是固定 60 秒。
+
+验收：同一 Session 可通过 CLI/TUI/RPC 执行 prompt、steer、abort、tool、compact、model、fork/switch 和 Extension UI；RPC stdout 只含协议帧，慢消费者有界；RpcClient 正确处理乱序 response/event、退出与清理。
+
+### Phase 15.5：Node/TypeScript Extension Host
+
+在 Phase 15 的通信基础上增加版本化 Node Host。使用 Jiti 原生加载 `.ts`/`.js` 与官方 default factory，不做源码翻译；为 Tool、Command、Flag、Shortcut、事件/hook、Session actions 和简单可序列化 UI 建立双向代理。每个 Package 使用自己的模块根和运行时依赖；Host 支持握手、能力协商、取消、超时、reload generation、崩溃诊断和干净退出。高级 `pi-tui` 组件、私有 AgentSession 对象和尚未映射的 Provider/OAuth 能力必须显式拒绝。
+
+验收：至少一个真实公开 Pi Package 和本地官方风格 fixture 可无源码修改安装；真实 DeepSeek + 真实 TUI 调用 TypeScript Tool/Command/hook 并完成多轮 Session 恢复；Host 崩溃、reload、switch 和退出不遗留进程，unsupported API 有稳定诊断。
+
+### Phase 16：功能可靠性与上游语义差分
+
+把原计划中最有价值的 P13 内容提前：TypeScript/Python 语义差分、历史 regression 和 Python/TypeScript 黄金 Package/Extension 端到端测试。差分比较事件顺序、状态变化和可观察结果，不比较时间、ID、绝对路径或模型自然语言。使用本地 FakeProvider、临时 Git/PyPI/npm fixture 和 subprocess/PTY，避免把 mock 单元测试当成产品可用证明。最新 Pi 增量回归至少覆盖：JSONL 尾行无换行恢复、Extension 插入消息不拆开 ToolCall/ToolResult、大工具结果在下一 Provider 请求前自动压缩、并行工具结果逐个持久化、Extension/MCP 子进程在 reload/退出时清理。
+
+验收：Python 与 TypeScript 黄金 Package 均覆盖 install → restart → Agent 调用扩展 Tool → TUI Command → Session switch/reload → RPC → update → remove；冻结上游核心场景语义 diff 通过；已确认历史问题每项有独立 regression。
+
+### Phase 17：次要但属于 1.0 的产品表面
+
+最后补齐不阻塞 Agent/Extension 主链的表面：`@file` 参数、文本/图片附件统一输入、HTML export、文档化帮助与必要的剪贴板适配。它们复用 Phase 12 的 bootstrap、Phase 14 的 renderers 和 Phase 15 的 RPC，不再产生独立实现。
+
+验收：CLI/SDK/TUI/RPC 对同一附件生成一致消息；HTML export 可读取真实 Session 并应用 Extension renderer；帮助、README 和实际 subprocess 输出一致。完成 Phase 17 即达到“功能完整”里程碑，可作为本地完整 Pi Python 产品使用。
+
+### Phase 18：MCP Host 与外部工具生态
+
+在 `ProductRuntime` 下增加核心 `McpHost`，统一拥有 stdio/HTTP/SSE 连接、Server 子进程、重连、取消、超时、认证引用和 teardown。MCP Server 配置、特定适配、工具选择策略与 UI 通过 Package/Extension 提供。工具目录使用 Phase 14 的全量 registry + active set：默认只激活搜索/加载工具，按需增加匹配的 MCP 工具，避免每轮发送全部 schema。Web、浏览器、数据库等不在 Agent Loop 内重复实现，优先通过 MCP Package 接入。
+
+验收：本地 fixture MCP Server 可经 Package 安装、启动、发现 Tool/Resource/Prompt、动态激活并由真实 Agent 调用；abort、reload、Session switch 和进程退出均不遗留 Server；断线和超时产生结构化错误且下一轮可恢复。
+
+### Phase 19：Child Agent 与后台任务
+
+在共享 runtime factory 上提供核心 `ChildAgentHost` 与持久 `TaskRegistry`。child 默认隔离历史，只显式继承 model/auth/tools/cwd；统一限制递归深度、并发数、token/时间/输出预算，并聚合状态、事件、usage、取消和失败。Package 定义 explorer/reviewer/tester 等角色、提示词、命令和 TUI；不得以裸 `pi --mode json` 子进程作为唯一产品契约。
+
+验收：父 Agent 可启动、观察、取消和等待单个或并行 child task；失败/超时不是普通成功 ToolResult；重启后任务状态可恢复；输出、token、成本和递归均有界；RPC 与 TUI 看到同一任务状态。
+
+### Phase 20：Worktree Task Runtime 与本地编排
+
+worktree 必须在 SessionManager、ResourceLoader、ExtensionRuntime 和工具创建前建立。核心拥有 create/reuse/cleanup、base ref、dirty-state 策略和 task ownership；ChildAgent/TaskRegistry 只接收已经解析的 workspace context。Package 可提供工作流和策略，但不能在 Extension 激活后偷偷切换进程 cwd。
+
+验收：一个父任务可在独立 worktree 中运行 child 完整任务，不污染父 checkout；Session、资源、工具和 Git 状态全部指向 worktree；取消、失败、重启和清理都有确定状态，未合并工作不会被自动删除。
+
+### Phase 21：安全、跨平台与正式发布（低优先级）
+
+在本地功能阶段完成后再处理威胁/依赖/secret 审查、跨平台 CI、coverage 门、全新 HOME wheel 安装、Release artifacts/attestation、Flash/Pro live smoke 和 1.0 发布。此阶段不新增核心产品能力，只证明可分发、可审计和可恢复。
+
+验收：所有静态/离线 CI 全绿；Windows/Ubuntu × 3.12/3.13；关键模块 branch coverage ≥90%；surface 每一行都链接到实现测试或明确 Post-v1；发布 `0.9` RC，用户验收后再发布 `1.0`。
 
 ## 8. 全局测试与安全门
 
@@ -318,14 +396,22 @@ Session 审计边界补充：catalog cwd 过滤在 Windows 盘符大小写与目
 
 - 在 test collection 前隔离 HOME、cwd、API Key、用户配置、缓存和 Git 全局影响。
 - 默认阻断 Python socket/DNS、Python child process 与常见 Python 网络客户端，并设置 offline proxy/env；这是可测试的 Python 进程边界，不宣称提供 OS 级任意原生进程防火墙。
-- `network`/真实 Provider 测试必须同时显式 env opt-in、使用独立 marker，并在每次运行前获得用户批准。
+- `network`/真实 Provider 测试必须同时显式 env opt-in 并使用独立 marker。DeepSeek 已获用户持续授权；其他真实 Provider 每次运行前仍需批准。
 - 固定时钟、ID、随机数。
 - 使用 FakeProvider 驱动 Agent/Session/CLI，避免 mock 内部实现细节。
 - 对 API Key、Authorization header、`.env` 与错误 repr 做泄漏测试。
 - 使用本地 pre-commit 与 CI secret scan；冻结 `uv.lock` 并审计依赖。
 - 不运行会修改 `D:\pi` 的 formatter、check 或 codegen。
 
-1.0 发布阻断场景：
+真实 Provider 验收轨（不属于默认测试门）：
+
+- 测试位于 `tests/live/`，同时使用 `live_provider` 与 `network` marker，并要求 `PI_PYTHON_ALLOW_LIVE_PROVIDER_TESTS=1`、`PI_PYTHON_ALLOW_NETWORK_TESTS=1` 和 Provider 专用执行开关。
+- DeepSeek 真实运行使用用户持续授权，不再逐次询问，但每项测试必须内建请求数、token、超时和总成本硬上限；其他真实 Provider 仍需对本次命令明确批准。
+- 凭据只从进程环境或显式 `--env-file` 读取，不打印、不写报告、不复制到 fixture；失败输出也必须通过泄漏检查。
+- 使用临时 HOME 和一次性 Git 项目，设置请求数、max tokens、超时和总成本上限；验证真实文件、测试结果、Session 记录和多轮行为，不断言模型自然语言完全一致。
+- Phase 12 live 验收覆盖共享 bootstrap、真实工具调用、Session 延续和跟进修正；Phase 13 live 验收覆盖 Package 安装后 Skill/Prompt/Theme 在真实 TUI 进程中的多轮行为；Phase 14 live 验收覆盖 Extension Tool/Command/hook 在真实 TUI 中的调用。SDK/AgentSession 直连测试不能替代 Phase 13/14 的 TUI 验收。
+
+Phase 21 正式发布阻断场景（不阻塞 Phase 17 Pi 功能完整验收）：
 
 - 多工具并行完成、按模型顺序持久化。
 - abort 后无迟到事件。
@@ -357,4 +443,4 @@ Session 审计边界补充：catalog cwd 过滤在 Windows 盘符大小写与目
 - `.env` 默认只读 cwd，可用 `--env-file` 指定。
 - Windows/Linux 正式支持；macOS 拒绝。
 - local RPC 属于 1.0；远程协议属于 Post-1.0。
-- 任何 live API 测试都必须在当次运行前获得用户批准。
+- DeepSeek live API 测试使用持续授权和硬预算；其他 live API 测试必须在当次运行前获得用户批准。

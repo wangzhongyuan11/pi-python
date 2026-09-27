@@ -267,6 +267,26 @@ class DeepSeekProvider:
                 thinking_level=self._thinking_level,
                 max_tokens=self._max_tokens,
             )
+            if options is not None and options.on_payload is not None:
+                payload = await options.on_payload(request, model)
+                if not isinstance(payload, dict):
+                    raise TypeError("DeepSeek request payload hook must return a dict")
+                request = cast("dict[str, Any]", payload)
+            if options is not None and options.transform_headers is not None:
+                raw_headers = request.get("extra_headers")
+                headers: dict[str, str | None] = (
+                    dict(cast("dict[str, str | None]", raw_headers))
+                    if isinstance(raw_headers, dict)
+                    else {}
+                )
+                transformed = await options.transform_headers(headers, model)
+                cleaned = {
+                    name: value for name, value in transformed.items() if isinstance(value, str)
+                }
+                if cleaned:
+                    request["extra_headers"] = cleaned
+                else:
+                    request.pop("extra_headers", None)
             client = self._client_factory(credential, model.base_url, self._timeout_seconds)
 
             for attempt in range(self._max_request_retries + 1):

@@ -44,10 +44,14 @@ Do not weaken, delete, skip, or over-mock a test to make it pass.
 - Treat model output, project resources, Session data, package metadata, paths, and tool arguments as untrusted.
 - Never commit `.env`, credentials, Authorization headers, tokens, private keys, or captured secret values.
 - Never print secret values in tests, logs, exceptions, diffs, or review output.
-- Never run live Provider tests without explicit approval for that exact run.
+- The user grants standing authorization for capped DeepSeek live validation. It does not
+  require per-run approval while the run uses explicit opt-ins, a disposable workspace,
+  and hard request, token, timeout, and cost ceilings. Any other live Provider still needs
+  explicit approval for that exact run.
 - Default tests must remain isolated from real HOME/cwd/configuration and use fake
   operations for native subprocesses; network/live markers also require their
-  explicit environment opt-in and approval for that exact run.
+  explicit environment opt-in. DeepSeek runs use the standing authorization above;
+  other live Providers require approval for that exact run.
 - Do not run `npm run check`, formatters, code generation, or any other mutation-capable command in `D:\pi`.
 - Read upstream directly or work on a disposable copy when an experiment is necessary.
 

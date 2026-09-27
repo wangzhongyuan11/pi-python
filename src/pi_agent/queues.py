@@ -14,12 +14,16 @@ class PendingMessageQueue:
     __slots__ = ("_messages", "mode")
 
     def __init__(self, *, mode: QueueMode = "one-at-a-time") -> None:
-        self.mode = mode
+        self.mode: QueueMode = mode
         self._messages: deque[AgentMessage] = deque()
 
     @property
     def has_items(self) -> bool:
         return bool(self._messages)
+
+    @property
+    def count(self) -> int:
+        return len(self._messages)
 
     def enqueue(self, message: AgentMessage) -> None:
         self._messages.append(message)

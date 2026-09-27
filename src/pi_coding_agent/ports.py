@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pi_agent import AgentTool
 from pi_ai import JsonValue, Provider
@@ -17,6 +17,37 @@ type ResourceKind = Literal["context", "extension", "prompt", "skill", "theme"]
 type ResourceSource = Literal[
     "builtin", "compatibility", "explicit", "global", "package", "project"
 ]
+type PackageScope = Literal["user", "project"]
+
+
+@dataclass(frozen=True, slots=True)
+class ConfiguredPackage:
+    source: str
+    scope: PackageScope
+    filtered: bool
+    enabled: bool = True
+    installed_path: Path | None = None
+
+
+@runtime_checkable
+class PackageManager(Protocol):
+    def add_source(self, source: str, *, scope: PackageScope = "user") -> bool: ...
+
+    def remove_source(self, source: str, *, scope: PackageScope = "user") -> bool: ...
+
+    def list_configured_packages(self) -> tuple[ConfiguredPackage, ...]: ...
+
+    def install_local(
+        self, source: str | Path, *, scope: PackageScope = "user"
+    ) -> tuple[ResourceRoot, ...]: ...
+
+    def resource_roots(self) -> tuple[ResourceRoot, ...]: ...
+
+    def set_enabled(self, source: str, enabled: bool, *, scope: PackageScope = "user") -> bool: ...
+
+    def remove_installed(self, source: str, *, scope: PackageScope = "user") -> bool: ...
+
+    def update(self, source: str | None = None, *, offline: bool = False) -> tuple[str, ...]: ...
 
 
 class Settings(Protocol):
@@ -50,6 +81,15 @@ class ResourceDescriptor:
     metadata: Mapping[str, JsonValue] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ResourceRoot:
+    """One already-resolved resource input shared by discovery and extensions."""
+
+    kind: ResourceKind
+    path: Path
+    source: Literal["explicit", "package"]
+
+
 class ResourceLoader(Protocol):
     def discover(self, cwd: Path) -> tuple[ResourceDescriptor, ...]: ...
 
@@ -67,6 +107,12 @@ class ExtensionRuntime(Protocol):
     @property
     def providers(self) -> tuple[Provider, ...]: ...
 
+    async def emit(self, event: object) -> tuple[object, ...]: ...
+
+    async def emit_chained(
+        self, event: object, apply_result: Callable[[object, object], None]
+    ) -> tuple[object, ...]: ...
+
     async def start(self) -> tuple[ResourceDescriptor, ...]: ...
 
     async def close(self) -> None: ...
@@ -79,6 +125,16 @@ class NoopExtensionRuntime:
 
     @property
     def providers(self) -> tuple[Provider, ...]:
+        return ()
+
+    async def emit(self, event: object) -> tuple[object, ...]:
+        del event
+        return ()
+
+    async def emit_chained(
+        self, event: object, apply_result: Callable[[object, object], None]
+    ) -> tuple[object, ...]:
+        del event, apply_result
         return ()
 
     async def start(self) -> tuple[ResourceDescriptor, ...]:
@@ -112,15 +168,19 @@ class DefaultSessionImporter:
 
 
 __all__ = [
+    "ConfiguredPackage",
     "DefaultSessionImporter",
     "ExtensionRuntime",
     "InMemorySettings",
     "NoopExtensionRuntime",
     "NoopResourceLoader",
     "NoopSessionExporter",
+    "PackageManager",
+    "PackageScope",
     "ResourceDescriptor",
     "ResourceKind",
     "ResourceLoader",
+    "ResourceRoot",
     "ResourceSource",
     "SessionExporter",
     "SessionImporter",

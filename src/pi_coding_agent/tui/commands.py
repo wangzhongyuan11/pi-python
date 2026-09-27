@@ -22,7 +22,7 @@ class CommandOutcome:
 class CommandSpec:
     name: str
     source: str
-    handler: Callable[[str], CommandResult | Awaitable[CommandResult]]
+    handler: Callable[..., CommandResult | Awaitable[CommandResult]]
 
 
 def _error(text: str) -> CommandOutcome:
@@ -32,14 +32,17 @@ def _error(text: str) -> CommandOutcome:
 class CommandDispatcher:
     """Routes ``/name args`` input lines to registered handlers."""
 
-    __slots__ = ("_commands",)
+    __slots__ = ("_commands", "_context")
 
-    def __init__(self) -> None:
+    def __init__(self, *, context: object | None = None) -> None:
         self._commands: dict[str, CommandSpec] = {}
+        self._context = context
 
     @classmethod
-    def from_registry(cls, registry: CapabilityRegistry) -> CommandDispatcher:
-        dispatcher = cls()
+    def from_registry(
+        cls, registry: CapabilityRegistry, *, context: object | None = None
+    ) -> CommandDispatcher:
+        dispatcher = cls(context=context)
         dispatcher.register_registry(registry)
         return dispatcher
 
@@ -56,7 +59,7 @@ class CommandDispatcher:
                         name=registration.name,
                         source=registration.source,
                         handler=cast(
-                            "Callable[[str], CommandResult | Awaitable[CommandResult]]",
+                            "Callable[..., CommandResult | Awaitable[CommandResult]]",
                             registration.payload,
                         ),
                     )
@@ -64,6 +67,15 @@ class CommandDispatcher:
             except RegistryConflictError:
                 skipped.append(registration.name)
         return tuple(skipped)
+
+    def refresh_registry(
+        self, registry: CapabilityRegistry, *, context: object | None = None
+    ) -> tuple[str, ...]:
+        self._commands = {
+            name: spec for name, spec in self._commands.items() if spec.source == "builtin"
+        }
+        self._context = context
+        return self.register_registry(registry)
 
     def register(self, spec: CommandSpec) -> None:
         if spec.name in self._commands:
@@ -82,7 +94,7 @@ class CommandDispatcher:
         if spec is None:
             return _error(f"unknown command: /{name}")
         try:
-            result = spec.handler(args.strip())
+            result = _invoke_with_optional_context(spec.handler, args.strip(), self._context)
             if inspect.isawaitable(result):
                 result = await result
         except Exception as error:
@@ -92,4 +104,78 @@ class CommandDispatcher:
         return result or CommandOutcome(kind="none")
 
 
-__all__ = ["CommandDispatcher", "CommandOutcome", "CommandSpec"]
+class ShortcutDispatcher:
+    """Routes normalized TUI key identifiers to extension handlers."""
+
+    __slots__ = ("_context", "_shortcuts")
+
+    def __init__(self, *, context: object | None = None) -> None:
+        self._context = context
+        self._shortcuts: dict[str, Callable[..., object]] = {}
+
+    @classmethod
+    def from_registry(
+        cls, registry: CapabilityRegistry, *, context: object | None = None
+    ) -> ShortcutDispatcher:
+        dispatcher = cls(context=context)
+        for registration in registry.registrations("shortcut"):
+            if callable(registration.payload):
+                dispatcher._shortcuts[_normalize_shortcut(registration.name)] = registration.payload
+        return dispatcher
+
+    def refresh_registry(
+        self, registry: CapabilityRegistry, *, context: object | None = None
+    ) -> None:
+        self._context = context
+        self._shortcuts.clear()
+        for registration in registry.registrations("shortcut"):
+            if callable(registration.payload):
+                self._shortcuts[_normalize_shortcut(registration.name)] = registration.payload
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(self._shortcuts)
+
+    async def dispatch(self, name: str) -> bool:
+        handler = self._shortcuts.get(_normalize_shortcut(name))
+        if handler is None:
+            return False
+        try:
+            result = _invoke_shortcut(handler, self._context)
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            # Shortcut failures must not terminate the interactive input loop.
+            return True
+        return True
+
+
+def _invoke_with_optional_context(
+    handler: Callable[..., CommandResult | Awaitable[CommandResult]],
+    args: str,
+    context: object | None,
+) -> CommandResult | Awaitable[CommandResult]:
+    if context is not None and _accepts(handler, args, context):
+        return handler(args, context)
+    return handler(args)
+
+
+def _invoke_shortcut(handler: Callable[..., object], context: object | None) -> object:
+    if context is not None and _accepts(handler, context):
+        return handler(context)
+    return handler()
+
+
+def _accepts(handler: Callable[..., object], *args: object) -> bool:
+    try:
+        inspect.signature(handler).bind(*args)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _normalize_shortcut(name: str) -> str:
+    return "+".join(part.strip().casefold() for part in name.split("+") if part.strip())
+
+
+__all__ = ["CommandDispatcher", "CommandOutcome", "CommandSpec", "ShortcutDispatcher"]

@@ -1,0 +1,5 @@
+{
+  "name": "fixture-extension",
+  "version": "0.1.0",
+  "entry": "main.py"
+}

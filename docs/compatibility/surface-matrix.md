@@ -50,7 +50,7 @@
 | `CLI-FLAG-023` | `--no-builtin-tools`, `-nbt` | Supported | 只禁用七个内建工具 | `packages/coding-agent/src/cli/args.ts:L121-L122` | `pi_coding_agent.tools` / P5,P12 |
 | `CLI-FLAG-024` | `--tools`, `-t <names>` | Supported | 所有工具的 allowlist | `packages/coding-agent/src/cli/args.ts:L123-L127` | `pi_coding_agent.tools` / P5,P12 |
 | `CLI-FLAG-025` | `--exclude-tools`, `-xt <names>` | Supported | 所有工具的 denylist；deny 优先 | `packages/coding-agent/src/cli/args.ts:L128-L132` | `pi_coding_agent.tools` / P5,P12 |
-| `CLI-FLAG-026` | `--extension`, `-e <path>` | Supported | 仅加载 Python Extension；可重复 | `packages/coding-agent/src/cli/args.ts:L152-L154` | `pi_coding_agent.extensions` / P10 |
+| `CLI-FLAG-026` | `--extension`, `-e <path>` | Supported | Python 原生；JS/TS 经版本化 Node Host；可重复 | `packages/coding-agent/src/cli/args.ts:L152-L154`; [ADR 0009](../decisions/0009-dual-runtime-package-extensions.md) | `pi_coding_agent.extensions` / P10,P15 |
 | `CLI-FLAG-027` | `--no-extensions`, `-ne` | Supported | 停止 discovery；显式 `-e` 仍加载 | `packages/coding-agent/src/cli/args.ts:L155-L156` | `pi_coding_agent.extensions` / P10 |
 | `CLI-FLAG-028` | `--skill <path>` | Supported | 可重复的临时 Skill 来源 | `packages/coding-agent/src/cli/args.ts:L157-L159` | `pi_coding_agent.resources` / P7 |
 | `CLI-FLAG-029` | `--no-skills`, `-ns` | Supported | 禁止 discovery | `packages/coding-agent/src/cli/args.ts:L174-L175` | `pi_coding_agent.resources` / P7 |
@@ -200,9 +200,9 @@
 | `EXT-017` | shared EventBus | Supported | runtime invalidation 时自动退订 | `packages/coding-agent/src/core/extensions/types.ts:L1434-L1437,L1600-L1624`; `packages/coding-agent/src/core/extensions/loader.ts:L206-L224` | `pi_coding_agent.extensions` / P10 |
 | `EXT-018` | handler failure isolation/ExtensionError | Supported | 捕获、诊断、不中断其他 extension；stack 不出 wire | `packages/coding-agent/src/core/extensions/types.ts:L1712-L1727`; `packages/coding-agent/src/core/extensions/runner.ts:L801-L832` | `pi_coding_agent.extensions` / P10 |
 | `EXT-019` | tool_call 参数原地修改后“不重新校验” | Intentional divergence | Python 修改后重新 Pydantic 校验 | `packages/coding-agent/src/core/extensions/types.ts:L899-L904` | `pi_coding_agent.extensions` / P10 |
-| `EXT-020` | JS/TS/Jiti Extension 执行 | Intentional divergence | 只执行 Python Extension | `packages/coding-agent/src/core/extensions/loader.ts:L1-L17,L436-L463,L490-L515`; `packages/coding-agent/package.json:L60` | `pi_coding_agent.extensions` / P10 |
-| `EXT-021` | npm package executable code/lifecycle scripts | Intentional divergence | npm 只读取纯数据，使用 `pack --ignore-scripts` 等价安全流程 | 上游 npm install：`packages/coding-agent/src/core/package-manager.ts:L1758-L1784` | `pi_coding_agent.resources` / P10 |
-| `EXT-022` | Node sidecar compatibility | Post-v1 | 不在 1.0 启动 Node | `packages/coding-agent/src/core/extensions/loader.ts:L1-L29,L436-L463` | `pi_coding_agent.extensions` / Post-v1 |
+| `EXT-020` | JS/TS/Jiti Extension 执行 | Supported | Node Host 原生加载，能力协商后代理到 Python 产品；不翻译源码 | `packages/coding-agent/src/core/extensions/loader.ts:L1-L17,L436-L463,L490-L515`; [ADR 0009](../decisions/0009-dual-runtime-package-extensions.md) | `pi_coding_agent.extensions` / P15 |
+| `EXT-021` | npm package executable code/lifecycle scripts | Supported | 安装先安全解包且不运行 scripts；Node Host 阶段安装依赖并执行受支持 Extension 入口 | 上游 npm install：`packages/coding-agent/src/core/package-manager.ts:L1758-L1784`; [ADR 0009](../decisions/0009-dual-runtime-package-extensions.md) | `pi_coding_agent.resources` / P14,P15 |
+| `EXT-022` | Node sidecar compatibility | Supported | 版本握手、能力协商、取消、reload、崩溃隔离和 teardown | `packages/coding-agent/src/core/extensions/loader.ts:L1-L29,L436-L463`; [ADR 0009](../decisions/0009-dual-runtime-package-extensions.md) | `pi_coding_agent.extensions` / P15 |
 
 ## 7. TUI actions
 
@@ -255,13 +255,13 @@ macOS 平台整体为 `Intentional divergence`，在启动时清晰拒绝；这�
 | `SETTING-017` | `quietStartup` | Supported | CLI/TUI startup verbosity | `packages/coding-agent/src/core/settings-manager.ts:L106` | `pi_coding_agent.cli` / P7,P12 |
 | `SETTING-018` | `defaultProjectTrust` | Supported | global-only `ask\|always\|never` | `packages/coding-agent/src/core/settings-manager.ts:L69-L70,L107` | `pi_coding_agent.resources` / P7 |
 | `SETTING-019` | `shellCommandPrefix` | Supported | 每条 bash 前缀；视为用户授权代码 | `packages/coding-agent/src/core/settings-manager.ts:L108` | `pi_coding_agent.tools` / P5,P7 |
-| `SETTING-020` | `npmCommand` | Intentional divergence | 不以 npm install 执行 Extension；npm data adapter 使用固定安全命令 | `packages/coding-agent/src/core/settings-manager.ts:L109` | `pi_coding_agent.resources` / P10 |
+| `SETTING-020` | `npmCommand` | Supported | Package fetch/依赖安装使用显式命令数组；安装阶段不执行 Extension | `packages/coding-agent/src/core/settings-manager.ts:L109`; [ADR 0009](../decisions/0009-dual-runtime-package-extensions.md) | `pi_coding_agent.resources` / P14,P15 |
 | `SETTING-021` | `collapseChangelog` | Supported | update UI | `packages/coding-agent/src/core/settings-manager.ts:L110` | `pi_coding_agent.cli` / P12 |
 | `SETTING-022` | `enableInstallTelemetry` | Post-v1 | 1.0 不发送安装 ping | `packages/coding-agent/src/core/settings-manager.ts:L111` | `pi_telemetry` / Post-v1 |
 | `SETTING-023` | `enableAnalytics` | Post-v1 | 1.0 无远程 analytics | `packages/coding-agent/src/core/settings-manager.ts:L112` | `pi_telemetry` / Post-v1 |
 | `SETTING-024` | `trackingId` | Post-v1 | 1.0 不生成远程 tracking id | `packages/coding-agent/src/core/settings-manager.ts:L113` | `pi_telemetry` / Post-v1 |
 | `SETTING-025` | `packages` 与 object filters `autoload/extensions/skills/prompts/themes` | Supported | local/Git/PyPI Python；npm 纯数据；trust/lock | `packages/coding-agent/src/core/settings-manager.ts:L79-L89,L114` | `pi_coding_agent.resources` / P10 |
-| `SETTING-026` | `extensions` | Supported | 本地 Python Extension paths | `packages/coding-agent/src/core/settings-manager.ts:L115` | `pi_coding_agent.extensions` / P10 |
+| `SETTING-026` | `extensions` | Supported | 本地 Python 与 JS/TS Extension paths；后者经 Node Host | `packages/coding-agent/src/core/settings-manager.ts:L115`; [ADR 0009](../decisions/0009-dual-runtime-package-extensions.md) | `pi_coding_agent.extensions` / P10,P15 |
 | `SETTING-027` | `skills` | Supported | Skill paths | `packages/coding-agent/src/core/settings-manager.ts:L116` | `pi_coding_agent.resources` / P7 |
 | `SETTING-028` | `prompts` | Supported | Prompt template paths | `packages/coding-agent/src/core/settings-manager.ts:L117` | `pi_coding_agent.resources` / P7 |
 | `SETTING-029` | `themes` | Supported | Theme paths | `packages/coding-agent/src/core/settings-manager.ts:L118` | `pi_coding_agent.resources` / P7,P11 |

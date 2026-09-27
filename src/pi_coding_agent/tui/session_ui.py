@@ -21,9 +21,9 @@ class _Summary(Protocol):
 
 
 class RuntimeLike(Protocol):
-    async def switch(self, manager: SessionManager) -> None: ...
+    async def switch(self, manager: SessionManager) -> bool: ...
 
-    async def fork(self, manager: SessionManager) -> None: ...
+    async def fork(self, manager: SessionManager) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,13 +73,13 @@ class SessionSelector:
         return None
 
 
-async def switch_to(runtime: RuntimeLike, summary: _Summary) -> None:
+async def switch_to(runtime: RuntimeLike, summary: _Summary) -> bool:
     manager = await asyncio.to_thread(open_session, summary.path)
     manager = manager if isinstance(manager, SessionManager) else manager  # type: ignore[assignment]
-    await runtime.switch(manager)
+    return await runtime.switch(manager)
 
 
-async def fork_from(runtime: RuntimeLike, summary: _Summary) -> None:
+async def fork_from(runtime: RuntimeLike, summary: _Summary) -> bool:
     source = await asyncio.to_thread(open_session, summary.path)
     if source.leaf_id is None:
         raise ValueError("cannot fork an empty session")
@@ -93,7 +93,7 @@ async def fork_from(runtime: RuntimeLike, summary: _Summary) -> None:
         session_id=uuid4().hex,
         timestamp=timestamp,
     )
-    await runtime.fork(manager)
+    return await runtime.fork(manager)
 
 
 __all__ = ["RuntimeLike", "Selection", "SessionSelector", "fork_from", "switch_to"]

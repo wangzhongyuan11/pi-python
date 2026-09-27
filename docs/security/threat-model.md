@@ -199,8 +199,9 @@ Session 上游会跳过 malformed 行，Python 严格拒绝是已记录分歧：
 socket/DNS 与 Python 子进程，并在启动常见网络客户端前拒绝，同时设置包管理器
 offline/proxy 环境。它不是 OS 防火墙，不能证明任意原生二进制无法直接使用 raw
 socket；这类测试必须使用 Operations fake，或在隔离 runner 中运行。真实 DeepSeek
-smoke 和 package registry 测试不在默认 CI；任何 live key/network 测试都同时需要
-专用环境开关与当次用户批准。
+smoke 和 package registry 测试不在默认 CI；任何 live key/network 测试都需要专用
+环境开关。DeepSeek 另有用户持续授权，并强制请求、token、超时和费用硬上限；其他
+真实服务仍需当次批准。
 
 ## 8. 残余风险与接受条件
 

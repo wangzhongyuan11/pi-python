@@ -88,11 +88,13 @@ def test_switch_and_fork_drive_the_runtime_with_opened_manager(tmp_path: Path) -
             self.switched: list[str] = []
             self.forked: list[str] = []
 
-        async def switch(self, manager: SessionManager) -> None:
+        async def switch(self, manager: SessionManager) -> bool:
             self.switched.append(manager.header.id)
+            return False
 
-        async def fork(self, manager: SessionManager) -> None:
+        async def fork(self, manager: SessionManager) -> bool:
             self.forked.append(manager.header.id)
+            return False
 
     runtime = FakeRuntime()
 

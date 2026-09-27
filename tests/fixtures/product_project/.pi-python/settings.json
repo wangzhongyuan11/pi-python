@@ -1,0 +1,4 @@
+{
+  "defaultTools": ["read", "ls"],
+  "theme": "fixture-theme"
+}

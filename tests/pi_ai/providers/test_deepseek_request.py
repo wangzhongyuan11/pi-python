@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 from pydantic import BaseModel
@@ -114,6 +115,14 @@ def test_disables_thinking_without_sending_reasoning_effort() -> None:
 
     assert request["extra_body"] == {"thinking": {"type": "disabled"}}
     assert "reasoning_effort" not in request
+
+
+def test_model_headers_are_forwarded_as_request_headers() -> None:
+    model = replace(DEFAULT_DEEPSEEK_MODEL, headers={"X-Extension-Hook": "enabled"})
+
+    request = build_deepseek_request(model, Context(messages=()))
+
+    assert request["extra_headers"] == {"X-Extension-Hook": "enabled"}
 
 
 def test_empty_tool_output_gets_a_stable_placeholder() -> None:

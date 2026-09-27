@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from pi_coding_agent.bootstrap import BootstrapConfig, ProductBootstrap
+from pi_coding_agent.config.settings import SettingsManager
 from pi_coding_agent.extensions.runtime import DefaultExtensionRuntime
 from pi_coding_agent.ports import (
     DefaultSessionImporter,
@@ -26,7 +27,7 @@ def test_default_bootstrap_builds_one_stable_service_graph(tmp_path: Path) -> No
 
     assert cli_services is sdk_services
     assert cli_services.cwd == (tmp_path / "project").resolve()
-    assert isinstance(cli_services.settings, InMemorySettings)
+    assert isinstance(cli_services.settings, SettingsManager)
     assert isinstance(cli_services.resources, DefaultResourceLoader)
     assert isinstance(cli_services.extensions, DefaultExtensionRuntime)
     assert isinstance(cli_services.exporter, NoopSessionExporter)

@@ -17,17 +17,23 @@ from pi_ai.credentials import CredentialResolutionError
 from pi_ai.providers.deepseek import DEEPSEEK_MODELS, DEFAULT_DEEPSEEK_MODEL
 
 from ..deepseek_credentials import DeepSeekCredentialResolver
+from ..extensions.registry import ExtensionFlagError
 from ..model_runtime import ModelRuntime, UnknownModelError
 from ..providers import UnknownProviderError
-from ..sdk import ToolSelection
+from ..sdk import AgentSessionFactory, ToolSelection
+from ..services import ServiceOverrides, create_product_services
 from ..session.errors import SessionError
 from ..tui.runner import InteractiveOptions, run_interactive
 from .import_session import run_import_session
-from .parser import create_parser, create_run_parser
+from .packages import run_package_command
+from .parser import create_parser, create_run_parser, parse_run_arguments
 from .run import HeadlessOptions, run_headless
 from .session_repair import run_session_repair
+from .surface import UnknownFlagError, format_extension_flag_help
 
 _GLOBAL_VALUE_OPTIONS = {"--api-key", "--env-file"}
+_PACKAGE_COMMANDS = frozenset({"install", "remove", "uninstall", "update", "list", "config"})
+_COMMANDS = frozenset({"auth", "import-pi-session", "session"}) | _PACKAGE_COMMANDS
 
 
 def tool_selection_from_arguments(arguments: argparse.Namespace) -> ToolSelection:
@@ -57,7 +63,7 @@ def _uses_command_parser(arguments: Sequence[str]) -> bool:
         if value in _GLOBAL_VALUE_OPTIONS:
             index += 2
             continue
-        return value in {"auth", "import-pi-session", "session"}
+        return value in _COMMANDS
     return False
 
 
@@ -124,14 +130,36 @@ def _auth(
     return 0
 
 
+async def _print_run_help(
+    parser: argparse.ArgumentParser,
+    *,
+    stdout: TextIO,
+    cwd: Path,
+    service_overrides: ServiceOverrides,
+) -> int:
+    services = create_product_services(cwd, service_overrides)
+    try:
+        await services.extensions.start()
+        registry = getattr(services.extensions, "registry", None)
+        registrations = () if registry is None else registry.registrations("flag")
+        stdout.write(parser.format_help())
+        stdout.write(format_extension_flag_help(registrations))
+    finally:
+        await services.extensions.close()
+    return 0
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
     stdout: TextIO | None = None,
+    stdin: TextIO | None = None,
     stderr: TextIO | None = None,
     cwd: Path | None = None,
     environ: Mapping[str, str] | None = None,
     model_runtime: ModelRuntime | None = None,
+    service_overrides: ServiceOverrides | None = None,
+    runtime_factory: AgentSessionFactory | None = None,
 ) -> int:
     output = sys.stdout if stdout is None else stdout
     errors = sys.stderr if stderr is None else stderr
@@ -144,12 +172,32 @@ def main(
         if command_mode
         else create_run_parser(version=version("pi-python"))
     )
+    if not command_mode and any(value in {"--help", "-h"} for value in raw_arguments):
+        try:
+            return asyncio.run(
+                _print_run_help(
+                    parser,
+                    stdout=output,
+                    cwd=runtime_cwd,
+                    service_overrides=(
+                        ServiceOverrides() if service_overrides is None else service_overrides
+                    ),
+                )
+            )
+        except KeyboardInterrupt:
+            return 130
+    extras: dict[str, bool | str] = {}
     try:
         with redirect_stdout(output), redirect_stderr(errors):
-            arguments = parser.parse_args(raw_arguments)
+            if command_mode:
+                arguments = parser.parse_args(raw_arguments)
+            else:
+                arguments, extras = parse_run_arguments(parser, raw_arguments)
+    except UnknownFlagError as error:
+        errors.write(f"Error: {error}\n")
+        return 2
     except SystemExit as error:
         return error.code if isinstance(error.code, int) else int(error.code is not None)
-
     if arguments.list_models is not None:
         return _list_models(arguments.list_models, output)
     if command_mode and arguments.command == "auth":
@@ -173,8 +221,22 @@ def main(
             stdout=output,
             stderr=errors,
         )
+    if command_mode and arguments.command in _PACKAGE_COMMANDS:
+        return run_package_command(
+            arguments,
+            stdout=output,
+            stderr=errors,
+            cwd=runtime_cwd,
+            environ=runtime_environ,
+        )
     messages = cast("list[str]", arguments.messages)
+    if arguments.mode == "rpc" and (messages or arguments.print_mode):
+        errors.write("Error: RPC mode accepts commands on stdin, not positional prompts or -p\n")
+        return 1
     tool_selection = tool_selection_from_arguments(arguments)
+    project_trusted = bool(
+        getattr(arguments, "approve", False) and not getattr(arguments, "no_approve", False)
+    )
     session_name: str | None = None
     raw_name = getattr(arguments, "name", None)
     if raw_name is not None:
@@ -186,6 +248,56 @@ def main(
     if arguments.session_dir:
         candidate = Path(arguments.session_dir)
         session_dir = (candidate if candidate.is_absolute() else runtime_cwd / candidate).resolve()
+    if arguments.mode == "rpc":
+        from ..rpc.runner import run_rpc
+
+        try:
+            return asyncio.run(
+                run_rpc(
+                    HeadlessOptions(
+                        cwd=runtime_cwd,
+                        prompt="",
+                        mode="json",
+                        credential_resolver=_resolver(
+                            arguments, cwd=runtime_cwd, environ=runtime_environ
+                        ),
+                        provider_id=arguments.provider,
+                        model_id=arguments.model,
+                        thinking_level=arguments.thinking,
+                        no_session=arguments.no_session,
+                        session=arguments.session,
+                        session_id=arguments.session_id,
+                        fork=arguments.fork,
+                        resume=arguments.resume or arguments.continue_session,
+                        session_dir=session_dir,
+                        model_runtime=model_runtime,
+                        tool_selection=tool_selection,
+                        name=session_name,
+                        service_overrides=service_overrides or ServiceOverrides(),
+                        runtime_factory=runtime_factory,
+                        project_trusted=project_trusted,
+                        extension_flags=extras,
+                    ),
+                    stdin=sys.stdin if stdin is None else stdin,
+                    stdout=output,
+                    stderr=errors,
+                )
+            )
+        except KeyboardInterrupt:
+            return 130
+        except ExtensionFlagError as error:
+            errors.write(f"Error: {error}\n")
+            return 2
+        except (
+            CredentialResolutionError,
+            SessionError,
+            UnknownModelError,
+            UnknownProviderError,
+            ValueError,
+            OSError,
+        ) as error:
+            errors.write(f"RPC error: {error}\n")
+            return 1
     if not messages:
         if arguments.print_mode or arguments.mode == "json":
             parser.print_help(output)
@@ -202,12 +314,20 @@ def main(
                         thinking_level=arguments.thinking,
                         no_session=arguments.no_session,
                         session=arguments.session,
+                        session_id=arguments.session_id,
+                        fork=arguments.fork,
                         resume=arguments.resume or arguments.continue_session,
                         session_dir=session_dir,
                         model_runtime=model_runtime,
                         tui_mode=arguments.tui_mode,
                         tool_selection=tool_selection,
                         name=session_name,
+                        service_overrides=(
+                            ServiceOverrides() if service_overrides is None else service_overrides
+                        ),
+                        runtime_factory=runtime_factory,
+                        project_trusted=project_trusted,
+                        extension_flags=extras,
                     ),
                     stdout=output,
                     stderr=errors,
@@ -215,6 +335,18 @@ def main(
             )
         except KeyboardInterrupt:
             return 130
+        except ExtensionFlagError as error:
+            errors.write(f"Error: {error}\n")
+            return 2
+        except (
+            CredentialResolutionError,
+            SessionError,
+            UnknownModelError,
+            UnknownProviderError,
+            ValueError,
+        ) as error:
+            errors.write(f"{error}\n")
+            return 1
     resolver = _resolver(arguments, cwd=runtime_cwd, environ=runtime_environ)
     try:
         return asyncio.run(
@@ -229,11 +361,19 @@ def main(
                     thinking_level=arguments.thinking,
                     no_session=arguments.no_session,
                     session=arguments.session,
+                    session_id=arguments.session_id,
+                    fork=arguments.fork,
                     resume=arguments.resume or arguments.continue_session,
                     session_dir=session_dir,
                     model_runtime=model_runtime,
                     tool_selection=tool_selection,
                     name=session_name,
+                    service_overrides=(
+                        ServiceOverrides() if service_overrides is None else service_overrides
+                    ),
+                    runtime_factory=runtime_factory,
+                    project_trusted=project_trusted,
+                    extension_flags=extras,
                 ),
                 stdout=output,
                 stderr=errors,
@@ -241,6 +381,9 @@ def main(
         )
     except KeyboardInterrupt:
         return 130
+    except ExtensionFlagError as error:
+        errors.write(f"Error: {error}\n")
+        return 2
     except (
         CredentialResolutionError,
         SessionError,

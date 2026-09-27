@@ -8,6 +8,7 @@ from typing import Literal
 from ..session.manager import SessionManager
 from ..session.models import CompactionEntry, SessionEntry
 from .cutpoint import CompactionCutPoint
+from .model_summarizer import ModelRuntimeSummarizer
 from .summarizer import CompactionSummarizer
 
 type CompactionReason = Literal["manual", "threshold", "overflow"]
@@ -35,13 +36,23 @@ class CompactionService:
         reason: CompactionReason,
         tokens_before: int,
         previous_summary: str | None = None,
+        custom_instructions: str | None = None,
     ) -> CompactionEntry:
         if not 0 <= cutpoint.first_kept_index < len(entries):
             raise ValueError("compaction cutpoint does not identify a kept entry")
         summary_entries = tuple(entries[: cutpoint.first_kept_index])
-        summary = await self._summarizer.summarize(
-            summary_entries, previous_summary=previous_summary
-        )
+        if custom_instructions:
+            if not isinstance(self._summarizer, ModelRuntimeSummarizer):
+                raise ValueError("configured summarizer does not accept custom instructions")
+            summary = await self._summarizer.summarize(
+                summary_entries,
+                previous_summary=previous_summary,
+                custom_instructions=custom_instructions,
+            )
+        else:
+            summary = await self._summarizer.summarize(
+                summary_entries, previous_summary=previous_summary
+            )
         if not summary.strip():
             raise ValueError("compaction summarizer returned an empty summary")
         entry = CompactionEntry(

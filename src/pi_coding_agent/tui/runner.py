@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
+import re
+import shlex
 import shutil
 import sys
 import time
-from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol, TextIO, cast, runtime_checkable
@@ -31,7 +33,7 @@ from pi_ai import (
 )
 from pi_tui.render import InlineRenderer, ScreenRenderer
 
-from ..agent_session import AgentSession
+from ..agent_session import AgentSession, SessionOperationCancelled
 from ..attachments import (
     build_image_attachment,
     build_text_file_attachment,
@@ -39,20 +41,33 @@ from ..attachments import (
     supports_image_input,
 )
 from ..cli.run import HeadlessOptions, resolve_session_manager
+from ..extensions.context import ExtensionActions, ExtensionCommandContext
 from ..extensions.registry import CapabilityRegistry
-from ..model_runtime import ModelRuntime, create_model_runtime, match_model_argument
+from ..extensions.renderers import ExtensionRendererRegistry
+from ..model_runtime import (
+    ModelRuntime,
+    create_model_runtime,
+    match_model_argument,
+    select_model_argument,
+)
+from ..resources.prompts import PromptDescriptor, load_prompt_descriptors
+from ..resources.skills import SkillDescriptor, load_skill_descriptors
 from ..sdk import (
+    AgentSessionFactory,
     CreateAgentSessionOptions,
     ToolSelection,
     create_agent_session,
     default_session_dir,
 )
-from ..session.catalog import SessionSummary, list_sessions
+from ..services import ServiceOverrides
+from ..session.catalog import SessionSummary, list_sessions, open_session
 from ..session.errors import SessionNotFoundError
-from .commands import CommandDispatcher, CommandOutcome, CommandSpec
+from ..session.fork import fork_session
+from ..session.manager import SessionManager
+from .commands import CommandDispatcher, CommandOutcome, CommandSpec, ShortcutDispatcher
 from .config_ui import ModelSettingsController
 from .main import InteractiveApp
-from .render_messages import render_replay_lines
+from .render_messages import render_extension_entry_lines, render_replay_lines
 from .session_ui import fork_from, switch_to
 
 type ReadLine = Callable[[str], Awaitable[str | None]]
@@ -63,6 +78,10 @@ _MAX_IMAGE_BYTES = 10 * 1024 * 1024
 _KEY_POLL_INTERVAL_SECONDS = 0.02
 
 _WIN32_ENABLE_PROCESSED_INPUT = 0x0001
+
+
+def _empty_flags() -> dict[str, bool | str]:
+    return {}
 
 
 def _disable_console_interrupt() -> Callable[[], None] | None:
@@ -271,6 +290,23 @@ class _HasRegistry(Protocol):
     def registry(self) -> CapabilityRegistry: ...
 
 
+@runtime_checkable
+class _HasActions(Protocol):
+    @property
+    def actions(self) -> ExtensionActions: ...
+
+
+@runtime_checkable
+class _HasRenderers(Protocol):
+    @property
+    def renderers(self) -> ExtensionRendererRegistry: ...
+
+
+@runtime_checkable
+class _HasReload(Protocol):
+    async def reload(self) -> tuple[object, ...]: ...
+
+
 class _RawOutput(Protocol):
     def write_raw(self, data: str) -> None: ...
 
@@ -302,15 +338,21 @@ class InteractiveOptions:
     credential_resolver: CredentialResolver
     provider_id: str = "deepseek"
     model_id: str | None = None
-    thinking_level: ModelThinkingLevel = "high"
+    thinking_level: ModelThinkingLevel | None = None
     no_session: bool = False
     session: str | None = None
+    session_id: str | None = None
+    fork: str | None = None
     resume: bool = False
     session_dir: Path | None = None
     model_runtime: ModelRuntime | None = None
     tui_mode: Literal["regular", "fullscreen"] = "regular"
     tool_selection: ToolSelection | None = None
     name: str | None = None
+    service_overrides: ServiceOverrides = field(default_factory=ServiceOverrides)
+    runtime_factory: AgentSessionFactory | None = None
+    project_trusted: bool = False
+    extension_flags: Mapping[str, bool | str] = field(default_factory=_empty_flags)
 
 
 class _StreamTerminal:
@@ -431,12 +473,59 @@ class SlashCompleter(Completer):
                     )
 
 
-def _prompt_toolkit_reader() -> ReadLine:
+def _prompt_toolkit_keys(name: str) -> tuple[str, ...] | None:
+    parts = name.casefold().split("+")
+    key = parts[-1]
+    modifiers = set(parts[:-1])
+    if "ctrl" in modifiers:
+        key = f"c-{key}"
+    if "alt" in modifiers or "meta" in modifiers:
+        return ("escape", key)
+    if modifiers - {"ctrl", "shift"}:
+        return None
+    if modifiers == {"shift"}:
+        key = {"tab": "s-tab"}.get(key, key.upper())
+    return (key,)
+
+
+def _prompt_toolkit_reader(
+    *,
+    shortcuts: ShortcutDispatcher | None = None,
+    commands: tuple[tuple[str, str], ...] = _TUI_COMMANDS,
+) -> ReadLine:
+    if not sys.stdin.isatty():
+
+        async def read_pipe_line(_prompt: str) -> str | None:
+            raw = await asyncio.to_thread(sys.stdin.readline)
+            if not raw:
+                return None
+            return raw.rstrip("\r\n")
+
+        return read_pipe_line
+
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.key_binding.key_processor import KeyPressEvent
+
+    bindings = KeyBindings()
+    if shortcuts is not None:
+        for shortcut_name in shortcuts.names:
+            keys = _prompt_toolkit_keys(shortcut_name)
+            if keys is None:
+                continue
+
+            def invoke(event: KeyPressEvent, name: str = shortcut_name) -> None:
+                async def run_shortcut() -> None:
+                    await shortcuts.dispatch(name)
+
+                event.app.create_background_task(run_shortcut())
+
+            bindings.add(*keys)(invoke)
 
     session: PromptSession[str] = PromptSession(
-        completer=SlashCompleter(),
+        completer=SlashCompleter(commands=commands),
         complete_while_typing=True,
+        key_bindings=bindings,
     )
 
     async def read_line(prompt: str) -> str | None:
@@ -446,6 +535,55 @@ def _prompt_toolkit_reader() -> ReadLine:
             return None
 
     return read_line
+
+
+_RESOURCE_COMMAND = re.compile(r"^/([^\s]+)(?:\s+([\s\S]*))?$")
+_PROMPT_ARGUMENT = re.compile(r"\$(ARGUMENTS|@|\d+)")
+
+
+def _resource_command_expander(
+    prompts: tuple[PromptDescriptor, ...],
+    skills: tuple[SkillDescriptor, ...],
+) -> Callable[[str], str]:
+    prompt_by_name = {prompt.name: prompt for prompt in prompts}
+    skill_by_name = {skill.name: skill for skill in skills}
+
+    def expand(line: str) -> str:
+        match = _RESOURCE_COMMAND.fullmatch(line)
+        if match is None:
+            return line
+        name = match.group(1)
+        raw_arguments = match.group(2) or ""
+        if name.startswith("skill:"):
+            skill = skill_by_name.get(name.removeprefix("skill:"))
+            if skill is None:
+                return line
+            body = skill.load_content().strip()
+            block = (
+                f'<skill name="{skill.name}" location="{skill.path.as_posix()}">\n'
+                f"References are relative to {skill.path.parent.as_posix()}.\n\n"
+                f"{body}\n</skill>"
+            )
+            return f"{block}\n\n{raw_arguments}" if raw_arguments else block
+        prompt = prompt_by_name.get(name)
+        if prompt is None:
+            return line
+        try:
+            arguments = shlex.split(raw_arguments)
+        except ValueError:
+            return line
+        all_arguments = " ".join(arguments)
+
+        def replace(argument: re.Match[str]) -> str:
+            token = argument.group(1)
+            if token in {"ARGUMENTS", "@"}:
+                return all_arguments
+            index = int(token) - 1
+            return arguments[index] if 0 <= index < len(arguments) else ""
+
+        return _PROMPT_ARGUMENT.sub(replace, prompt.load_content())
+
+    return expand
 
 
 async def run_interactive(
@@ -459,16 +597,18 @@ async def run_interactive(
     if sys.platform == "darwin":
         stderr.write("interactive mode is not supported on macOS\n")
         return 2
+    model_thinking: ModelThinkingLevel | None = None
     runtime = options.model_runtime
     if runtime is None:
         runtime = create_model_runtime(
             credential_resolver=options.credential_resolver,
             provider_id=options.provider_id,
-            model_id=options.model_id,
         )
-    elif options.model_id is not None:
-        runtime.select_model(options.model_id, provider_id=options.provider_id)
-    thinking = clamp_thinking_level(runtime.model, options.thinking_level)
+    if options.model_id is not None:
+        _selected, model_thinking = select_model_argument(runtime, options.model_id)
+    thinking = clamp_thinking_level(
+        runtime.model, options.thinking_level or model_thinking or "high"
+    )
     session_dir = options.session_dir
     if options.resume and session_dir is None and options.session is None:
         session_dir = default_session_dir(options.cwd)
@@ -484,6 +624,8 @@ async def run_interactive(
                 thinking_level=thinking,
                 no_session=options.no_session,
                 session=options.session,
+                session_id=options.session_id,
+                fork=options.fork,
                 resume=options.resume,
                 session_dir=session_dir,
                 model_runtime=runtime,
@@ -499,9 +641,13 @@ async def run_interactive(
         stderr.flush()
         manager = None
     selection = options.tool_selection or ToolSelection()
-    created = await create_agent_session(
+    runtime_factory = options.runtime_factory or create_agent_session
+    created = await runtime_factory(
         CreateAgentSessionOptions(
             cwd=options.cwd,
+            service_overrides=options.service_overrides,
+            project_trusted=options.project_trusted,
+            extension_flags=options.extension_flags,
             credential_resolver=options.credential_resolver,
             model_runtime=runtime,
             session_manager=manager,
@@ -512,14 +658,33 @@ async def run_interactive(
         )
     )
     async with created:
+        descriptors = created.services.resources.discover(options.cwd)
+        prompt_paths = tuple(
+            item.path for item in descriptors if item.kind == "prompt" and item.path is not None
+        )
+        skill_paths = tuple(
+            item.path for item in descriptors if item.kind == "skill" and item.path is not None
+        )
+        expand_resource_command = _resource_command_expander(
+            load_prompt_descriptors(prompt_paths).prompts,
+            load_skill_descriptors(skill_paths).skills,
+        )
         if options.name:
             created.session.session_manager.append_session_info(
                 options.name,
                 entry_id_factory=lambda: uuid4().hex,
                 timestamp_factory=_utc_timestamp,
             )
-        dispatcher = CommandDispatcher()
-        reader_fn = read_line or _prompt_toolkit_reader()
+        extensions = created.services.extensions
+        extension_context = (
+            ExtensionCommandContext(extensions.actions)
+            if isinstance(extensions, _HasActions)
+            else None
+        )
+        extension_renderers = (
+            extensions.renderers if isinstance(extensions, _HasRenderers) else None
+        )
+        dispatcher = CommandDispatcher(context=extension_context)
         app_holder: list[InteractiveApp] = []
         controller_holder: list[ModelSettingsController] = []
 
@@ -528,8 +693,18 @@ async def run_interactive(
             if options.tui_mode != "fullscreen":
                 replay_width = terminal.columns - 1
             previous_lines = tuple(app_holder[0].lines) if app_holder else ()
-            history_lines = render_replay_lines(
-                created.session.state.messages, max(1, replay_width)
+            width = max(1, replay_width)
+            history_lines = (
+                *render_replay_lines(
+                    created.session.state.messages,
+                    width,
+                    renderers=extension_renderers,
+                ),
+                *render_extension_entry_lines(
+                    created.session.session_manager.entries,
+                    width,
+                    renderers=extension_renderers,
+                ),
             )
             initial_lines = history_lines if history_lines else previous_lines
             controller_holder[:] = [
@@ -551,6 +726,7 @@ async def run_interactive(
                     screen_sink=lambda lines: renderer.render(list(lines[-terminal.rows :])),
                     raw_sink=terminal.write,
                     compose_prompt=compose,
+                    renderers=extension_renderers,
                     initial_lines=initial_lines,
                 )
             else:
@@ -567,6 +743,7 @@ async def run_interactive(
                     commit_sink=renderer.commit,
                     raw_sink=terminal.write,
                     compose_prompt=compose,
+                    renderers=extension_renderers,
                     initial_lines=initial_lines,
                 )
             app_holder[:] = [app]
@@ -621,27 +798,30 @@ async def run_interactive(
             payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
             return CommandOutcome(kind="raw", text=f"\x1b]52;c;{payload}\x07")
 
+        def show_help(_args: str) -> CommandOutcome:
+            return CommandOutcome(
+                kind="message",
+                text=(
+                    "/help  show commands\n"
+                    "/model [provider/model]  show or switch model (partial match ok)\n"
+                    "/thinking [level]  show or set thinking level\n"
+                    "/attach <path>  attach a file or image to the next prompt\n"
+                    "/copy  copy the last reply to the terminal clipboard (OSC-52)\n"
+                    "/compact  summarize the conversation so far into a checkpoint\n"
+                    "/sessions  list saved sessions and switch by number\n"
+                    "/fork  fork the current session and switch to the copy\n"
+                    "/exit  leave the session\n"
+                    "\n"
+                    "keys: Esc/Ctrl+C cancels the running turn; a line typed during\n"
+                    "a turn steers it; Ctrl+C while idle exits on the second press"
+                ),
+            )
+
         dispatcher.register(
             CommandSpec(
                 name="help",
                 source="builtin",
-                handler=lambda _args: CommandOutcome(
-                    kind="message",
-                    text=(
-                        "/help  show commands\n"
-                        "/model [provider/model]  show or switch model (partial match ok)\n"
-                        "/thinking [level]  show or set thinking level\n"
-                        "/attach <path>  attach a file or image to the next prompt\n"
-                        "/copy  copy the last reply to the terminal clipboard (OSC-52)\n"
-                        "/compact  summarize the conversation so far into a checkpoint\n"
-                        "/sessions  list saved sessions and switch by number\n"
-                        "/fork  fork the current session and switch to the copy\n"
-                        "/exit  leave the session\n"
-                        "\n"
-                        "keys: Esc/Ctrl+C cancels the running turn; a line typed during\n"
-                        "a turn steers it; Ctrl+C while idle exits on the second press"
-                    ),
-                ),
+                handler=show_help,
             )
         )
         dispatcher.register(CommandSpec(name="model", source="builtin", handler=select_model))
@@ -720,7 +900,9 @@ async def run_interactive(
             if not 1 <= chosen <= len(items):
                 return CommandOutcome(kind="error", text=f"out of range 1..{len(items)}")
             summary = items[chosen - 1]
-            await switch_to(created, summary)
+            if await switch_to(created, summary):
+                return CommandOutcome(kind="message", text="session switch cancelled by extension")
+            refresh_extension_surfaces()
             rebuild()
             app_holder[0].note(f"switched to {summary.id}")
             return CommandOutcome(kind="none")
@@ -732,10 +914,82 @@ async def run_interactive(
                     kind="error", text="cannot fork: the current session has no persisted turns"
                 )
             summary = _PathRef(path=manager.path)
-            await fork_from(created, summary)
+            if await fork_from(created, summary):
+                return CommandOutcome(kind="message", text="session fork cancelled by extension")
+            refresh_extension_surfaces()
             rebuild()
             app_holder[0].note(f"forked to {created.session.session_manager.header.id}")
             return CommandOutcome(kind="none")
+
+        async def new_extension_session() -> bool:
+            timestamp = _utc_timestamp()
+            manager = (
+                SessionManager.in_memory(
+                    cwd=options.cwd,
+                    session_id=uuid4().hex,
+                    timestamp=timestamp,
+                )
+                if options.no_session
+                else SessionManager.create(
+                    cwd=options.cwd,
+                    session_dir=_selector_directory(),
+                    session_id=uuid4().hex,
+                    timestamp=timestamp,
+                    parent_session=(
+                        str(created.session.session_manager.path)
+                        if created.session.session_manager.path is not None
+                        else None
+                    ),
+                )
+            )
+            cancelled = await created.new_session(manager)
+            if not cancelled:
+                refresh_extension_surfaces()
+                rebuild()
+            return cancelled
+
+        async def fork_extension_session(entry_id: str) -> bool:
+            manager = created.session.session_manager
+            if manager.path is None:
+                raise ValueError("cannot fork an in-memory session")
+            forked = await asyncio.to_thread(
+                fork_session,
+                manager.path,
+                leaf_id=entry_id,
+                target_cwd=options.cwd,
+                session_dir=manager.path.parent,
+                session_id=uuid4().hex,
+                timestamp=_utc_timestamp(),
+            )
+            cancelled = await created.fork(forked)
+            if not cancelled:
+                refresh_extension_surfaces()
+                rebuild()
+            return cancelled
+
+        async def navigate_extension_session(target_id: str) -> bool:
+            try:
+                await created.session.branch(target_id)
+            except SessionOperationCancelled:
+                return True
+            rebuild()
+            return False
+
+        async def switch_extension_session(path: str) -> bool:
+            manager = await asyncio.to_thread(open_session, Path(path))
+            cancelled = await created.switch(manager)
+            if not cancelled:
+                refresh_extension_surfaces()
+                rebuild()
+            return cancelled
+
+        async def reload_extensions() -> None:
+            current = created.services.extensions
+            if not isinstance(current, _HasReload):
+                raise RuntimeError("extension reload is unavailable")
+            await current.reload()
+            refresh_extension_surfaces()
+            rebuild()
 
         def compose(line: str) -> AgentMessage | str:
             if not pending_attachments:
@@ -765,7 +1019,8 @@ async def run_interactive(
         dispatcher.register(
             CommandSpec(name="fork", source="builtin", handler=fork_current_session)
         )
-        extensions = created.services.extensions
+        shortcuts: ShortcutDispatcher | None = None
+        extension_commands: tuple[tuple[str, str], ...] = ()
         if isinstance(extensions, _HasRegistry):
             skipped = dispatcher.register_registry(extensions.registry)
             if skipped:
@@ -774,6 +1029,53 @@ async def run_interactive(
                     f"skipped extension commands already provided by the product: {names}\n"
                 )
                 stderr.flush()
+            shortcuts = ShortcutDispatcher.from_registry(
+                extensions.registry, context=extension_context
+            )
+            extension_commands = tuple(
+                (f"/{item.name}", f"extension: {item.source}")
+                for item in extensions.registry.registrations("command")
+                if item.name not in skipped
+            )
+
+        def refresh_extension_surfaces() -> None:
+            nonlocal extension_context, extension_renderers, extensions
+            extensions = created.services.extensions
+            extension_context = (
+                ExtensionCommandContext(extensions.actions)
+                if isinstance(extensions, _HasActions)
+                else None
+            )
+            extension_renderers = (
+                extensions.renderers if isinstance(extensions, _HasRenderers) else None
+            )
+            if isinstance(extensions, _HasRegistry):
+                dispatcher.refresh_registry(extensions.registry, context=extension_context)
+                if shortcuts is not None:
+                    shortcuts.refresh_registry(extensions.registry, context=extension_context)
+            if extension_context is not None:
+                extension_context.bind(
+                    wait_for_idle=created.session.wait_for_idle,
+                    new_session=new_extension_session,
+                    fork=fork_extension_session,
+                    navigate=navigate_extension_session,
+                    switch=switch_extension_session,
+                    reload=reload_extensions,
+                )
+
+        if extension_context is not None:
+            extension_context.bind(
+                wait_for_idle=created.session.wait_for_idle,
+                new_session=new_extension_session,
+                fork=fork_extension_session,
+                navigate=navigate_extension_session,
+                switch=switch_extension_session,
+                reload=reload_extensions,
+            )
+        reader_fn = read_line or _prompt_toolkit_reader(
+            shortcuts=shortcuts,
+            commands=(*_TUI_COMMANDS, *extension_commands),
+        )
         fullscreen = options.tui_mode == "fullscreen"
         terminal = _StreamTerminal(stdout, fullscreen=fullscreen)
         renderer = ScreenRenderer(terminal) if fullscreen else InlineRenderer(terminal)
@@ -783,6 +1085,12 @@ async def run_interactive(
         try:
             last_idle_interrupt: float | None = None
             while True:
+                current_extensions = created.services.extensions
+                if (
+                    isinstance(current_extensions, _HasActions)
+                    and current_extensions.actions.shutdown_requested
+                ):
+                    return 0
                 try:
                     line = await reader_fn("› ")
                 except KeyboardInterrupt:
@@ -801,7 +1109,8 @@ async def run_interactive(
                 if not line.strip():
                     continue
                 try:
-                    await _drive_turn(app_holder[0], created.session, line, char_reader)
+                    expanded_line = expand_resource_command(line)
+                    await _drive_turn(app_holder[0], created.session, expanded_line, char_reader)
                 except Exception as error:
                     stderr.write(f"{error}\n")
                     stderr.flush()
