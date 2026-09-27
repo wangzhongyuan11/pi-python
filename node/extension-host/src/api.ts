@@ -125,18 +125,16 @@ export class ExtensionApi {
       },
       getFlag: (name: string) => this.state.flags[name],
       // Actions and session metadata: ordered fire-and-forget (void upstream).
-      sendMessage: (message: unknown, options?: unknown) => {
-        fireAndForget(this.callPython("send_message", { message, options }));
-      },
+      sendMessage: (message: unknown, options?: unknown) =>
+        this.callPython("send_message", { message, options }).catch(() => undefined),
       sendUserMessage: (content: unknown, options?: unknown) => {
         fireAndForget(this.callPython("send_user_message", { content, options }));
       },
-      appendEntry: (customType: string, data?: unknown) => {
-        fireAndForget(this.callPython("append_entry", { customType, data }));
-      },
+      appendEntry: (customType: string, data?: unknown) =>
+        this.callPython("append_entry", { customType, data }).catch(() => undefined),
       setSessionName: (name: string) => {
         this.state.sessionName = name;
-        fireAndForget(this.callPython("set_session_name", { name }));
+        return this.callPython("set_session_name", { name }).catch(() => undefined);
       },
       getSessionName: () => this.state.sessionName,
       setLabel: (entryId: string, label?: string) => {

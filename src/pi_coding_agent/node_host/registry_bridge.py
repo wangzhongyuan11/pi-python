@@ -17,6 +17,8 @@ from pi_agent import AgentTool, AgentToolResult
 from pi_ai import TextContent
 from pi_coding_agent.extensions.registry import FlagState
 
+from .event_bridge import NodeRequestError
+
 HostCaller = Callable[[str, Mapping[str, object]], Awaitable[object]]
 
 _JSON_SCHEMA_TYPES: dict[str, type[Any] | tuple[type[Any], ...]] = {
@@ -204,10 +206,6 @@ class RegistryBridge:
     def _register(self, kind: str, name: str, payload: object) -> object:
         registry = self._registry
         return registry.register(kind, name, self._source, payload)  # type: ignore[union-attr]
-
-
-class NodeRequestError(RuntimeError):
-    """The host requested an operation the bridge cannot perform."""
 
 
 __all__ = ["NodeRequestError", "RegistryBridge", "model_from_json_schema"]

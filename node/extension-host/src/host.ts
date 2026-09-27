@@ -81,6 +81,7 @@ async function loadModule(extensionPath: string): Promise<unknown> {
 
 const apis: ExtensionApi[] = [];
 const loaded: ExtensionDescriptor[] = [];
+const inflight = new Set<Promise<void>>();
 
 async function activateExtension(extensionPath: string, state?: Partial<HostState>): Promise<void> {
   const descriptor: ExtensionDescriptor = { path: extensionPath, unsupported: [] };
@@ -288,23 +289,29 @@ async function main(): Promise<void> {
     }
     if (frame.type === "request") {
       const request = frame as Request;
-      try {
-        if (request.command === "shutdown") {
-          respond(request.id, { type: "response", id: request.id, ok: true, result: null });
-          process.exit(0);
+      // Handle concurrently: a handler may itself await a Python round trip
+      // (sendMessage, exec, ui), which must not block the read loop.
+      const task = (async () => {
+        try {
+          if (request.command === "shutdown") {
+            respond(request.id, { type: "response", id: request.id, ok: true, result: null });
+            process.exit(0);
+          }
+          const result = await handleRequest(request);
+          respond(request.id, { type: "response", id: request.id, ok: true, result });
+        } catch (error) {
+          const code = (error as { code?: string }).code ?? "handler_error";
+          respond(request.id, {
+            type: "response",
+            id: request.id,
+            ok: false,
+            errorCode: code === "unknown_command" ? "unknown_command" : "handler_error",
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
-        const result = await handleRequest(request);
-        respond(request.id, { type: "response", id: request.id, ok: true, result });
-      } catch (error) {
-        const code = (error as { code?: string }).code ?? "handler_error";
-        respond(request.id, {
-          type: "response",
-          id: request.id,
-          ok: false,
-          errorCode: code === "unknown_command" ? "unknown_command" : "handler_error",
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+      })();
+      inflight.add(task);
+      void task.finally(() => inflight.delete(task));
       continue;
     }
     if (frame.type === "response") {

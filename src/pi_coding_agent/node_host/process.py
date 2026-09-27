@@ -129,6 +129,7 @@ class NodeHostProcess:
         self._request_handler: Callable[[str, Mapping[str, object]], Awaitable[object]] | None = (
             None
         )
+        self._host_request_tasks: set[asyncio.Task[None]] = set()
         self._closed = False
         self._id = 0
 
@@ -182,8 +183,9 @@ class NodeHostProcess:
         try:
             first = await asyncio.wait_for(self._wait_response("handshake"), HANDSHAKE_TIMEOUT)
         except TimeoutError as error:
+            tail = self._stderr_tail_text()
             await self.close()
-            raise NodeHostError("node host handshake timed out") from error
+            raise NodeHostError(f"node host handshake timed out: {tail[:400]}") from error
         finally:
             config_path.unlink(missing_ok=True)
         if isinstance(first, HelloAck):
@@ -221,7 +223,9 @@ class NodeHostProcess:
                     if future and not future.done():
                         future.set_result(frame)
                 elif isinstance(frame, Request):
-                    await self._answer_host_request(frame)
+                    task = asyncio.create_task(self._answer_host_request(frame))
+                    self._host_request_tasks.add(task)
+                    task.add_done_callback(self._host_request_tasks.discard)
                 elif isinstance(frame, Response):
                     future = self._pending.get(frame.id)
                     if future and not future.done():
@@ -291,7 +295,7 @@ class NodeHostProcess:
             if not chunk:
                 return
             self._stderr_tail.extend(chunk.decode("utf-8", errors="replace").splitlines())
-            del self._stderr_tail[:-50]
+            del self._stderr_tail[:-400]
 
     def _stderr_tail_text(self) -> str:
         return "\n".join(self._stderr_tail[-10:])
