@@ -42,7 +42,7 @@ from .agent_session_runtime import (
     RuntimeEventSink,
     RuntimeTarget,
 )
-from .bootstrap import BootstrapConfig, ProductBootstrap, bootstrap
+from .bootstrap import BootstrapConfig, ProductBootstrap, attach_node_host, bootstrap
 from .branch_summary import BranchSummarizer, BranchSummaryService
 from .builtin_extensions.permission_gate import PermissionGate
 from .compaction.cutpoint import TokenCounter, estimate_entry_tokens
@@ -169,6 +169,11 @@ async def _before_extension_tool_call(
             if isinstance(mapping.get("reason"), str):
                 reason = cast("str", mapping["reason"])
             terminate = terminate or mapping.get("terminate") is True
+            bridged_input = mapping.get("input")
+            if isinstance(bridged_input, Mapping):
+                # Bridged (Node) hooks return the rewritten arguments because
+                # they cannot mutate the serialized event in place.
+                event.input = cast("dict[str, object]", dict(bridged_input))
     return BeforeToolCallResult(
         block=block,
         reason=reason,
@@ -431,6 +436,7 @@ async def create_agent_session(
             extension_provider_ids.clear()
         services.resources.discover(target.cwd)
         await services.extensions.start()
+        node_host = await attach_node_host(services, target.cwd)
         if selected.extension_flags:
             apply_flags = getattr(services.extensions, "apply_flags", None)
             if not callable(apply_flags):
@@ -442,6 +448,10 @@ async def create_agent_session(
             except Exception:
                 await services.extensions.close()
                 raise
+        if selected.extension_flags and node_host is not None:
+            await node_host.update_flags(
+                {f"--{name}": value for name, value in selected.extension_flags.items()}
+            )
         for provider in services.extensions.providers:
             model_runtime.register_provider(provider)
             extension_provider_ids.add(provider.id)
@@ -586,6 +596,8 @@ async def create_agent_session(
         )
 
         async def close_services(_reason: object) -> None:
+            if node_host is not None:
+                await node_host.close()
             await services.extensions.close()
 
         session = AgentSession(

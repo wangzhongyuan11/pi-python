@@ -1,0 +1,16 @@
+{
+  "name": "pi-python-extension-host",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Managed Node host that loads upstream Pi TypeScript extensions for pi-python.",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/host.ts"
+  },
+  "optionalDependencies": {
+    "jiti": "^2.6.0"
+  }
+}

@@ -34,12 +34,29 @@ class ExtensionIdentity:
     entry_hash: str
 
 
+BRIDGED_SUFFIXES = frozenset({".ts", ".js", ".mjs", ".cts", ".mts"})
+
+
 def discover_extensions(root: Path) -> tuple[ExtensionMetadata, ...]:
-    """Enumerate valid extension manifests under ``root`` without importing code."""
+    """Enumerate valid extension manifests under ``root`` without importing code.
+
+    Top-level JavaScript/TypeScript files are reported as bridged extension
+    entries; the Python loader skips them and the Node host activates them.
+    """
     discovered: list[ExtensionMetadata] = []
     if not root.is_dir():
         return ()
     for child in sorted(root.iterdir()):
+        if child.is_file() and child.suffix.lower() in BRIDGED_SUFFIXES:
+            discovered.append(
+                ExtensionMetadata(
+                    name=child.stem,
+                    version="",
+                    entry=child.name,
+                    path=root.resolve(),
+                )
+            )
+            continue
         if not child.is_dir() or not (child / MANIFEST_NAME).exists():
             continue
         try:

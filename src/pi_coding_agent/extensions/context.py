@@ -101,6 +101,12 @@ class ExtensionActions:
         )
         self._shutdown_requested = False
 
+    @property
+    def is_bound(self) -> bool:
+        """Whether a session binding is currently attached."""
+
+        return self._binding is not None
+
     def invalidate(self) -> None:
         self._binding = None
 
