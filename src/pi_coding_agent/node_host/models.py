@@ -44,12 +44,18 @@ class ProtocolError(ValueError):
 
 
 class Hello(BaseModel):
-    """Python → Node handshake offering the protocol version it speaks."""
+    """Python → Node handshake offering the protocol version it speaks.
+
+    The state snapshot lets the host answer synchronous reads (flags, active
+    tools, session name, thinking level) without a round trip, matching the
+    upstream synchronous ExtensionAPI semantics.
+    """
 
     type: Literal["hello"] = "hello"
     protocol: int = PROTOCOL_VERSION
     generation: int = 0
     cwd: str = ""
+    state: dict[str, object] = Field(default_factory=dict)
 
 
 class HelloAck(BaseModel):

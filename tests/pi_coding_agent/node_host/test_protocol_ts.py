@@ -19,10 +19,10 @@ def _run_node_probe() -> dict[str, object]:
         "const ack = module.negotiate({"
         " type: 'hello', protocol: module.PROTOCOL_VERSION, generation: 2, cwd: '/p' });\n"
         "const request = module.parseFrame("
-        " '{\"type\":\"request\",\"id\":\"r1\",\"command\":\"events\"}');\n"
+        ' \'{"type":"request","id":"r1","command":"events"}\');\n'
         "const errors = [];\n"
         "try { module.parseFrame('not json'); } catch (error) { errors.push(error.code); }\n"
-        "try { module.parseFrame('{\"type\":\"mystery\"}'); }"
+        'try { module.parseFrame(\'{"type":"mystery"}\'); }'
         " catch (error) { errors.push(error.code); }\n"
         "try { module.negotiate({ type: 'hello', protocol: 99, generation: 0, cwd: '' }); }"
         " catch (error) { errors.push(error.code); }\n"

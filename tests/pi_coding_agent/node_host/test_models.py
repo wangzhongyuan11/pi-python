@@ -9,7 +9,6 @@ from pi_coding_agent.node_host.models import (
     CAPABILITIES,
     PROTOCOL_VERSION,
     Hello,
-    HelloAck,
     ProtocolError,
     Request,
     Response,
