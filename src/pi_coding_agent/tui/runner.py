@@ -40,6 +40,7 @@ from ..attachments import (
     classify_attachment,
     supports_image_input,
 )
+from ..cli.file_args import ProcessedFiles, build_attachment_message
 from ..cli.run import HeadlessOptions, resolve_session_manager
 from ..extensions.context import ExtensionActions, ExtensionCommandContext
 from ..extensions.registry import CapabilityRegistry
@@ -996,22 +997,27 @@ async def run_interactive(
                 return line
             attachments = tuple(pending_attachments)
             pending_attachments.clear()
-            blocks: list[TextContent | ImageContent] = [TextContent(text=line)]
+            envelope_parts: list[str] = []
+            images: list[ImageContent] = []
             for attachment in attachments:
                 if attachment.get("type") == "image":
-                    blocks.append(
+                    images.append(
                         ImageContent(
                             data=str(attachment["data"]),
                             mime_type=str(attachment["mimeType"]),
                         )
                     )
+                    envelope_parts.append(f'<file name="{attachment["name"]}"></file>')
                 else:
-                    blocks.append(
-                        TextContent(
-                            text=f"[attached file {attachment['name']}]\n{attachment['content']}"
-                        )
+                    envelope_parts.append(
+                        '<file name="'
+                        + str(attachment["name"])
+                        + '">\n'
+                        + str(attachment["content"])
+                        + "\n</file>"
                     )
-            return UserMessage(content=tuple(blocks), timestamp=_message_timestamp())
+            files = ProcessedFiles(text="".join(envelope_parts), images=tuple(images))
+            return build_attachment_message(line, files, timestamp=_message_timestamp())
 
         dispatcher.register(
             CommandSpec(name="sessions", source="builtin", handler=open_session_selector)

@@ -9,6 +9,7 @@ from pathlib import Path
 from pi_tui.protocols import NoopUI
 
 from .extensions.runtime import DefaultExtensionRuntime
+from .node_host.process import NpmInstaller
 from .node_host.runtime import NodeHostRuntime, discover_bridged_extensions
 from .services import ProductServices, ServiceOverrides, create_product_services
 
@@ -59,6 +60,7 @@ async def attach_node_host(services: ProductServices, cwd: Path) -> NodeHostRunt
         extensions_runtime=runtime,
         cwd=cwd,
         has_ui=not isinstance(services.ui, NoopUI),
+        installer=NpmInstaller(),
         ui_provider=lambda: services.ui,
         actions_provider=lambda: runtime.actions if runtime.actions.is_bound else None,
     )

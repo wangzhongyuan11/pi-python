@@ -22,8 +22,10 @@ from ..model_runtime import ModelRuntime, UnknownModelError
 from ..providers import UnknownProviderError
 from ..sdk import AgentSessionFactory, ToolSelection
 from ..services import ServiceOverrides, create_product_services
+from ..session.catalog import open_session
 from ..session.errors import SessionError
 from ..tui.runner import InteractiveOptions, run_interactive
+from .file_args import split_file_arguments
 from .import_session import run_import_session
 from .packages import run_package_command
 from .parser import create_parser, create_run_parser, parse_run_arguments
@@ -230,6 +232,10 @@ def main(
             environ=runtime_environ,
         )
     messages = cast("list[str]", arguments.messages)
+    messages, file_args = split_file_arguments(messages)
+    if arguments.mode == "rpc" and file_args:
+        errors.write("Error: @file arguments are not supported in RPC mode\n")
+        return 1
     if arguments.mode == "rpc" and (messages or arguments.print_mode):
         errors.write("Error: RPC mode accepts commands on stdin, not positional prompts or -p\n")
         return 1
@@ -248,6 +254,33 @@ def main(
     if arguments.session_dir:
         candidate = Path(arguments.session_dir)
         session_dir = (candidate if candidate.is_absolute() else runtime_cwd / candidate).resolve()
+    export_target = getattr(arguments, "export", None)
+    if export_target:
+        if not arguments.session:
+            errors.write("Error: --export requires --session <path|id>\n")
+            return 1
+        try:
+            manager = open_session(arguments.session, session_dir=session_dir)
+        except SessionError as error:
+            errors.write(f"Error: {error}\n")
+            return 1
+        exporter = (
+            service_overrides.exporter
+            if service_overrides is not None and service_overrides.exporter is not None
+            else None
+        )
+        if exporter is None:
+            from .export.html import HtmlSessionExporter
+
+            exporter = HtmlSessionExporter()
+        from ..session.export import export_session
+
+        destination = Path(export_target)
+        if not destination.is_absolute():
+            destination = runtime_cwd / destination
+        written = exporter.export(export_session(manager), destination.resolve())
+        output.write(f"exported {written}\n")
+        return 0
     if arguments.mode == "rpc":
         from ..rpc.runner import run_rpc
 
@@ -298,7 +331,7 @@ def main(
         ) as error:
             errors.write(f"RPC error: {error}\n")
             return 1
-    if not messages:
+    if not messages and not file_args:
         if arguments.print_mode or arguments.mode == "json":
             parser.print_help(output)
             return 0
@@ -354,6 +387,7 @@ def main(
                 HeadlessOptions(
                     cwd=runtime_cwd,
                     prompt=" ".join(messages),
+                    file_args=tuple(file_args),
                     mode=arguments.mode,
                     credential_resolver=resolver,
                     provider_id=arguments.provider,

@@ -93,9 +93,7 @@ def run_package_command(
         return 0
     if command == "update":
         source = getattr(arguments, "source", None)
-        self_requested = (
-            bool(getattr(arguments, "self_update", False)) or source in {"self", "pi"}
-        )
+        self_requested = bool(getattr(arguments, "self_update", False)) or source in {"self", "pi"}
         if self_requested:
             # The wheel is managed by the user's installer; self-update only
             # prints the matching upgrade command instead of mutating anything.

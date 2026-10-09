@@ -84,6 +84,30 @@ const apis: ExtensionApi[] = [];
 const loaded: ExtensionDescriptor[] = [];
 const inflight = new Set<Promise<void>>();
 
+/**
+ * Classify a module activation failure: upstream TUI/host value imports fail
+ * at ESM link time with export/package errors — those are structured
+ * unsupported capabilities per ADR 0009, not extension bugs.
+ */
+function classifyActivationError(descriptor: ExtensionDescriptor, message: string): boolean {
+  if (!message.includes("earendil")) {
+    return false;
+  }
+  if (/does not provide an export named/.test(message)) {
+    descriptor.unsupported = [
+      message.includes("pi-tui") ? "upstream_tui_values" : "upstream_host_values",
+    ];
+    descriptor.error = undefined;
+    return true;
+  }
+  if (/Cannot find package '@earendil-works\//.test(message)) {
+    descriptor.unsupported = ["upstream_host_values"];
+    descriptor.error = undefined;
+    return true;
+  }
+  return false;
+}
+
 async function activateExtension(extensionPath: string, state?: Partial<HostState>): Promise<void> {
   const descriptor: ExtensionDescriptor = { path: extensionPath, unsupported: [] };
   try {
@@ -111,7 +135,10 @@ async function activateExtension(extensionPath: string, state?: Partial<HostStat
     descriptor.events = [...api.handlers.keys()];
     loaded.push(descriptor);
   } catch (error) {
-    descriptor.error = error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (!classifyActivationError(descriptor, message)) {
+      descriptor.error = message;
+    }
     loaded.push(descriptor);
   }
 }

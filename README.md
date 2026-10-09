@@ -9,27 +9,17 @@
 
 ## 1. 当前状态与能力边界
 
-当前版本号是 `0.5.0`，主干能力推进到 Phase 11，并包含 checkpoint 之后的 TUI、工具组合和
-Windows Git Bash 修复。它已经是一个可实际对话、调用工具、修改代码并保存会话的本地 Agent，
-但 **Phase 12 的完整 CLI/RPC 和 Phase 13 的发布审查尚未完成，不能视为 1.0 或发布就绪版本**。
-
-为了避免把“代码里已有”误写成“用户现在就能用”，能力分为三层：
+主干能力推进到 Phase 17:双运行时扩展(Python + 经 Node host 的官方
+TypeScript 扩展)、完整 CLI 分发(包管理/认证/会话维护/导入/HTML 导出)、
+本地 JSONL RPC、语义差分与故障恢复验收均已完成并验证。它是一个可实际对话、
+调用工具、修改代码、保存会话并加载真实生态扩展的本地 Agent。**MCP、子代理、
+worktree 运行时与 1.0 发布门(Phase 18–21)尚未实现**。
 
 | 层级 | 当前能力 | 如何使用 |
 | --- | --- | --- |
-| 默认 CLI/TUI | DeepSeek 对话、流式 thinking/text、`read`、`bash`、`edit`、`write`、持久化 v3 Session、regular/fullscreen TUI、文本附件、会话切换和分叉 | 直接运行 `pi-python` |
-| SDK/内部可选 | 自定义 Provider/工具、七工具注册表、逐工具权限、压缩/分支摘要、资源/Extension/包管理底层、同步 SDK | Python API 显式注入并配置 |
-| 尚未接入当前 CLI | `grep/find/ls` 默认注入、项目 trust 管理命令、包安装命令、`@file` 参数、HTML export、本地 JSONL RPC、远程 Session | Phase 12 或 Post-1.0 |
-
-七个 Coding Tools 都有实现和契约测试，但默认 Agent 只创建四个：
-
-```text
-默认：read, bash, edit, write
-可注入：grep, find, ls
-```
-
-`grep/find/ls` 需要调用方分别提供 `SearchOperations` 和 `FilesystemOperations`；仅仅导入
-`create_all_tools()` 不会自动获得原生实现。
+| 默认 CLI/TUI | DeepSeek 对话、流式 thinking/text、七个内建工具(read/bash/edit/write/grep/find/ls)、`@file` 附件、HTML 导出、持久化 v3 Session、regular/fullscreen TUI、会话切换/分叉/修复、包管理、RPC 模式 | 直接运行 `pi-python`(详见 [docs/usage.md](docs/usage.md)) |
+| 扩展 | Python 扩展完整运行时;上游 TypeScript 扩展经 Node host 零修改执行(自定义 TUI 组件与自定义 Provider 除外,报告为 unsupported) | 安装后即用,详见 [docs/architecture.md](docs/architecture.md) |
+| 尚未实现 | MCP、子代理/后台任务、worktree 任务运行时、远程 Session | Phase 18–20 |
 
 完整路线图见 [tasks/plan.md](tasks/plan.md)，原子任务见 [tasks/todo.md](tasks/todo.md)，
 兼容范围见 [surface matrix](docs/compatibility/surface-matrix.md)。
@@ -596,10 +586,13 @@ uv run --frozen python scripts/ts_oracle.py --source D:\pi verify
 
 ## 12. 已知未完成项
 
-- Phase 12 完整 CLI、`@file`/多模态参数、HTML export、trust/package 命令、本地 JSONL RPC；
-- 远程 Session、Harness、SQLite、lanes（Post-1.0）；
-- Phase 13 跨平台安装、许可、发布和最终验收；
+- MCP Host(Phase 18)、子代理与后台任务(Phase 19)、worktree 任务运行时(Phase 20);
+- 安全/跨平台发布门与 1.0 发布流程(Phase 21);
+- 远程 Session、Harness、SQLite、lanes(Post-1.0);
 - macOS 在当前 1.0 compatibility scope 中明确不支持。
+
+日常使用说明见 [docs/usage.md](docs/usage.md);架构与模块边界见
+[docs/architecture.md](docs/architecture.md)。
 
 ## 13. 许可状态
 

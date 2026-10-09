@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -9,8 +10,16 @@ from pathlib import Path
 from typing import Literal, TextIO
 from uuid import uuid4
 
-from pi_ai import AssistantMessage, CredentialResolver, ModelThinkingLevel, clamp_thinking_level
+from pi_ai import (
+    AssistantMessage,
+    CredentialResolver,
+    ModelThinkingLevel,
+    UserMessage,
+    clamp_thinking_level,
+)
 
+from ..attachments import supports_image_input
+from ..cli.file_args import build_attachment_message, process_file_arguments
 from ..model_runtime import ModelRuntime, create_model_runtime, select_model_argument
 from ..presenters import JsonEventPresenter, assistant_text
 from ..sdk import (
@@ -47,6 +56,7 @@ class HeadlessOptions:
     no_session: bool = False
     session: str | None = None
     session_id: str | None = None
+    file_args: tuple[str, ...] = ()
     fork: str | None = None
     resume: bool = False
     session_dir: Path | None = None
@@ -133,6 +143,14 @@ async def run_headless(options: HeadlessOptions, *, stdout: TextIO, stderr: Text
         runtime.model, options.thinking_level or model_thinking or "high"
     )
     selection = options.tool_selection or ToolSelection()
+    prompt: str | AssistantMessage | UserMessage = options.prompt
+    if options.file_args:
+        files = process_file_arguments(
+            options.file_args,
+            cwd=options.cwd,
+            image_supported=supports_image_input(runtime.model),
+        )
+        prompt = build_attachment_message(options.prompt, files, timestamp=int(time.time() * 1000))
     runtime_factory = options.runtime_factory or create_agent_session
     created = await runtime_factory(
         CreateAgentSessionOptions(
@@ -157,7 +175,7 @@ async def run_headless(options: HeadlessOptions, *, stdout: TextIO, stderr: Text
             )
         if options.mode == "json":
             created.session.subscribe(JsonEventPresenter(stdout))
-        await created.session.prompt(options.prompt)
+        await created.session.prompt(prompt)
         assistants = [
             message for message in created.session.messages if isinstance(message, AssistantMessage)
         ]
