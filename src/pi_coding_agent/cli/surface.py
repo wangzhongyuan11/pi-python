@@ -84,9 +84,12 @@ def format_extension_flag_help(registrations: Iterable[Registration]) -> str:
     for registration in registrations:
         if registration.kind != "flag":
             continue
-        suffix = " <value>" if isinstance(registration.payload, FlagState) and (
-            registration.payload.value_type == "string"
-        ) else ""
+        suffix = (
+            " <value>"
+            if isinstance(registration.payload, FlagState)
+            and (registration.payload.value_type == "string")
+            else ""
+        )
         rows.append(f"  {registration.name}{suffix}\t({registration.source})")
     if not rows:
         return ""
