@@ -6,13 +6,13 @@ import pytest
 
 from pi_coding_agent.bootstrap import BootstrapConfig, ProductBootstrap
 from pi_coding_agent.config.settings import SettingsManager
+from pi_coding_agent.export.html import HtmlSessionExporter
 from pi_coding_agent.extensions.runtime import DefaultExtensionRuntime
 from pi_coding_agent.ports import (
     DefaultSessionImporter,
     InMemorySettings,
     NoopExtensionRuntime,
     NoopResourceLoader,
-    NoopSessionExporter,
 )
 from pi_coding_agent.resources.default_loader import DefaultResourceLoader
 from pi_coding_agent.services import ServiceOverrides
@@ -30,7 +30,7 @@ def test_default_bootstrap_builds_one_stable_service_graph(tmp_path: Path) -> No
     assert isinstance(cli_services.settings, SettingsManager)
     assert isinstance(cli_services.resources, DefaultResourceLoader)
     assert isinstance(cli_services.extensions, DefaultExtensionRuntime)
-    assert isinstance(cli_services.exporter, NoopSessionExporter)
+    assert isinstance(cli_services.exporter, HtmlSessionExporter)
     assert isinstance(cli_services.importer, DefaultSessionImporter)
     assert isinstance(cli_services.ui, NoopUI)
 
@@ -39,7 +39,7 @@ def test_bootstrap_preserves_explicit_service_identity(tmp_path: Path) -> None:
     settings = InMemorySettings({"model": "deepseek-v4-pro"})
     resources = NoopResourceLoader()
     extensions = NoopExtensionRuntime()
-    exporter = NoopSessionExporter()
+    exporter = HtmlSessionExporter()
     importer = DefaultSessionImporter()
     ui = MemoryUI()
     overrides = ServiceOverrides(

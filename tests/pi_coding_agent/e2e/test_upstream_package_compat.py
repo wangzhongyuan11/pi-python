@@ -52,7 +52,10 @@ def test_upstream_package_survives_restart_with_portable_and_dual_runtime_resour
     report = inspect_package(installed)
 
     assert (installed / "extensions/official.ts").is_file()
-    assert {item.name for item in result.extensions} == {"upstream-python-proof"}
+    assert {item.name for item in result.extensions} == {
+        "upstream-python-proof",
+        "official",
+    }
     assert {(item.kind, item.name) for item in result.descriptors} >= {
         ("skill", "SKILL"),
         ("prompt", "review"),
@@ -89,5 +92,8 @@ def test_offline_npm_fixture_uses_the_same_restart_and_discovery_path(tmp_path: 
         ("prompt", "review"),
         ("theme", "upstream"),
     }
-    assert {item.name for item in result.extensions} == {"upstream-python-proof"}
+    assert {item.name for item in result.extensions} == {
+        "upstream-python-proof",
+        "official",
+    }
     assert inspect_package(installed).overall == "bridged"

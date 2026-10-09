@@ -6,8 +6,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
-import pytest
-
 from pi_ai import FakeProvider, Model, fake_assistant_message, fake_model
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.ports import ResourceRoot
@@ -226,7 +224,7 @@ def test_export_html_writes_an_escaped_document(tmp_path: Path) -> None:
         )
         async with created:
             await created.session.prompt("<script>alert(1)</script>")
-            result = await RpcCommandAdapter(created).execute(
+            await RpcCommandAdapter(created).execute(
                 parse_rpc_command({"type": "export_html", "outputPath": str(tmp_path / "out.html")})
             )
 
