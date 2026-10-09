@@ -271,6 +271,20 @@ def _collect_extensions(
         if resolved in seen:
             continue
         seen.add(resolved)
+        if resolved.is_file():
+            # A package manifest may declare a single extension FILE
+            # (e.g. "pi": {"extensions": ["./index.js"]}). Report it as a
+            # bridged entry; the Python loader skips non-.py entries and the
+            # Node host activates them.
+            discovered.append(
+                ExtensionMetadata(
+                    name=resolved.stem,
+                    version="",
+                    entry=resolved.name,
+                    path=resolved.parent,
+                )
+            )
+            continue
         if not root.is_dir():
             continue
         if (root / MANIFEST_NAME).is_file():

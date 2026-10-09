@@ -40,24 +40,70 @@ class DependencyInstaller:
         raise NotImplementedError
 
 
-class NpmInstaller(DependencyInstaller):
-    """Run an isolated ``npm install --ignore-scripts`` for one module root."""
+_UPSTREAM_PEER_PREFIX = "@earendil-works/"
 
-    def __init__(self, npm_executable: str = "npm") -> None:
+
+def _npm_installer() -> str | None:
+    return shutil.which("npm")
+
+
+class NpmInstaller(DependencyInstaller):
+    """Run an isolated ``npm install --ignore-scripts`` for one module root.
+
+    Runtime dependencies are installed into the package's own node_modules.
+    Missing third-party peer dependencies (e.g. ``typebox`` used for tool
+    schemas) are installed too; upstream ``@earendil-works/*`` peers are NOT
+    installed — the host intercepts those specifiers with stubs.
+    """
+
+    def __init__(self, npm_executable: str | None = None) -> None:
         self._npm = npm_executable
 
     def install(self, module_root: Path) -> None:
         manifest = module_root / "package.json"
-        if not manifest.exists() or (module_root / "node_modules").exists():
+        if not manifest.exists():
             return
+        npm = self._npm or _npm_installer()
+        if npm is None:
+            raise NodeHostError(
+                "npm executable not found on PATH; cannot install extension dependencies"
+            )
         try:
-            declared = json.loads(manifest.read_text(encoding="utf-8")).get("dependencies")
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return
-        if not isinstance(declared, dict) or not declared:
+        dependencies = payload.get("dependencies")
+        peers = payload.get("peerDependencies")
+        targets: list[str] = []
+        if isinstance(dependencies, dict) and dependencies:
+            if not (module_root / "node_modules").exists():
+                targets.append("")
+        missing_peers: list[str] = []
+        if isinstance(peers, dict):
+            for name, spec in peers.items():
+                if name.startswith(_UPSTREAM_PEER_PREFIX):
+                    continue
+                spec_text = str(spec)
+                if spec_text and spec_text != "*":
+                    targets.append(f"{name}@{spec_text}")
+                else:
+                    missing_peers.append(name)
+        if missing_peers:
+            listed = subprocess.run(
+                [npm, "view", *missing_peers, "name"],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+            )
+            if listed.returncode == 0:
+                targets.extend(missing_peers)
+        if not targets:
             return
         completed = subprocess.run(
-            [self._npm, "install", "--ignore-scripts", "--no-audit", "--no-fund"],
+            [npm, "install", "--ignore-scripts", "--no-audit", "--no-fund", *targets],
             cwd=module_root,
             capture_output=True,
             text=True,

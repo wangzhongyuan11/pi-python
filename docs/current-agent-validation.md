@@ -554,3 +554,29 @@ pi-python 当前缺口(除计划内 Post-v1 外,对"达到 codex/pi-agent 体验
 
 备注：前几次尝试中 `/exit` 在回合仍活跃时被输入轮询捕获为 steering（模型回复"再见"）——
 这正是 F7 已验收的"回合中插话"语义，属测试脚本时序问题而非产品缺陷；空闲提交后退出正常。
+
+### H. 真实公开 npm Package 的 Node host 激活验收（Phase 15.5 收尾）
+
+**通过(结构性 unsupported 按契约报告)。** 真实生态包 `npm:pi-subagents@0.76.1`(MIT,
+上游 pi.dev/gallery 生态,`pi`: extensions `./index.js` + skills + prompts)在临时项目:
+
+1. `pi-python install npm:pi-subagents --no-approve` → 安装成功并 `list` 可见(修复
+   Windows `npm.cmd` 解析:`_npm_pack`/`NpmInstaller` 均改经 `shutil.which("npm")`);
+2. 兼容检查(`inspect_package`)逐项报告:extension `index.js` = **bridged**,
+   skills/prompts = **portable**;
+3. 包根级**文件型**扩展条目(`pi.extensions: ["./index.js"]`)此前被
+   `_collect_extensions` 跳过(只识别目录)——已修复并补回归
+   (`test_file_root_extension.py`);修复后真实包的 skills(6 项:council、
+   parallel-research、review-loop 等)与 prompts(6 项)全部进入发现层;
+4. 激活发现该包依赖 `yaml`(dependencies)与 `typebox`(peerDependencies)——
+   `NpmInstaller` 已接线进 `attach_node_host` 并补装缺失的第三方 peer
+   (`@earendil-works/*` peer 不装,由 host stub 拦截);依赖装齐后 `yaml`/`typebox`
+   均可解析;
+5. 该扩展从 `@earendil-works/pi-tui` **值导入** `truncateToWidth`,在 ESM 链接期失败
+   ——属 ADR 0009 定义的结构性 unsupported(TUI 组件无法跨进程序列化)。host 现将
+   此类链接错误归类为 `unsupported: ["upstream_tui_values"]` 而非笼统 error,extension
+   descriptor 无 error 字段;skills/prompts 不受影响,产品保持可用。
+
+结论:公开 npm 包按 ADR 0009 的四级兼容契约正确分类与报告;portable 资源真实可用;
+bridged 扩展中依赖 TUI 值的部分按契约显式报告 unsupported。同时修复两个真实缺陷
+(npm.cmd 解析、文件型扩展条目发现)。

@@ -231,12 +231,15 @@ def _remove_sibling(path: Path, parent: Path) -> None:
 
 
 def _npm_pack(spec: str, cache_dir: Path) -> Path:
+    npm = shutil.which("npm")
+    if npm is None:
+        raise RuntimeError("npm executable not found on PATH; npm packages are unavailable")
     before = {
         path.name: (path.stat().st_mtime_ns, path.stat().st_size)
         for path in cache_dir.glob("*.tgz")
     }
     completed = subprocess.run(
-        ["npm", "pack", "--ignore-scripts", "--pack-destination", str(cache_dir), "--", spec],
+        [npm, "pack", "--ignore-scripts", "--pack-destination", str(cache_dir), "--", spec],
         check=False,
         capture_output=True,
         text=True,
