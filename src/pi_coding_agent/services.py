@@ -8,12 +8,12 @@ from pathlib import Path
 from pi_tui import UI, NoopUI
 
 from .config.settings import SettingsManager
+from .export.html import HtmlSessionExporter
 from .extensions.runtime import DefaultExtensionRuntime
 from .packages.manager import DefaultPackageManager
 from .ports import (
     DefaultSessionImporter,
     ExtensionRuntime,
-    NoopSessionExporter,
     ResourceKind,
     ResourceLoader,
     ResourceRoot,
@@ -98,7 +98,7 @@ def create_product_services(
         settings=settings,
         resources=resources,
         extensions=extensions,
-        exporter=(selected.exporter if selected.exporter is not None else NoopSessionExporter()),
+        exporter=(selected.exporter if selected.exporter is not None else HtmlSessionExporter()),
         importer=(selected.importer if selected.importer is not None else DefaultSessionImporter()),
         ui=ui,
         _static_resource_roots=selected.resource_roots,

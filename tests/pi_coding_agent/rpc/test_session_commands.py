@@ -215,9 +215,9 @@ def test_server_prompt_after_new_session_uses_replacement_and_streams_events(
     asyncio.run(scenario())
 
 
-def test_export_without_exporter_reports_unavailable(tmp_path: Path) -> None:
+def test_export_html_writes_an_escaped_document(tmp_path: Path) -> None:
     async def scenario() -> None:
-        provider = _Models()
+        provider = _Models([fake_assistant_message("exported answer")])
         created = await create_agent_session(
             CreateAgentSessionOptions(
                 cwd=tmp_path,
@@ -225,10 +225,17 @@ def test_export_without_exporter_reports_unavailable(tmp_path: Path) -> None:
             )
         )
         async with created:
-            with pytest.raises(RuntimeError, match="HTML exporter is not configured"):
-                await RpcCommandAdapter(created).execute(parse_rpc_command({"type": "export_html"}))
+            await created.session.prompt("<script>alert(1)</script>")
+            result = await RpcCommandAdapter(created).execute(
+                parse_rpc_command({"type": "export_html", "outputPath": str(tmp_path / "out.html")})
+            )
 
     asyncio.run(scenario())
+
+    exported = tmp_path / "out.html"
+    content = exported.read_text(encoding="utf-8")
+    assert "exported answer" in content
+    assert "<script>alert" not in content
 
 
 def test_compact_forwards_custom_instructions_to_model(tmp_path: Path) -> None:

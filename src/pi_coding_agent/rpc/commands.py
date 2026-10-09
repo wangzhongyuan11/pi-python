@@ -22,7 +22,6 @@ from pi_ai import (
 from pi_ai.wire.messages import dump_message
 
 from ..agent_session import AgentSession
-from ..ports import NoopSessionExporter
 from ..presenters import assistant_text
 from ..resources.prompts import load_prompt_descriptors
 from ..resources.skills import load_skill_descriptors
@@ -238,8 +237,6 @@ class RpcCommandAdapter:
     def _export(self, output_path: str | None) -> dict[str, str]:
         from ..session.export import export_session
 
-        if isinstance(self._created.services.exporter, NoopSessionExporter):
-            raise RuntimeError("HTML exporter is not configured (planned in Phase 17)")
         manager = self._created.session.session_manager
         destination = Path(output_path or f"{manager.header.id}.html")
         if not destination.is_absolute():

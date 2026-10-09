@@ -22,6 +22,7 @@ from ..model_runtime import ModelRuntime, UnknownModelError
 from ..providers import UnknownProviderError
 from ..sdk import AgentSessionFactory, ToolSelection
 from ..services import ServiceOverrides, create_product_services
+from ..session.catalog import open_session
 from ..session.errors import SessionError
 from ..tui.runner import InteractiveOptions, run_interactive
 from .file_args import split_file_arguments
@@ -253,6 +254,33 @@ def main(
     if arguments.session_dir:
         candidate = Path(arguments.session_dir)
         session_dir = (candidate if candidate.is_absolute() else runtime_cwd / candidate).resolve()
+    export_target = getattr(arguments, "export", None)
+    if export_target:
+        if not arguments.session:
+            errors.write("Error: --export requires --session <path|id>\n")
+            return 1
+        try:
+            manager = open_session(arguments.session, session_dir=session_dir)
+        except SessionError as error:
+            errors.write(f"Error: {error}\n")
+            return 1
+        exporter = (
+            service_overrides.exporter
+            if service_overrides is not None and service_overrides.exporter is not None
+            else None
+        )
+        if exporter is None:
+            from .export.html import HtmlSessionExporter
+
+            exporter = HtmlSessionExporter()
+        from ..session.export import export_session
+
+        destination = Path(export_target)
+        if not destination.is_absolute():
+            destination = runtime_cwd / destination
+        written = exporter.export(export_session(manager), destination.resolve())
+        output.write(f"exported {written}\n")
+        return 0
     if arguments.mode == "rpc":
         from ..rpc.runner import run_rpc
 
