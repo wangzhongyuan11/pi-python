@@ -89,16 +89,23 @@ const inflight = new Set<Promise<void>>();
  * at ESM link time with export/package errors — those are structured
  * unsupported capabilities per ADR 0009, not extension bugs.
  */
-function classifyActivationError(descriptor: ExtensionDescriptor, message: string): void {
+function classifyActivationError(descriptor: ExtensionDescriptor, message: string): boolean {
+  if (!message.includes("earendil")) {
+    return false;
+  }
   if (/does not provide an export named/.test(message)) {
-    descriptor.unsupported = [message.includes("pi-tui") ? "upstream_tui_values" : "upstream_host_values"];
+    descriptor.unsupported = [
+      message.includes("pi-tui") ? "upstream_tui_values" : "upstream_host_values",
+    ];
     descriptor.error = undefined;
-    return;
+    return true;
   }
   if (/Cannot find package '@earendil-works\//.test(message)) {
     descriptor.unsupported = ["upstream_host_values"];
     descriptor.error = undefined;
+    return true;
   }
+  return false;
 }
 
 async function activateExtension(extensionPath: string, state?: Partial<HostState>): Promise<void> {
@@ -129,12 +136,9 @@ async function activateExtension(extensionPath: string, state?: Partial<HostStat
     loaded.push(descriptor);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    classifyActivationError(descriptor, message);
-    if (descriptor.error === undefined) {
-      loaded.push(descriptor);
-      return;
+    if (!classifyActivationError(descriptor, message)) {
+      descriptor.error = message;
     }
-    descriptor.error = message;
     loaded.push(descriptor);
   }
 }
