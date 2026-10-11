@@ -34,7 +34,7 @@ def _run_node_probe() -> dict[str, object]:
     completed = subprocess.run(
         [
             "node",
-            "--experimental-strip-types",
+            "--experimental-transform-types",
             "--disable-warning=ExperimentalWarning",
             "-e",
             probe,

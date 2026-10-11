@@ -201,7 +201,7 @@ class NodeHostProcess:
         try:
             self._process = await asyncio.create_subprocess_exec(
                 self._node,
-                "--experimental-strip-types",
+                "--experimental-transform-types",
                 "--disable-warning=ExperimentalWarning",
                 "--import",
                 "./src/register.mjs",

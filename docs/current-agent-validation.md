@@ -580,3 +580,25 @@ pi-python 当前缺口(除计划内 Post-v1 外,对"达到 codex/pi-agent 体验
 结论:公开 npm 包按 ADR 0009 的四级兼容契约正确分类与报告;portable 资源真实可用;
 bridged 扩展中依赖 TUI 值的部分按契约显式报告 unsupported。同时修复两个真实缺陷
 (npm.cmd 解析、文件型扩展条目发现)。
+
+### I. MCP 适配器包的激活验证(Phase 15.5 / 18 前置调研)
+
+**真实包 `npm:pi-mcp-adapter@5.2.0`**(MCP 客户端适配器,依赖 @modelcontextprotocol/client):
+
+1. 安装成功;兼容检查 extension `index.ts` = **bridged**;
+2. 发现其 `index.ts` 使用 TS **参数属性**(`constructor(private ...)`),strip-only 模式无法
+   加载——host 启动标志已从 `--experimental-strip-types` 升级为
+   `--experimental-transform-types`(超集,支持参数属性/枚举),全部 29 项 node_host
+   测试与 954 项全量离线回归通过;
+3. 升级后模块可解析,但该包从 `@earendil-works/pi-tui` 值导入渲染组件,按 ADR 0009
+   报告 `unsupported: ["upstream_tui_values"]`——MCP 工具注册不会发生。
+   **这是架构正确的结果**:pi-python 的 MCP 集成路径是 Phase 18 的原生 `McpHost`
+   (Python 核心拥有连接生命周期),不需要经 TS 适配器中转。
+
+生态调研(npm `pi-package` 标签,2026-10-10):`pi-subagents`(多代理编排)、
+`pi-mcp-adapter` / `@pi-unipi/mcp` / `pi-mcp-extension`(MCP)、`pi-web-access`
+(网页/GitHub/PDF/YouTube)、`pi-lens`(LSP/静态分析)、`pi-fabric`(工具运行时)、
+`@gotgenes/pi-permission-system`(权限)、`@narumitw/pi-plan-mode`(计划模式)、
+`billion-context-pi`(上下文管理)、`pi-browser-use`(浏览器)等。skills/prompts 类
+资源(pi-subagents、pi-claude-marketplace 等)当前即可用;依赖 TUI 值的 TS 扩展
+显式报 unsupported;MCP 场景待 Phase 18 原生实现。
