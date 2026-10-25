@@ -44,7 +44,7 @@ class McpHost:
         self._restart_cap = restart_cap
         self._restart_delay = restart_delay
         self.restart_counts: dict[str, int] = {}
-        self._watchers: set[asyncio.Task[None]] = set()
+        self._watchers: dict[str, asyncio.Task[None]] = {}
         self._closed = False
 
     async def start(self, specs: list[ServerSpec]) -> None:
@@ -68,8 +68,10 @@ class McpHost:
                     return
 
         task = asyncio.create_task(watch())
-        self._watchers.add(task)
-        task.add_done_callback(self._watchers.discard)
+        self._watchers[server.spec.name] = task
+        task.add_done_callback(
+            lambda _task, *, _name=server.spec.name: self._watchers.pop(_name, None)
+        )
 
     async def _boot(self, server: _ManagedServer) -> None:
         transport = create_stdio_transport(server.spec)
@@ -142,9 +144,35 @@ class McpHost:
             "tools/call", {"name": tool_name, "arguments": arguments}
         )
 
+    async def restart(self, name: str) -> None:
+        """Manually restart one server (counts against the restart cap)."""
+
+        server = self._servers.get(name)
+        if server is None or self._closed:
+            return
+        if server.transport is not None:
+            await server.transport.close()
+            server.transport = None
+        await self._restart(server)
+
+    async def remove(self, name: str) -> None:
+        """Stop one server and drop it from the host so it stops being served."""
+
+        server = self._servers.pop(name, None)
+        watcher = self._watchers.pop(name, None)
+        if watcher is not None:
+            watcher.cancel()
+        if server is None:
+            return
+        if server.transport is not None:
+            try:
+                await server.transport.close()
+            except ProcessLookupError:
+                pass
+
     async def close(self) -> None:
         self._closed = True
-        for watcher in self._watchers:
+        for watcher in self._watchers.values():
             watcher.cancel()
         for server in self._servers.values():
             if server.transport is not None:
