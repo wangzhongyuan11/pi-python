@@ -171,8 +171,17 @@ class StdioTransport:
         if process is not None and stdin is not None and process.returncode is None:
             try:
                 stdin.close()
+            except (ConnectionResetError, RuntimeError, OSError):
+                pass
+            try:
                 await asyncio.wait_for(process.wait(), 5)
-            except (TimeoutError, ConnectionResetError, RuntimeError, OSError):
+            except TimeoutError:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+            except (ConnectionResetError, RuntimeError, OSError, ProcessLookupError):
+                pass
                 if process.returncode is None:
                     process.kill()
                 try:
