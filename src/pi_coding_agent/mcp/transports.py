@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import cast
 
@@ -37,12 +38,16 @@ class StdioTransport:
         return self._spec.name
 
     async def start(self) -> InitializedServer:
+        spawn_env: dict[str, str] | None = None
+        if self._spec.env:
+            spawn_env = {**os.environ, **self._spec.env}
         try:
             self._process = await asyncio.create_subprocess_exec(
                 *self._spec.command,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=spawn_env,
             )
         except OSError as error:
             raise McpTransportError(
