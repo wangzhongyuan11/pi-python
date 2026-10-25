@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import cast
 
-from pi_coding_agent.rpc.framing import JsonlFramer
+from ..rpc.framing import JsonlFramer
 
 from .contracts import InitializedServer, McpTransportError, ServerSpec
 
