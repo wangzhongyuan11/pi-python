@@ -41,6 +41,7 @@ class ExtensionAgentEndEvent:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AgentSettledEvent:
+    aborted: bool = False
     type: Literal["agent_settled"] = field(default="agent_settled", init=False)
 
 
@@ -101,6 +102,7 @@ class ExtensionToolExecutionEndEvent:
     tool_name: str
     result: object
     is_error: bool
+    duration_ms: int | None = None
     type: Literal["tool_execution_end"] = field(default="tool_execution_end", init=False)
 
 

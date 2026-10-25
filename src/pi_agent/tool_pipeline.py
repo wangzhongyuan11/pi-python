@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
@@ -81,6 +82,10 @@ class ToolCallOutcome:
     terminate: bool
 
 
+def _elapsed_ms(started_monotonic: float) -> int:
+    return int((time.monotonic() - started_monotonic) * 1000)
+
+
 async def _emit(sink: ToolEventSink | None, event: AgentEvent) -> None:
     if sink is None:
         return
@@ -113,6 +118,7 @@ async def execute_tool_call(
 ) -> ToolCallOutcome:
     if _preparation_gate is not None:
         await _preparation_gate.acquire()
+    started_monotonic = time.monotonic()
     try:
         await _emit(
             event_sink,
@@ -129,6 +135,7 @@ async def execute_tool_call(
                 _error_result(f"Tool {tool_call.name} not found"),
                 timestamp,
                 event_sink,
+                duration_ms=_elapsed_ms(started_monotonic),
                 emit_message_events=_emit_message_events,
             )
 
@@ -153,6 +160,7 @@ async def execute_tool_call(
                         ),
                         timestamp,
                         event_sink,
+                        duration_ms=_elapsed_ms(started_monotonic),
                         emit_message_events=_emit_message_events,
                     )
                 if before is not None and before.arguments is not _UNSET:
@@ -164,6 +172,7 @@ async def execute_tool_call(
                     _error_result("Operation aborted"),
                     timestamp,
                     event_sink,
+                    duration_ms=_elapsed_ms(started_monotonic),
                     emit_message_events=_emit_message_events,
                 )
         except Exception as error:
@@ -172,6 +181,7 @@ async def execute_tool_call(
                 _error_result(str(error)),
                 timestamp,
                 event_sink,
+                duration_ms=_elapsed_ms(started_monotonic),
                 emit_message_events=_emit_message_events,
             )
     finally:
@@ -247,6 +257,7 @@ async def execute_tool_call(
         is_error,
         timestamp,
         event_sink,
+        duration_ms=_elapsed_ms(started_monotonic),
         emit_message_events=_emit_message_events,
     )
 
@@ -280,6 +291,7 @@ async def _finalize_immediate(
     timestamp: int,
     event_sink: ToolEventSink | None,
     *,
+    duration_ms: int | None = None,
     emit_message_events: bool = True,
 ) -> ToolCallOutcome:
     return await _finalize(
@@ -288,6 +300,7 @@ async def _finalize_immediate(
         True,
         timestamp,
         event_sink,
+        duration_ms=duration_ms,
         emit_message_events=emit_message_events,
     )
 
@@ -299,6 +312,7 @@ async def _finalize(
     timestamp: int,
     event_sink: ToolEventSink | None,
     *,
+    duration_ms: int | None = None,
     emit_message_events: bool = True,
 ) -> ToolCallOutcome:
     await _emit(
@@ -308,13 +322,19 @@ async def _finalize(
             tool_name=tool_call.name,
             result=result,
             is_error=is_error,
+            duration_ms=duration_ms,
         ),
     )
+    details = result.details
+    if duration_ms is not None:
+        merged = dict(details) if isinstance(details, dict) else {}
+        merged.setdefault("durationMs", duration_ms)
+        details = cast("JsonValue", merged)
     message = ToolResultMessage(
         tool_call_id=tool_call.id,
         tool_name=tool_call.name,
         content=result.content,
-        details=cast("JsonValue", result.details),
+        details=cast("JsonValue", details),
         usage=result.usage,
         added_tool_names=result.added_tool_names,
         is_error=is_error,

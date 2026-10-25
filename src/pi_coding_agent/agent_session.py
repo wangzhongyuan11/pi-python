@@ -210,9 +210,16 @@ class AgentSession:
         await self._emit_extension(UiPromptStartEvent(prompt=prompt))
         try:
             await self._run_prompt(prompt)
-            await self._emit_extension(AgentSettledEvent())
+            await self._emit_extension(AgentSettledEvent(aborted=self._run_was_aborted()))
         finally:
             await self._emit_extension(UiPromptEndEvent(prompt=prompt))
+
+    def _run_was_aborted(self) -> bool:
+        last = self.agent.state.messages[-1] if self.agent.state.messages else None
+        return (
+            bool(isinstance(last, AssistantMessage) and last.stop_reason == "aborted")
+            or self.agent.state.is_streaming
+        )
 
     async def _run_prompt(self, prompt: str | AgentMessage | Sequence[AgentMessage]) -> None:
         self._ensure_open()
@@ -740,6 +747,7 @@ class AgentSession:
                 tool_name=event.tool_name,
                 result=event.result,
                 is_error=event.is_error,
+                duration_ms=event.duration_ms,
             )
         await self._emit_extension(extension_event)
         if isinstance(event, TurnEndEvent):
