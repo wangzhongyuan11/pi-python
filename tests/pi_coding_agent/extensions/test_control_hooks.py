@@ -210,7 +210,9 @@ def test_control_hooks_modify_provider_context_headers_tool_args_and_result(
     assert [block.text for block in result.content if isinstance(block, TextContent)] == [
         "result-hook"
     ]
-    assert result.details == {"hooked": True, "chained": True}
+    # finalize merges durationMs into details (1.1.0 contract).
+    assert result.details["hooked"] is True
+    assert result.details["chained"] is True
     assert result.is_error is False
     assert len(provider.calls) == 2
     _request_model, request_context = provider.calls[0]
