@@ -180,6 +180,7 @@ class StdioTransport:
                     process.kill()
                 except ProcessLookupError:
                     pass
+                await process.wait()
             except (ConnectionResetError, RuntimeError, OSError, ProcessLookupError):
                 pass
                 if process.returncode is None:
