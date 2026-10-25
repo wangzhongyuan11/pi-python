@@ -19,6 +19,7 @@ from pi_agent import (
     Agent,
     AgentMessage,
     AgentTool,
+    AgentToolResult,
     BeforeToolCallContext,
     BeforeToolCallResult,
 )
@@ -61,6 +62,7 @@ from .extensions.events import (
 )
 from .extensions.hooks import HookOutcome
 from .extensions.registry import ExtensionFlagError
+from .mcp.mapping import map_tools
 from .model_runtime import ModelRuntime, create_model_runtime
 from .ports import ExtensionRuntime, Settings
 from .prompts.system import build_system_prompt
@@ -310,6 +312,7 @@ class CreateAgentSessionOptions:
     tool_names: tuple[str, ...] | None = None
     exclude_tools: tuple[str, ...] | None = None
     permission_gate: PermissionGate | None = None
+    mcp_host: object | None = None
     agent_clock: Callable[[], int] | None = None
     entry_id_factory: Callable[[], str] = lambda: uuid4().hex
     timestamp_factory: Callable[[], str] = _timestamp
@@ -389,6 +392,33 @@ class CreatedAgentSession:
 
 
 type AgentSessionFactory = Callable[[CreateAgentSessionOptions], Awaitable[CreatedAgentSession]]
+
+
+class _McpSearchArgs(BaseModel):
+    query: str
+
+
+def _build_mcp_search_tool(mcp_host: object, entries: list[dict[str, object]]) -> AgentTool:
+    """Compact search tool per MCP host: lists matching tools and activates them."""
+
+    descriptions = [
+        f"{entry.get('name')} ({entry.get('server')}): {entry.get('description', '')}"
+        for entry in entries
+    ]
+
+    async def _execute(_call_id: str, params: BaseModel, _abort: object, _update: object) -> AgentToolResult:
+        query = (params.query or "").casefold()
+        matched = [name for name in descriptions if query in name.casefold()]
+        listing = "\n".join(matched or descriptions)
+        return AgentToolResult(content=(TextContent(text=listing),), details=None)
+
+    return AgentTool(
+        name="mcp_search",
+        label="MCP tool search",
+        description="Search MCP tools by keyword; matching tools activate on the next request.",
+        parameter_type=_McpSearchArgs,
+        execute=_execute,
+    )
 
 
 async def create_agent_session(
@@ -532,8 +562,32 @@ async def create_agent_session(
         if selected.no_tools == "all":
             extension_tools = ()
         extension_tools = tuple(tool for tool in extension_tools if tool.name not in excluded_tools)
-        all_registered_tools = (*all_configured_tools, *extension_tools)
-        active_tool_names = tuple(tool.name for tool in (*configured_tools, *extension_tools))
+        mcp_tools: tuple[AgentTool[BaseModel, object], ...] = ()
+        if selected.mcp_host is not None and selected.no_tools not in {"all", "builtin"}:
+            server_tools = await selected.mcp_host.list_tools()
+            server_by_tool = {
+                str(entry.get("name")): str(entry.get("server")) for entry in server_tools
+            }
+
+            async def relay(
+                tool_name: str, arguments: dict[str, object]
+            ) -> dict[str, object]:
+                assert selected.mcp_host is not None
+                return await selected.mcp_host.call_tool(
+                    server_by_tool[tool_name], tool_name, arguments
+                )
+
+            mcp_tools = map_tools(list(server_tools), server="mcp", relay=relay)
+            search_tool = _build_mcp_search_tool(selected.mcp_host, list(server_tools))
+            mcp_active: tuple[AgentTool[BaseModel, object], ...] = ()
+            all_registered_tools = (*all_configured_tools, *extension_tools, search_tool, *mcp_tools)
+            active_tool_names = tuple(
+                tool.name for tool in (*configured_tools, *extension_tools, search_tool)
+            )
+        else:
+            mcp_active = ()
+            all_registered_tools = (*all_configured_tools, *extension_tools)
+            active_tool_names = tuple(tool.name for tool in (*configured_tools, *extension_tools))
         tool_names = [tool.name for tool in all_registered_tools]
         if len(set(tool_names)) != len(tool_names):
             raise ValueError("duplicate tool names across configured and extension tools")
@@ -621,6 +675,23 @@ async def create_agent_session(
         bind_session = getattr(services.extensions, "bind_session", None)
         if callable(bind_session):
             bind_session(session=session, model_runtime=model_runtime, all_tools=all_tools)
+        if selected.mcp_host is not None and mcp_tools:
+
+            def _activate_mcp_tools(event: object, _signal: object) -> None:
+                from pi_agent import ToolExecutionEndEvent
+
+                if (
+                    isinstance(event, ToolExecutionEndEvent)
+                    and event.tool_name == "mcp_search"
+                    and agent is not None
+                ):
+                    current = [tool.name for tool in agent.state.tools]
+                    for tool in mcp_tools:
+                        if tool.name not in current:
+                            current.append(tool.name)
+                    agent.set_active_tool_names(current)
+
+            agent.subscribe(_activate_mcp_tools)
         return RuntimeComponents(
             session=session,
             services=services,
