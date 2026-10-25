@@ -20,7 +20,12 @@ from pi_ai import (
 
 from ..attachments import supports_image_input
 from ..cli.file_args import build_attachment_message, process_file_arguments
-from ..model_runtime import ModelRuntime, create_model_runtime, select_model_argument
+from ..model_runtime import (
+    ModelRuntime,
+    VirtualModelTable,
+    create_model_runtime,
+    select_model_argument,
+)
 from ..presenters import JsonEventPresenter, assistant_text
 from ..sdk import (
     AgentSessionFactory,
@@ -61,6 +66,7 @@ class HeadlessOptions:
     resume: bool = False
     session_dir: Path | None = None
     model_runtime: ModelRuntime | None = None
+    virtual_models: VirtualModelTable = field(default_factory=dict)
     tool_selection: ToolSelection | None = None
     name: str | None = None
     service_overrides: ServiceOverrides = field(default_factory=ServiceOverrides)
@@ -138,7 +144,9 @@ async def run_headless(options: HeadlessOptions, *, stdout: TextIO, stderr: Text
             provider_id=options.provider_id,
         )
     if options.model_id is not None:
-        _selected, model_thinking = select_model_argument(runtime, options.model_id)
+        _selected, model_thinking = select_model_argument(
+            runtime, options.model_id, virtual_models=options.virtual_models
+        )
     thinking = clamp_thinking_level(
         runtime.model, options.thinking_level or model_thinking or "high"
     )

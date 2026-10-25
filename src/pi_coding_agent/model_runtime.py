@@ -174,8 +174,36 @@ def match_model_argument(runtime: ModelRuntime, argument: str) -> str:
 _THINKING_LEVEL_CHOICES = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
+type VirtualModelTable = dict[str, tuple[str, ModelThinkingLevel | None]]
+
+
+def virtual_models_from_payload(payload: object) -> VirtualModelTable:
+    """Normalize an untrusted ``virtualModels`` settings payload (bad entries drop)."""
+
+    if not isinstance(payload, dict):
+        return {}
+    table: VirtualModelTable = {}
+    for raw_name, raw_entry in payload.items():
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            continue
+        if not isinstance(raw_entry, dict):
+            continue
+        model_id = raw_entry.get("model")
+        if not isinstance(model_id, str) or not model_id.strip():
+            continue
+        thinking = raw_entry.get("thinkingLevel")
+        level: ModelThinkingLevel | None = (
+            thinking if isinstance(thinking, str) and thinking in _THINKING_LEVEL_CHOICES else None
+        )
+        table[raw_name] = (model_id, level)
+    return table
+
+
 def select_model_argument(
-    runtime: ModelRuntime, argument: str
+    runtime: ModelRuntime,
+    argument: str,
+    *,
+    virtual_models: VirtualModelTable | None = None,
 ) -> tuple[Model, ModelThinkingLevel | None]:
     """Resolve a CLI ``--model`` argument and select it on ``runtime``.
 
@@ -183,7 +211,8 @@ def select_model_argument(
     model id, or a unique partial match, plus the ``:<thinking>`` shorthand
     suffix. A suffix that names a valid thinking level is returned to the
     caller so an explicit ``--thinking`` flag can still take precedence; any
-    other suffix is ignored and the remaining pattern is matched.
+    other suffix is ignored and the remaining pattern is matched. Real models
+    win over settings-defined virtual aliases that share their name.
     """
 
     pattern = argument.strip()
@@ -193,7 +222,16 @@ def select_model_argument(
         pattern = head
         if suffix in _THINKING_LEVEL_CHOICES:
             thinking = suffix
-    resolved = match_model_argument(runtime, pattern)
+    try:
+        resolved = match_model_argument(runtime, pattern)
+    except ValueError:
+        table = virtual_models or {}
+        entry = table.get(pattern)
+        if entry is None:
+            raise
+        model_id, virtual_thinking = entry
+        model = runtime.select_model(model_id)
+        return model, thinking if thinking is not None else virtual_thinking
     provider_id, _, model_id = resolved.partition("/")
     model = runtime.select_model(model_id, provider_id=provider_id)
     return model, thinking
@@ -203,7 +241,9 @@ __all__ = [
     "ModelCapabilityError",
     "ModelRuntime",
     "UnknownModelError",
+    "VirtualModelTable",
     "create_model_runtime",
     "match_model_argument",
     "select_model_argument",
+    "virtual_models_from_payload",
 ]
