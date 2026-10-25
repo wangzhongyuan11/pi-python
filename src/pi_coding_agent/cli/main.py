@@ -381,6 +381,9 @@ def main(
             errors.write(f"{error}\n")
             return 1
     resolver = _resolver(arguments, cwd=runtime_cwd, environ=runtime_environ)
+    agent_dir = Path(
+        runtime_environ.get("PI_PYTHON_AGENT_DIR", Path.home() / ".pi-python" / "agent")
+    )
     try:
         return asyncio.run(
             run_headless(
@@ -427,6 +430,13 @@ def main(
     ) as error:
         errors.write(f"{error}\n")
         return 1
+    except BaseException as error:
+        if isinstance(error, KeyboardInterrupt):
+            return 130
+        from ..crash_log import write_crash_log
+
+        write_crash_log(agent_dir, error)
+        raise
     parser.print_help(output)
     return 0
 

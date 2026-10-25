@@ -30,7 +30,7 @@ def test_estimate_uses_three_point_five_chars_per_token() -> None:
     # 3.5 chars/token → exactly 100 tokens for 350 chars (ceil handles json overhead).
     tokens = estimate_entry_tokens(entry)
 
-    expected = math.ceil((len(entry.model_dump_json(by_alias=True, exclude_none=True)) / 3.5))
+    expected = math.ceil(len(entry.model_dump_json(by_alias=True, exclude_none=True)) / 3.5)
     assert tokens == expected
     assert tokens > 0
 

@@ -9,8 +9,9 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from pi_ai import FakeProvider, ToolCall, fake_assistant_message, fake_model
 from pydantic import BaseModel
+
+from pi_ai import FakeProvider, ToolCall, fake_assistant_message
 
 
 class _Args(BaseModel):

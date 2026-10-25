@@ -5,7 +5,15 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from pi_ai import AssistantStream, Context, FakeProvider, Model, StreamOptions, fake_assistant_message, fake_model
+from pi_ai import (
+    AssistantStream,
+    Context,
+    FakeProvider,
+    Model,
+    StreamOptions,
+    fake_assistant_message,
+    fake_model,
+)
 from pi_coding_agent.extensions.events import AgentSettledEvent, ExtensionAgentEndEvent
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.sdk import CreateAgentSessionOptions, create_agent_session
