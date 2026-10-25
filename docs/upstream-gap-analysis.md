@@ -125,13 +125,18 @@ pi-python:interactive/print/json/rpc ✅;acp/agent-hub/hud ❌。
 
 ## 4. 差距分级与建议
 
-### A 级(建议尽快,低成本高确定性)
-1. `agent_settled`/JSON 事件补 `aborted` 字段;工具事件补 `durationMs`——事件契约级,对齐 1.1.0。
-2. compaction 估算 4 → 3.5 chars/token(上游实测减少 context-limit 失败),带常量测试。
-3. `--tools +name/-name` 增量语法与 `*` 通配(解析层小改)。
-4. crash-log(崩溃时把最近转写/错误落 agent dir)——纯本地,无遥测边界。
+### A 级(✅ 已全部闭环,2026-10-10,分支 phase/18-gap-closure)
+1. ✅ `agent_settled` 补 `aborted` 字段(abort 后中端流验证 aborted=True);
+2. ✅ 工具事件补 `durationMs`(tool_execution_end 扩展事件 + ToolResultMessage.details
+   持久化,重载会话后仍在);
+3. ✅ compaction 估算 4 → 3.5 chars/token(常量测试锁定);
+4. ✅ `--tools +name/-name` 增量语法与 `*`/`?`/`[...]` 通配(增量基准为默认四工具;
+   `mcp__*` 模式穿透至扩展层);
+5. ✅ crash-log:顶层异常落盘 `agent/crash/<stamp>-<pid>/`(error.txt + meta.json +
+   最近 100 条 entries;best-effort,失败不遮蔽原异常);CLI main 已接线。
 
-### B 级(已排期,Phase 18 对齐上游形态)
+### B 级(已排期,Phase 18 对齐上游形态;2026-10-10 补充:host 已升级
+--experimental-transform-types 以加载真实 TS 扩展的参数属性语法)
 - MCP:P18 建议对齐 1.1.0 的交付形态——`mcp__server__tool` 命名、`--no-mcp`、工具模式匹配、OAuth 生命周期(超时/取消/端口回退)与 `/mcp` 实时管理;工具搜索(tool-search/deferred)并入 P18-T4。
 - 子代理(P19):参考 omp `task/` 的 in-process 执行 + workflow 命令 + 完成度自评估设计。
 

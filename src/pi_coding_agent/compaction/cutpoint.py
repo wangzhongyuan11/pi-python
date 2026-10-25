@@ -12,9 +12,13 @@ type TokenCounter = Callable[[SessionEntry], int]
 
 
 def estimate_entry_tokens(entry: SessionEntry) -> int:
-    """Conservatively estimate serialized Session entry tokens using chars/4."""
+    """Estimate serialized Session entry tokens at 3.5 chars/token.
+
+    Upstream 1.1.0 lowered this from 4 after finding that 4 under-estimated
+    input size and caused context-limit request failures.
+    """
     chars = len(entry.model_dump_json(by_alias=True, exclude_none=True))
-    return math.ceil(chars / 4)
+    return math.ceil(chars / 3.5)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

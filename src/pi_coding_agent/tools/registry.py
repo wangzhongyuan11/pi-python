@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -34,14 +35,54 @@ DEFAULT_READONLY_TOOL_NAMES = ("read", "grep", "find", "ls")
 
 
 def expand_tool_selection(names: str | tuple[str, ...]) -> tuple[str, ...]:
-    """Expand a CLI tool selection; the ``all`` keyword selects every built-in tool."""
+    """Expand a CLI tool selection.
+
+    ``all`` selects every built-in tool. Plain entries replace the selection.
+    ``+name`` adds to the defaults, ``-name`` removes from them, and
+    fnmatch-style ``*`` patterns match built-in tool names — ``mcp__*``
+    patterns pass through for extension-layer matching.
+    """
     if isinstance(names, str):
         parts: tuple[str, ...] = tuple(part.strip() for part in names.split(","))
     else:
         parts = names
     if any(part == "all" for part in parts):
         return ALL_TOOL_NAMES
-    return tuple(part for part in parts if part)
+
+    def matches_for(pattern: str) -> tuple[str, ...]:
+        matched = tuple(fnmatch.filter(ALL_TOOL_NAMES, pattern))
+        if pattern.startswith("mcp__"):
+            return (*matched, pattern)
+        return matched
+
+    has_adjustment = any(part[:1] in "+-" and len(part) > 1 for part in parts)
+    has_pattern = any(
+        any(ch in part for ch in "*?[") for part in parts if part[:1] not in "+-"
+    )
+    if not has_adjustment and not has_pattern:
+        return tuple(part for part in parts if part)
+
+    if has_adjustment:
+        selected = list(DEFAULT_CODING_TOOL_NAMES)
+    else:
+        selected = []
+    for part in parts:
+        if not part:
+            continue
+        sign, pattern = ("+", part) if part[0] not in "+-" else (part[0], part[1:])
+        if pattern == "all":
+            matches: tuple[str, ...] = ALL_TOOL_NAMES
+        else:
+            matches = matches_for(pattern)
+        if not matches:
+            continue
+        if sign == "+":
+            for name in matches:
+                if name not in selected:
+                    selected.append(name)
+        else:
+            selected = [name for name in selected if name not in matches]
+    return tuple(selected)
 
 
 class _InputModel(BaseModel):

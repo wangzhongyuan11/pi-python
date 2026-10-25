@@ -96,7 +96,9 @@ def test_pipeline_prepares_validates_hooks_executes_and_finalizes_in_order() -> 
         assert order == ["prepare", "before", "execute", "after"]
         assert outcome.is_error is False
         assert outcome.message.content == (TextContent(text="final"),)
-        assert outcome.message.details == {"value": 3}
+        # durationMs is merged into details by the finalize step (1.1.0 contract).
+        assert outcome.message.details["value"] == 3
+        assert isinstance(outcome.message.details["durationMs"], int)
         assert outcome.message.timestamp == 10
 
     asyncio.run(scenario())

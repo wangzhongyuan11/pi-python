@@ -75,6 +75,7 @@ class ToolExecutionEndEvent:
     tool_name: str
     result: object
     is_error: bool
+    duration_ms: int | None = None
     type: Literal["tool_execution_end"] = field(default="tool_execution_end", init=False)
 
 
