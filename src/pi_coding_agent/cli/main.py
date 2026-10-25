@@ -18,7 +18,12 @@ from pi_ai.providers.deepseek import DEEPSEEK_MODELS, DEFAULT_DEEPSEEK_MODEL
 
 from ..deepseek_credentials import DeepSeekCredentialResolver
 from ..extensions.registry import ExtensionFlagError
-from ..model_runtime import ModelRuntime, UnknownModelError
+from ..model_runtime import (
+    ModelRuntime,
+    UnknownModelError,
+    VirtualModelTable,
+    virtual_models_from_payload,
+)
 from ..providers import UnknownProviderError
 from ..sdk import AgentSessionFactory, ToolSelection
 from ..services import ServiceOverrides, create_product_services
@@ -85,6 +90,17 @@ def _resolver(
         env_file=env_file,
         cwd=cwd,
     )
+
+
+def _virtual_model_table(
+    cwd: Path, service_overrides: ServiceOverrides | None
+) -> VirtualModelTable:
+    settings = (
+        service_overrides.settings
+        if service_overrides is not None and service_overrides.settings is not None
+        else create_product_services(cwd, service_overrides).settings
+    )
+    return virtual_models_from_payload(settings.get("virtualModels"))
 
 
 def _resolve_key(resolver: DeepSeekCredentialResolver) -> str:
@@ -240,6 +256,7 @@ def main(
         errors.write("Error: RPC mode accepts commands on stdin, not positional prompts or -p\n")
         return 1
     tool_selection = tool_selection_from_arguments(arguments)
+    virtual_models = _virtual_model_table(runtime_cwd, service_overrides)
     project_trusted = bool(
         getattr(arguments, "approve", False) and not getattr(arguments, "no_approve", False)
     )
@@ -304,6 +321,7 @@ def main(
                         resume=arguments.resume or arguments.continue_session,
                         session_dir=session_dir,
                         model_runtime=model_runtime,
+                        virtual_models=virtual_models,
                         tool_selection=tool_selection,
                         name=session_name,
                         service_overrides=service_overrides or ServiceOverrides(),
@@ -352,6 +370,7 @@ def main(
                         resume=arguments.resume or arguments.continue_session,
                         session_dir=session_dir,
                         model_runtime=model_runtime,
+                        virtual_models=virtual_models,
                         tui_mode=arguments.tui_mode,
                         tool_selection=tool_selection,
                         name=session_name,
@@ -403,6 +422,7 @@ def main(
                     resume=arguments.resume or arguments.continue_session,
                     session_dir=session_dir,
                     model_runtime=model_runtime,
+                    virtual_models=virtual_models,
                     tool_selection=tool_selection,
                     name=session_name,
                     service_overrides=(

@@ -47,6 +47,7 @@ from ..extensions.registry import CapabilityRegistry
 from ..extensions.renderers import ExtensionRendererRegistry
 from ..model_runtime import (
     ModelRuntime,
+    VirtualModelTable,
     create_model_runtime,
     match_model_argument,
     select_model_argument,
@@ -347,6 +348,7 @@ class InteractiveOptions:
     resume: bool = False
     session_dir: Path | None = None
     model_runtime: ModelRuntime | None = None
+    virtual_models: VirtualModelTable = field(default_factory=dict)
     tui_mode: Literal["regular", "fullscreen"] = "regular"
     tool_selection: ToolSelection | None = None
     name: str | None = None
@@ -606,7 +608,9 @@ async def run_interactive(
             provider_id=options.provider_id,
         )
     if options.model_id is not None:
-        _selected, model_thinking = select_model_argument(runtime, options.model_id)
+        _selected, model_thinking = select_model_argument(
+            runtime, options.model_id, virtual_models=options.virtual_models
+        )
     thinking = clamp_thinking_level(
         runtime.model, options.thinking_level or model_thinking or "high"
     )

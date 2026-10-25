@@ -5,13 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-RegistrationKind = Literal["tool", "command", "provider", "flag", "shortcut"]
+RegistrationKind = Literal["tool", "command", "provider", "flag", "shortcut", "mcp_server"]
 REGISTRATION_KINDS: tuple[RegistrationKind, ...] = (
     "tool",
     "command",
     "provider",
     "flag",
     "shortcut",
+    "mcp_server",
 )
 
 

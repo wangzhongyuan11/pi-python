@@ -117,10 +117,12 @@ pi-python:interactive/print/json/rpc ✅;acp/agent-hub/hud ❌。
 | packages/*(spec/resolver/manifest/manager/npm_data) | package-manager-cli、core/package-manager | discovery | ✅ |
 | export/html.py | core/session-export(1.1.0 新) | — | ✅(P17-T03) |
 | node_host/* + node/extension-host | (上游无此概念——宿主即 TS) | — | ✅ 架构等价物(我们反过来用 Node host 跑 TS 扩展) |
-| — | core/mcp-servers + extensions/mcp | src/mcp(10.9k) | ❌ Phase 18 |
-| — | extensions/codemode + core/nested-tool-calls | src/tools/run-code、session/code-mode | ❌ 候选 |
-| — | extensions/tool-search | — | ❌ Phase 18-T4 邻接 |
-| — | core/cache-warmer、virtual-models、crash-log、settings-diagnostics | — | ❌/🟡 候选 |
+| — | core/mcp-servers + extensions/mcp | src/mcp(10.9k) | ✅ Phase 18(stdio transport/Host 生命周期/映射/deferred 激活/Package 声明/产品 E2E;OAuth 生命周期 ❌ Post-v1) |
+| — | extensions/codemode + core/nested-tool-calls | src/tools/run-code、session/code-mode | ❌ 已评估(P18.5-T03,见 §4 C 级) |
+| — | extensions/tool-search | — | ✅ P18-T04 deferred 工具(mcp_search + 增量激活) |
+| — | core/cache-warmer、settings-diagnostics | — | ❌/🟡 候选 |
+| — | core/virtual-models | — | ✅ P18.5-T02(settings virtualModels 别名 → 真实模型 + thinking 覆盖) |
+| — | — | usage-totals/checkpoint-entries | 🟡 usage-totals ✅ P18.5-T01(纯聚合);checkpoint-entries 候选 |
 | — | — | memories/mnemopi/hindsight、task、lsp/dap、web、acp、voice、security、eval、gh-* | ❌(Phase 19+ / 不排期) |
 
 ## 4. 差距分级与建议
@@ -135,14 +137,35 @@ pi-python:interactive/print/json/rpc ✅;acp/agent-hub/hud ❌。
 5. ✅ crash-log:顶层异常落盘 `agent/crash/<stamp>-<pid>/`(error.txt + meta.json +
    最近 100 条 entries;best-effort,失败不遮蔽原异常);CLI main 已接线。
 
-### B 级(已排期,Phase 18 对齐上游形态;2026-10-10 补充:host 已升级
---experimental-transform-types 以加载真实 TS 扩展的参数属性语法)
-- MCP:P18 建议对齐 1.1.0 的交付形态——`mcp__server__tool` 命名、`--no-mcp`、工具模式匹配、OAuth 生命周期(超时/取消/端口回退)与 `/mcp` 实时管理;工具搜索(tool-search/deferred)并入 P18-T4。
-- 子代理(P19):参考 omp `task/` 的 in-process 执行 + workflow 命令 + 完成度自评估设计。
+### B 级(✅ MCP 已全部闭环,2026-10-25,分支 phase/18-mcp;子代理见 Phase 19 排期)
+- ✅ MCP(P18-T01~T06):stdio JSON-RPC transport(握手/超时/结构化错误)、McpHost 生命周期
+  (看门狗/崩溃重启上限/按代关闭)、Tool/Prompt/content 双向映射(JSON schema→pydantic、
+  isError→异常)、deferred 工具激活(`mcp_search` 紧凑工具 + 工具执行后增量注入)、
+  Package 声明(`package.json#pi.mcpServers` + install/restart/remove 与 Host 状态一致)、
+  产品 E2E(调用/断线恢复/abort/switch/干净退出,`tests/fixtures/mcp_server`)。
+  与上游 1.1.0 的差异:OAuth 生命周期(超时/取消/端口回退)与 `/mcp` 实时管理面板未做
+  (Post-v1);工具命名沿用真实工具名 + `server` 元数据,未引入 `mcp__server__tool`
+  前缀(会话内以 server 归属区分,避免与用户工具名冲突语义)。
 
-### C 级(新增候选,未排期)
-- **codemode + nested-tool-calls**:上游 1.x 旗舰能力;建议作为 P18 后的独立阶段评估。
-- virtual-models、cache-warmer、LSP/DAP、记忆后端(local)、web 工具包、AOC 7501、usage-totals/checkpoint-entries。
+### C 级(快速项已闭环,2026-10-25,P18.5;其余候选维持)
+- ✅ **usage-totals**(P18.5-T01):`session/usage_totals.py` 纯聚合(requests/input/output/
+  cache/tokens/cost),assistant 消息累计,畸形值按 0(untrusted settings 原则)。
+- ✅ **virtual-models**(P18.5-T02):settings `virtualModels`(config 边界校验)→
+  `--model 别名` 在 CLI/RPC/TUI 三入口解析到真实模型 + thinking 覆盖;真实模型名优先,
+  避免遮蔽。
+- **codemode + nested-tool-calls 评估结论**(P18.5-T03,不实现,留给独立阶段):
+  - nested-tool-calls 是 codemode 的前置:需要 pi_agent 工具管线支持重入执行
+    (`execute` 内发起子工具调用)、`parentToolCallId` 关联、usage 归账到外层调用、
+    abort 信号沿嵌套链传播。这触及执行循环核心(事件语义/取消/归账),属跨包
+    (pi_agent + pi_coding_agent)改造,估算为一个独立 Phase(3~4 个任务:契约、
+    重入执行、预算与取消、产品接线)。
+  - codemode 的 Python 侧形态建议复用既有 Node host:JS 代码在 host 内执行,
+    经 `execute_tool` 回调 Python 管线(等价上游 `pi.tools.*`),避免自建 JS 运行时;
+    沙箱边界(上游 isolated-vm 语义)在 dist 层面未逐行核实,实施前需先固化
+    允许的宿主能力面与超时/输出上限。
+  - 建议:作为 P21 后的独立阶段(P20/P21 完成后),先 nested 后 codemode。
+- 其余候选维持:checkpoint-entries、cache-warmer、LSP/DAP、记忆后端(local)、
+  web 工具包、AOC 7501。
 
 ### ➖ 有意 divergence(维持)
 - 多 Provider 目录与分类器模型(单 DeepSeek 是项目架构决策);

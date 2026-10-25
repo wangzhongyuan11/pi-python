@@ -97,6 +97,11 @@ class ExtensionAPI:
     def define_tool(self, name: str, tool: object | None = None) -> Registration:
         return self._define("tool", name, tool)
 
+    def define_mcp_server(self, name: str, config: object | None = None) -> Registration:
+        """Register an MCP server declaration (a ``pi.mcpServers`` entry dict)."""
+
+        return self._define("mcp_server", name, config)
+
     def define_command(self, name: str, handler: object | None = None) -> Registration:
         return self._define("command", name, handler)
 

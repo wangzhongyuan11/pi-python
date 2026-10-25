@@ -41,6 +41,13 @@ class ProviderRetrySettings(_SettingsModel):
     max_retry_delay_ms: NonNegativeInt = 60_000
 
 
+class VirtualModelSettings(_SettingsModel):
+    model: str
+    thinking_level: (
+        Literal["off", "minimal", "low", "medium", "high"] | None
+    ) = None
+
+
 class RetrySettings(_SettingsModel):
     enabled: bool = True
     max_retries: NonNegativeInt = 3
@@ -112,6 +119,7 @@ class SettingsValues(_SettingsModel):
     images: ImageSettings = ImageSettings()
     enabled_models: tuple[str, ...] = ()
     default_tools: tuple[str, ...] = ()
+    virtual_models: dict[str, VirtualModelSettings] = {}
     double_escape_action: Literal["fork", "tree", "none"] = "tree"
     tree_filter_mode: Literal["default", "no-tools", "user-only", "labeled-only", "all"] = "default"
     thinking_budgets: ThinkingBudgetsSettings = ThinkingBudgetsSettings()
@@ -158,5 +166,6 @@ __all__ = [
     "SettingsValues",
     "TerminalSettings",
     "ThinkingBudgetsSettings",
+    "VirtualModelSettings",
     "settings_payload",
 ]

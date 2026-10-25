@@ -1,0 +1,12 @@
+{
+  "name": "echo-mcp-package",
+  "version": "1.0.0",
+  "pi": {
+    "mcpServers": {
+      "echo": {
+        "command": ["{{PYTHON}}", "echo_server.py"],
+        "timeoutSeconds": 10
+      }
+    }
+  }
+}

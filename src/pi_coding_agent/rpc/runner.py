@@ -73,7 +73,9 @@ async def run_rpc(
                 provider_id=options.provider_id,
             )
             if options.model_id is not None:
-                _selected, model_thinking = select_model_argument(runtime, options.model_id)
+                _selected, model_thinking = select_model_argument(
+                    runtime, options.model_id, virtual_models=options.virtual_models
+                )
             selection = options.tool_selection or ToolSelection()
             factory = options.runtime_factory or create_agent_session
             created = await factory(
