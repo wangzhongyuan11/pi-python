@@ -9,7 +9,7 @@ description = "A from-scratch Python reimplementation of the Pi coding agent"
 requires-python = ">=3.12"
 license-files = ["THIRD_PARTY_NOTICES.md"]
 dependencies = [
-    "openai==3.1.0",
+    "openai==3.5.0",
     "pydantic==2.13.4",
     "prompt-toolkit==3.0.53",
     "wcwidth==0.8.2",
